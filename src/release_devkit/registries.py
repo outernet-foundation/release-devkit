@@ -74,7 +74,7 @@ class NpmRegistry:
                 bash_output(command, cwd=request.path)
             except CalledProcessError as e:
                 stderr = e.stderr or ""
-                if "EPUBLISHCONFLICT" in stderr or "cannot publish over existing version" in stderr:
+                if "EPUBLISHCONFLICT" in stderr or "cannot publish over" in stderr:
                     print("  Version already published, skipping (idempotent)")
                 else:
                     raise

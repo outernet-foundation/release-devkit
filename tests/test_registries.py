@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from subprocess import CalledProcessError
 
 import pytest
 
@@ -194,6 +195,60 @@ def test_npm_publish_without_dist_tag_leaves_latest_alone(tmp_path: Path, monkey
     )
 
     assert recorder.commands == ["npm publish --access public --provenance"]
+
+
+class ConflictingCommand:
+    def __init__(self, stderr: str) -> None:
+        self.stderr = stderr
+
+    def __call__(
+        self,
+        command: str,
+        *,
+        cwd: Path | None = None,
+        stdin_text: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> str:
+        raise CalledProcessError(returncode=1, cmd=command, stderr=self.stderr)
+
+
+def test_npm_publish_swallows_version_conflict_from_current_npm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_manifest(tmp_path)
+    monkeypatch.setattr(
+        "release_devkit.registries.bash_output",
+        ConflictingCommand("npm error You cannot publish over the previously published versions: 0.2.1.\n"),
+    )
+
+    NpmRegistry().publish(
+        PublishRequest(path=tmp_path, identity="org.outernet.placeframe", version="0.2.1", dependency_versions={})
+    )
+
+
+def test_npm_publish_swallows_version_conflict_from_legacy_npm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_manifest(tmp_path)
+    monkeypatch.setattr(
+        "release_devkit.registries.bash_output",
+        ConflictingCommand("npm ERR! code EPUBLISHCONFLICT\nnpm ERR! cannot publish over existing version\n"),
+    )
+
+    NpmRegistry().publish(
+        PublishRequest(path=tmp_path, identity="org.outernet.placeframe", version="0.2.1", dependency_versions={})
+    )
+
+
+def test_npm_publish_rides_through_on_unrelated_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_manifest(tmp_path)
+    monkeypatch.setattr(
+        "release_devkit.registries.bash_output",
+        ConflictingCommand("npm error code ENEEDAUTH\nnpm error need auth to publish\n"),
+    )
+
+    with pytest.raises(CalledProcessError):
+        NpmRegistry().publish(
+            PublishRequest(path=tmp_path, identity="org.outernet.placeframe", version="0.2.1", dependency_versions={})
+        )
 
 
 NUGET_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
