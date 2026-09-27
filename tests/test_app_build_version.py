@@ -51,6 +51,7 @@ def invoke(monkeypatch: pytest.MonkeyPatch, tag_output: str, arguments: list[str
 
 def test_dev_spelling_off_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     result = invoke(
         monkeypatch,
@@ -78,6 +79,7 @@ def test_release_spelling_on_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
 def test_run_number_defaults_to_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
     monkeypatch.setenv("GITHUB_RUN_NUMBER", "412")
 
     result = invoke(monkeypatch, "capture-tool-v0.2.7\n", ["--app", "CaptureTool", "--config", str(config_path)])
@@ -88,6 +90,7 @@ def test_run_number_defaults_to_env(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 
 def test_no_tags_fall_back_to_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     result = invoke(monkeypatch, "", ["--app", "CaptureTool", "--config", str(config_path), "--run-number", "1"])
 
@@ -97,6 +100,7 @@ def test_no_tags_fall_back_to_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
 def test_prerelease_tags_do_not_count(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     result = invoke(
         monkeypatch,
