@@ -19,6 +19,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
+app-build-version = "release_devkit.app_build_version:app"
 create-release = "release_devkit.create_release:app"
 ensure-release-pr = "release_devkit.ensure_release_pr:app"
 fetch-ci-artifacts = "release_devkit.fetch_ci_artifacts:app"
