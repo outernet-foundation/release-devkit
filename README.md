@@ -37,6 +37,12 @@ The uvx invocation runs inside the caller's job, so the OIDC trusted-publishing 
 uvx --from release-devkit==0.1.14 publish-stable --config release-devkit.json
 ```
 
+Build tooling consumes the same ledger at build time: `app-build-version --app <name>` prints the
+version a CI build of an app should stamp — `{version}-dev+{run}` off-main, `{version}+{run}` when
+`GITHUB_REF_NAME` is `main`; the run number comes from `--run-number` or `GITHUB_RUN_NUMBER`. The
+emitted string is opaque to the build door that receives it: version derivation lives here,
+stamping belongs to the build tool, and the consumer's workflow bridges the two.
+
 Then author root `release-devkit.json`:
 
 ```json
