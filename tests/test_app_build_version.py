@@ -27,20 +27,18 @@ class CommandRecorder:
 def write_config(tmp_path: Path) -> Path:
     config_path = tmp_path / "release-devkit.json"
     config_path.write_text(
-        json.dumps(
-            {
-                "apps": [
-                    {
-                        "name": "CaptureTool",
-                        "path": "apps/CaptureTool",
-                        "major_minor": "1.0",
-                        "tag_prefix": "capture-tool",
-                        "display_name": "Capture Tool",
-                    }
-                ],
-                "ci_workflow": "ci.yml",
-            }
-        ),
+        json.dumps({
+            "apps": [
+                {
+                    "name": "CaptureTool",
+                    "path": "apps/CaptureTool",
+                    "major_minor": "1.0",
+                    "tag_prefix": "capture-tool",
+                    "display_name": "Capture Tool",
+                }
+            ],
+            "ci_workflow": "ci.yml",
+        }),
         encoding="utf-8",
     )
     return config_path
@@ -55,7 +53,9 @@ def test_dev_spelling_off_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     config_path = write_config(tmp_path)
 
     result = invoke(
-        monkeypatch, "capture-tool-v0.2.7\n", ["--app", "CaptureTool", "--config", str(config_path), "--run-number", "42"]
+        monkeypatch,
+        "capture-tool-v0.2.7\n",
+        ["--app", "CaptureTool", "--config", str(config_path), "--run-number", "42"],
     )
 
     assert result.exit_code == 0
@@ -67,7 +67,9 @@ def test_release_spelling_on_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     monkeypatch.setenv("GITHUB_REF_NAME", "main")
 
     result = invoke(
-        monkeypatch, "capture-tool-v0.2.7\n", ["--app", "CaptureTool", "--config", str(config_path), "--run-number", "42"]
+        monkeypatch,
+        "capture-tool-v0.2.7\n",
+        ["--app", "CaptureTool", "--config", str(config_path), "--run-number", "42"],
     )
 
     assert result.exit_code == 0
@@ -87,9 +89,7 @@ def test_run_number_defaults_to_env(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 def test_no_tags_fall_back_to_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
 
-    result = invoke(
-        monkeypatch, "", ["--app", "CaptureTool", "--config", str(config_path), "--run-number", "1"]
-    )
+    result = invoke(monkeypatch, "", ["--app", "CaptureTool", "--config", str(config_path), "--run-number", "1"])
 
     assert result.exit_code == 0
     assert result.output.strip() == "0.0.0-dev+1"
