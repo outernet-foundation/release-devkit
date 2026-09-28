@@ -1,4 +1,5 @@
 ci_workflow: ci.yml
+requires: ">=0.1"
 packages:
   release-devkit:
     path: .

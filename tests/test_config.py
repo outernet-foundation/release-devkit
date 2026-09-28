@@ -43,6 +43,7 @@ def base_payload() -> dict[str, object]:
             },
         },
         "ci_workflow": "placeframe-ci.yml",
+        "requires": ">=0.1",
     }
 
 
@@ -61,6 +62,7 @@ def test_load_config_parses_packages(tmp_path: Path):
 def test_load_config_defaults_empty_collections(tmp_path: Path):
     payload: dict[str, object] = {
         "ci_workflow": "my-ci.yml",
+        "requires": ">=0.1",
     }
 
     config = load_config(write_config(tmp_path, payload))
@@ -82,6 +84,7 @@ def test_load_config_rejects_the_old_feeds_key(tmp_path: Path):
 def test_load_config_rejects_unknown_top_level_keys(tmp_path: Path):
     payload: dict[str, object] = {
         "ci_workflow": "my-ci.yml",
+        "requires": ">=0.1",
         "mirror_prefix": "ghcr.io/my-org/mirror",
     }
 
@@ -201,10 +204,6 @@ def test_load_config_rejects_duplicate_keys(tmp_path: Path):
         load_config(config_path)
 
 
-def _version_must_not_be_queried(_name: str) -> str:
-    raise AssertionError("release-devkit version must not be queried when requires is absent")
-
-
 def _version_dev_sentinel(_name: str) -> str:
     return DEV_SENTINEL
 
@@ -221,22 +220,20 @@ def _version_0_1_17(_name: str) -> str:
     return "0.1.17"
 
 
-def test_requires_omitted_does_not_query_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(importlib.metadata, "version", _version_must_not_be_queried)
+def test_requires_omitted_is_required(tmp_path: Path) -> None:
+    payload = base_payload()
+    del payload["requires"]
 
-    config = load_config(write_config(tmp_path, base_payload()))
+    with pytest.raises(ValidationError, match="requires"):
+        load_config(write_config(tmp_path, payload))
 
-    assert config.requires is None
 
-
-def test_requires_empty_string_is_treated_as_omitted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(importlib.metadata, "version", _version_must_not_be_queried)
+def test_requires_empty_string_rejected(tmp_path: Path) -> None:
     payload = base_payload()
     payload["requires"] = ""
 
-    config = load_config(write_config(tmp_path, payload))
-
-    assert config.requires is None
+    with pytest.raises(ValidationError, match="requires"):
+        load_config(write_config(tmp_path, payload))
 
 
 def test_requires_dev_sentinel_skips_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

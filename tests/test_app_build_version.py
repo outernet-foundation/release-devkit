@@ -36,6 +36,7 @@ def write_config(tmp_path: Path) -> Path:
                     }
                 },
                 "ci_workflow": "ci.yml",
+                "requires": ">=0.1",
             },
             default_flow_style=False,
             sort_keys=False,

@@ -33,13 +33,13 @@ class PublishConfig(BaseModel):
     packages: dict[str, PackageConfig] = Field(default_factory=dict)
     apps: dict[str, AppConfig] = Field(default_factory=dict)
     ci_workflow: str
-    requires: str | None = None
+    requires: str
 
     @field_validator("requires")
     @classmethod
-    def validate_requires(cls, value: str | None) -> str | None:
+    def validate_requires(cls, value: str) -> str:
         if not value:
-            return None
+            raise ValueError("requires must be a non-empty PEP 440 specifier; use '>=0.0' for no constraint")
         SpecifierSet(value)
         return value
 
@@ -54,8 +54,6 @@ class PublishConfig(BaseModel):
 
 def load_config(path: Path) -> PublishConfig:
     config = PublishConfig.model_validate(load_strict_yaml(path.read_text(encoding="utf-8")).data)
-    if config.requires is None:
-        return config
     installed = importlib.metadata.version("release-devkit")
     if installed == DEV_SENTINEL:
         return config
