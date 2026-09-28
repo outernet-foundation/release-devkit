@@ -6,7 +6,7 @@ The publication machinery for outernet-foundation repos: the publish pipeline, t
 
 The consumer owns everything declarative: package and app identities, paths, and registry mappings live in a consumer-authored `release-devkit.yaml` at the repo root; every command here reads that file. Per-repo copies of this machinery are refused, as are per-ecosystem splits — the seam is internal: one `Registry` adapter per registry over the shared ledger/diff/versioning core.
 
-The package is `release-devkit` (src-layout under `src/release_devkit/`; import `release_devkit`). Runtime dependencies: `bashrun` (all shell-outs), `ci-devkit` (`ci_step`, runner setup), `pydantic`/`pydantic-settings` (config + CI env), `strictyaml` (config loading), `typer` (CLIs) — all from PyPI, zero domain dependencies.
+The package is `release-devkit` (src-layout under `src/release_devkit/`; import `release_devkit`). Runtime dependencies: `bashrun` (all shell-outs), `ci-devkit` (`ci_step`, runner setup), `packaging` (PEP 440 specifier parsing for `requires`), `pydantic`/`pydantic-settings` (config + CI env), `strictyaml` (config loading), `typer` (CLIs) — all from PyPI, zero domain dependencies.
 
 ## Self-publication
 
@@ -74,6 +74,7 @@ The repo is the release unit: repos release independently; one release event pub
 - The registry-mapping key is `registries`. Hard flip, no accept-both: unknown keys are rejected (`extra="forbid"`), so an unmigrated config fails loudly at load instead of silently publishing with zero registries.
 - `ci_workflow` is required: it is the `fetch-ci-artifacts` lookup key (`gh api …/workflows/{name}/runs?head_sha=…`) that disambiguates which workflow's artifacts to staple onto a release — several workflows run on the release SHA, including Release itself, so a `"ci.yml"` default would be silently wrong for repos whose CI file is named differently.
 - The mapping fields (`packages`, `apps`) may be omitted when empty — an apps-only repo declares no `packages` key at all. Both key packages and apps by name, which doubles as the git-tag prefix (`{name}-v{semver}`); apps carry no separate `display_name` or `tag_prefix`.
+- `requires` is an optional PEP 440 specifier (e.g. `requires: ">=0.1.18"`); when present, `load_config` self-checks the installed release-devkit version against it and refuses loudly outside the range (the terraform pattern). Omission means no constraint. The `0.0.0.dev0` dev sentinel bypasses the check, so running the tool's own checkout is never blocked.
 
 ## See also
 
