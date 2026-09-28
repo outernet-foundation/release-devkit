@@ -190,3 +190,11 @@ def test_repo_release_devkit_yaml_loads() -> None:
 
     assert "release-devkit" in config.packages
     assert config.ci_workflow == "ci.yml"
+
+
+def test_load_config_rejects_duplicate_keys(tmp_path: Path):
+    config_path = tmp_path / "release-devkit.yaml"
+    config_path.write_text("ci_workflow: ci.yml\nci_workflow: other.yml\n", encoding="utf-8")
+
+    with pytest.raises(Exception, match=r"Duplicate key"):
+        load_config(config_path)
