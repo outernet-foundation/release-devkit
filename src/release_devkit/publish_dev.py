@@ -49,11 +49,9 @@ def main(
     with ci_step("Compute dev publish plan"):
         edges = resolve_edges(publish_config.packages)
         plans = compute_plan(publish_config.packages, ledger, edges)
-        publishing = {package.name for package in packages if plans[package.name].publish}
+        publishing = {name for name in packages if plans[name].publish}
         resolved_versions = {
-            package.name: resolve_dependency_versions(edges[package.name], plans, publishing)
-            for package in packages
-            if package.name in publishing
+            name: resolve_dependency_versions(edges[name], plans, publishing) for name in packages if name in publishing
         }
 
         summary = render_dev_summary(packages, plans, resolved_run_id)
@@ -76,13 +74,13 @@ def main(
 
     registries = build_registries(settings.nuget_api_key)
     published: list[tuple[str, str, str]] = []
-    for package in packages:
-        plan = plans[package.name]
+    for name, package in packages.items():
+        plan = plans[name]
         if not plan.publish:
             continue
         for registry_name, identity in package.registries.items():
             dev_version = DEV_VERSION_FORMATS[registry_name](plan.version, resolved_run_id)
-            with ci_step(f"Publish {registry_name} ({package.name}) {dev_version}"):
+            with ci_step(f"Publish {registry_name} ({name}) {dev_version}"):
                 registries[registry_name].publish(
                     PublishRequest(
                         path=package.path,
@@ -94,7 +92,7 @@ def main(
                                 if resolved.co_publishing
                                 else resolved.version
                             )
-                            for dependency_identity, resolved in resolved_versions[package.name].items()
+                            for dependency_identity, resolved in resolved_versions[name].items()
                         },
                         dist_tag=NPM_DEV_DIST_TAG if registry_name == "npm" else None,
                     )

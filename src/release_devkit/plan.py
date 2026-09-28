@@ -33,19 +33,20 @@ class ResolvedDependency:
 
 
 def compute_plan(
-    packages: list[PackageConfig], ledger: TagLedger, edges: dict[str, list[DependencyEdge]]
+    packages: dict[str, PackageConfig], ledger: TagLedger, edges: dict[str, list[DependencyEdge]]
 ) -> dict[str, PackagePlan]:
     plans: dict[str, PackagePlan] = {}
-    for package in topological_order(packages, edges):
-        prefix = f"{package.name}-v"
+    for name in topological_order(packages, edges):
+        package = packages[name]
+        prefix = f"{name}-v"
         last_version = ledger.latest_version(prefix)
         last_in_line = ledger.latest_version_in_line(prefix, package.major_minor)
         changed = ledger.has_changes_since(f"{prefix}{last_version}" if last_version else None, package.path)
-        plans[package.name] = PackagePlan(
-            name=package.name,
+        plans[name] = PackagePlan(
+            name=name,
             publish=changed,
             version=(
-                next_version(package.major_minor, last_in_line, last_version, package.name)
+                next_version(package.major_minor, last_in_line, last_version, name)
                 if changed
                 else (last_version or UNCHANGED_FALLBACK_VERSION)
             ),
@@ -72,19 +73,16 @@ def resolve_dependency_versions(
     return resolved
 
 
-def topological_order(packages: list[PackageConfig], edges: dict[str, list[DependencyEdge]]) -> list[PackageConfig]:
-    by_name = {package.name: package for package in packages}
-    dependencies = {
-        package.name: {edge.dependency_package for edge in edges.get(package.name, [])} for package in packages
-    }
-    ordered: list[PackageConfig] = []
+def topological_order(packages: dict[str, PackageConfig], edges: dict[str, list[DependencyEdge]]) -> list[str]:
+    dependencies = {name: {edge.dependency_package for edge in edges.get(name, [])} for name in packages}
+    ordered: list[str] = []
     placed: set[str] = set()
-    remaining = [package.name for package in packages]
+    remaining = list(packages)
     while remaining:
         ready = next((name for name in remaining if dependencies[name] <= placed), None)
         if ready is None:
             raise ValueError(f"cyclic dependency edge among packages: {sorted(remaining)}")
-        ordered.append(by_name[ready])
+        ordered.append(ready)
         placed.add(ready)
         remaining.remove(ready)
     return ordered
@@ -113,14 +111,14 @@ def render_summary(plans: dict[str, PackagePlan]) -> str:
     return "\n".join(lines)
 
 
-def render_dev_summary(packages: list[PackageConfig], plans: dict[str, PackagePlan], run_id: str) -> str:
+def render_dev_summary(packages: dict[str, PackageConfig], plans: dict[str, PackagePlan], run_id: str) -> str:
     lines = [
         "### Dev Publish Plan",
         "| Package | Publish | Versions |",
         "|---|---|---|",
     ]
-    for package in packages:
-        plan = plans[package.name]
+    for name, package in packages.items():
+        plan = plans[name]
         if not plan.publish:
             lines.append(f"| {plan.name} | False | - |")
             continue

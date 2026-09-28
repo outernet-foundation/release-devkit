@@ -81,8 +81,8 @@ def main(config: Annotated[Path, typer.Option(help="Publish configuration JSON")
         lines: list[str] = []
 
         lines.extend(["## Packages", "", "| Package | Version | Registry |", "|---|---|---|"])
-        for package in publish_config.packages:
-            version = ledger.latest_version(f"{package.name}-v") or UNCHANGED_FALLBACK_VERSION
+        for name, package in publish_config.packages.items():
+            version = ledger.latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
             links: list[str] = []
             for registry_name, identity in package.registries.items():
                 url_builder = registry_urls.get(registry_name)
@@ -92,12 +92,12 @@ def main(config: Annotated[Path, typer.Option(help="Publish configuration JSON")
                     links.append(f"[{registry_name}]({url_builder(identity, version)})")
                 else:
                     links.append(registry_name)
-            lines.append(f"| {package.name} | {version} | {', '.join(links)} |")
+            lines.append(f"| {name} | {version} | {', '.join(links)} |")
 
-        for app_config in publish_config.apps:
-            version = ledger.latest_version(f"{app_config.tag_prefix}-v")
+        for app_name in publish_config.apps:
+            version = ledger.latest_version(f"{app_name}-v")
             if version:
-                lines.append(f"| {app_config.display_name} | {version} | — |")
+                lines.append(f"| {app_name} | {version} | — |")
 
         lines.append("")
         notes = "\n".join(lines)

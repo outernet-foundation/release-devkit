@@ -10,11 +10,11 @@ from release_devkit.registries import SENTINEL_VERSION
 
 
 def npm_package(name: str, identity: str) -> PackageConfig:
-    return PackageConfig(name=name, path=Path(name), major_minor="1.0", registries={"npm": identity})
+    return PackageConfig(path=Path(name), major_minor="1.0", registries={"npm": identity})
 
 
 def nuget_package(name: str, identity: str) -> PackageConfig:
-    return PackageConfig(name=name, path=Path(name), major_minor="1.0", registries={"nuget": identity})
+    return PackageConfig(path=Path(name), major_minor="1.0", registries={"nuget": identity})
 
 
 def write_npm_manifest(root: Path, package_name: str, dependencies: dict[str, str]) -> None:
@@ -39,7 +39,7 @@ def write_pypi_manifest(root: Path, package_name: str, dependencies: list[str]) 
 
 
 def pypi_package(name: str) -> PackageConfig:
-    return PackageConfig(name=name, path=Path(name), major_minor="0.1", registries={"pypi": name})
+    return PackageConfig(path=Path(name), major_minor="0.1", registries={"pypi": name})
 
 
 NUGET_LIBRARY_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
@@ -80,7 +80,10 @@ def test_npm_sentinel_dependency_forms_edge(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.chdir(tmp_path)
     write_npm_manifest(tmp_path, "core", {})
     write_npm_manifest(tmp_path, "arfoundation", {"org.example.core": SENTINEL_VERSION, "com.unity.xr": "6.0.5"})
-    packages = [npm_package("core", "org.example.core"), npm_package("arfoundation", "org.example.arfoundation")]
+    packages = {
+        "core": npm_package("core", "org.example.core"),
+        "arfoundation": npm_package("arfoundation", "org.example.arfoundation"),
+    }
 
     edges = resolve_edges(packages)
 
@@ -97,7 +100,10 @@ def test_npm_real_version_on_config_identity_is_loud(tmp_path: Path, monkeypatch
     monkeypatch.chdir(tmp_path)
     write_npm_manifest(tmp_path, "core", {})
     write_npm_manifest(tmp_path, "arfoundation", {"org.example.core": "1.0.6-dev.35815669170"})
-    packages = [npm_package("core", "org.example.core"), npm_package("arfoundation", "org.example.arfoundation")]
+    packages = {
+        "core": npm_package("core", "org.example.core"),
+        "arfoundation": npm_package("arfoundation", "org.example.arfoundation"),
+    }
 
     with pytest.raises(ValueError, match="must be authored as the sentinel"):
         resolve_edges(packages)
@@ -106,7 +112,7 @@ def test_npm_real_version_on_config_identity_is_loud(tmp_path: Path, monkeypatch
 def test_npm_sentinel_on_non_config_identity_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     write_npm_manifest(tmp_path, "arfoundation", {"com.fofx.stateful": SENTINEL_VERSION})
-    packages = [npm_package("arfoundation", "org.example.arfoundation")]
+    packages = {"arfoundation": npm_package("arfoundation", "org.example.arfoundation")}
 
     with pytest.raises(ValueError, match=r"no config package owns that npm identity"):
         resolve_edges(packages)
@@ -115,7 +121,7 @@ def test_npm_sentinel_on_non_config_identity_is_loud(tmp_path: Path, monkeypatch
 def test_npm_missing_manifest_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "arfoundation").mkdir()
-    packages = [npm_package("arfoundation", "org.example.arfoundation")]
+    packages = {"arfoundation": npm_package("arfoundation", "org.example.arfoundation")}
 
     with pytest.raises(ValueError, match=r"no package.json under 'arfoundation'"):
         resolve_edges(packages)
@@ -128,7 +134,7 @@ def test_npm_malformed_dependencies_table_is_loud(tmp_path: Path, monkeypatch: p
     (package_dir / "package.json").write_text(
         '{"name": "x", "version": "0.0.0-local", "dependencies": []}', encoding="utf-8"
     )
-    packages = [npm_package("arfoundation", "org.example.arfoundation")]
+    packages = {"arfoundation": npm_package("arfoundation", "org.example.arfoundation")}
 
     with pytest.raises(Exception, match="dependencies"):
         resolve_edges(packages)
@@ -138,7 +144,7 @@ def test_pypi_sentinel_dependency_forms_edge(tmp_path: Path, monkeypatch: pytest
     monkeypatch.chdir(tmp_path)
     write_pypi_manifest(tmp_path, "sibling", [])
     write_pypi_manifest(tmp_path, "consumer", [f"sibling=={SENTINEL_VERSION}", "pydantic>=2"])
-    packages = [pypi_package("sibling"), pypi_package("consumer")]
+    packages = {"sibling": pypi_package("sibling"), "consumer": pypi_package("consumer")}
 
     edges = resolve_edges(packages)
 
@@ -151,7 +157,7 @@ def test_pypi_real_version_on_config_identity_is_loud(tmp_path: Path, monkeypatc
     monkeypatch.chdir(tmp_path)
     write_pypi_manifest(tmp_path, "sibling", [])
     write_pypi_manifest(tmp_path, "consumer", ["sibling==1.2.3"])
-    packages = [pypi_package("sibling"), pypi_package("consumer")]
+    packages = {"sibling": pypi_package("sibling"), "consumer": pypi_package("consumer")}
 
     with pytest.raises(ValueError, match="must be authored as the sentinel"):
         resolve_edges(packages)
@@ -160,7 +166,7 @@ def test_pypi_real_version_on_config_identity_is_loud(tmp_path: Path, monkeypatc
 def test_pypi_sentinel_on_non_config_identity_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     write_pypi_manifest(tmp_path, "consumer", [f"leftalone=={SENTINEL_VERSION}"])
-    packages = [pypi_package("consumer")]
+    packages = {"consumer": pypi_package("consumer")}
 
     with pytest.raises(ValueError, match=r"no config package owns that pypi identity"):
         resolve_edges(packages)
@@ -169,7 +175,7 @@ def test_pypi_sentinel_on_non_config_identity_is_loud(tmp_path: Path, monkeypatc
 def test_pypi_missing_manifest_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "consumer").mkdir()
-    packages = [pypi_package("consumer")]
+    packages = {"consumer": pypi_package("consumer")}
 
     with pytest.raises(ValueError, match=r"no pyproject.toml under 'consumer'"):
         resolve_edges(packages)
@@ -182,7 +188,7 @@ def test_pypi_project_without_dependencies_table_yields_no_edges(
     package_dir = tmp_path / "consumer"
     package_dir.mkdir()
     (package_dir / "pyproject.toml").write_text('[project]\nname = "consumer"\n', encoding="utf-8")
-    packages = [pypi_package("consumer")]
+    packages = {"consumer": pypi_package("consumer")}
 
     assert resolve_edges(packages) == {"consumer": []}
 
@@ -191,7 +197,10 @@ def test_nuget_property_sentinel_forms_edge_with_property_name(tmp_path: Path, m
     monkeypatch.chdir(tmp_path)
     write_nuget_library(tmp_path, "sibling")
     write_nuget_consumer(tmp_path, "consumer", SENTINEL_VERSION)
-    packages = [nuget_package("sibling", "Org.Sibling"), nuget_package("consumer", "Org.Consumer")]
+    packages = {
+        "sibling": nuget_package("sibling", "Org.Sibling"),
+        "consumer": nuget_package("consumer", "Org.Consumer"),
+    }
 
     edges = resolve_edges(packages)
 
@@ -208,7 +217,10 @@ def test_nuget_non_sentinel_property_default_is_loud(tmp_path: Path, monkeypatch
     monkeypatch.chdir(tmp_path)
     write_nuget_library(tmp_path, "sibling")
     write_nuget_consumer(tmp_path, "consumer", "1.0.0")
-    packages = [nuget_package("sibling", "Org.Sibling"), nuget_package("consumer", "Org.Consumer")]
+    packages = {
+        "sibling": nuget_package("sibling", "Org.Sibling"),
+        "consumer": nuget_package("consumer", "Org.Consumer"),
+    }
 
     with pytest.raises(ValueError, match="must be authored as the sentinel"):
         resolve_edges(packages)
@@ -223,7 +235,10 @@ def test_nuget_literal_version_on_config_identity_is_loud(tmp_path: Path, monkey
     package_dir = tmp_path / "consumer" / "src"
     package_dir.mkdir(parents=True)
     (package_dir / "Consumer.csproj").write_text(csproj, encoding="utf-8")
-    packages = [nuget_package("sibling", "Org.Sibling"), nuget_package("consumer", "Org.Consumer")]
+    packages = {
+        "sibling": nuget_package("sibling", "Org.Sibling"),
+        "consumer": nuget_package("consumer", "Org.Consumer"),
+    }
 
     with pytest.raises(ValueError, match="must be authored as the sentinel"):
         resolve_edges(packages)
@@ -238,7 +253,10 @@ def test_nuget_property_without_default_is_loud(tmp_path: Path, monkeypatch: pyt
     package_dir = tmp_path / "consumer" / "src"
     package_dir.mkdir(parents=True)
     (package_dir / "Consumer.csproj").write_text(csproj, encoding="utf-8")
-    packages = [nuget_package("sibling", "Org.Sibling"), nuget_package("consumer", "Org.Consumer")]
+    packages = {
+        "sibling": nuget_package("sibling", "Org.Sibling"),
+        "consumer": nuget_package("consumer", "Org.Consumer"),
+    }
 
     with pytest.raises(ValueError, match="carries no default"):
         resolve_edges(packages)
@@ -253,7 +271,7 @@ def test_nuget_literal_sentinel_on_external_identity_is_loud(tmp_path: Path, mon
     package_dir = tmp_path / "consumer" / "src"
     package_dir.mkdir(parents=True)
     (package_dir / "Consumer.csproj").write_text(csproj, encoding="utf-8")
-    packages = [nuget_package("consumer", "Org.Consumer")]
+    packages = {"consumer": nuget_package("consumer", "Org.Consumer")}
 
     with pytest.raises(ValueError, match=r"no config package owns that nuget identity"):
         resolve_edges(packages)
@@ -262,7 +280,7 @@ def test_nuget_literal_sentinel_on_external_identity_is_loud(tmp_path: Path, mon
 def test_nuget_missing_csproj_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "consumer").mkdir()
-    packages = [nuget_package("consumer", "Org.Consumer")]
+    packages = {"consumer": nuget_package("consumer", "Org.Consumer")}
 
     with pytest.raises(ValueError, match=r"no csproj under 'consumer'"):
         resolve_edges(packages)
@@ -272,10 +290,10 @@ def test_identity_resolution_is_scoped_per_registry_kind(tmp_path: Path, monkeyp
     monkeypatch.chdir(tmp_path)
     write_npm_manifest(tmp_path, "npm-pkg", {})
     write_pypi_manifest(tmp_path, "pypi-pkg", ["npm-pkg>=1.0"])
-    packages = [
-        PackageConfig(name="npm-pkg", path=Path("npm-pkg"), major_minor="1.0", registries={"npm": "npm-pkg"}),
-        PackageConfig(name="pypi-pkg", path=Path("pypi-pkg"), major_minor="0.1", registries={"pypi": "pypi-pkg"}),
-    ]
+    packages = {
+        "npm-pkg": PackageConfig(path=Path("npm-pkg"), major_minor="1.0", registries={"npm": "npm-pkg"}),
+        "pypi-pkg": PackageConfig(path=Path("pypi-pkg"), major_minor="0.1", registries={"pypi": "pypi-pkg"}),
+    }
 
     edges = resolve_edges(packages)
 
@@ -288,18 +306,17 @@ def test_multi_registry_package_unions_edges_across_manifests(tmp_path: Path, mo
     write_pypi_manifest(tmp_path, "pypi-sibling", [])
     write_npm_manifest(tmp_path, "dual", {"org.example.npm-sibling": SENTINEL_VERSION})
     write_pypi_manifest(tmp_path, "dual", [f"pypi-sibling=={SENTINEL_VERSION}"])
-    packages = [
-        PackageConfig(
-            name="npm-sibling",
+    packages = {
+        "npm-sibling": PackageConfig(
             path=Path("npm-sibling"),
             major_minor="1.0",
             registries={"npm": "org.example.npm-sibling"},
         ),
-        pypi_package("pypi-sibling"),
-        PackageConfig(
-            name="dual", path=Path("dual"), major_minor="1.0", registries={"npm": "org.example.dual", "pypi": "dual"}
+        "pypi-sibling": pypi_package("pypi-sibling"),
+        "dual": PackageConfig(
+            path=Path("dual"), major_minor="1.0", registries={"npm": "org.example.dual", "pypi": "dual"}
         ),
-    ]
+    }
 
     edges = resolve_edges(packages)
 
@@ -311,7 +328,10 @@ def test_duplicate_identity_across_packages_is_loud(tmp_path: Path, monkeypatch:
     monkeypatch.chdir(tmp_path)
     write_npm_manifest(tmp_path, "one", {})
     write_npm_manifest(tmp_path, "two", {})
-    packages = [npm_package("one", "org.example.dup"), npm_package("two", "org.example.dup")]
+    packages = {
+        "one": npm_package("one", "org.example.dup"),
+        "two": npm_package("two", "org.example.dup"),
+    }
 
     with pytest.raises(ValueError, match=r"share npm identity 'org.example.dup'"):
         resolve_edges(packages)

@@ -44,23 +44,21 @@ def main(
     with ci_step("Compute publish plan"):
         edges = resolve_edges(publish_config.packages)
         plans = compute_plan(publish_config.packages, ledger, edges)
-        publishing = {package.name for package in packages if plans[package.name].publish}
+        publishing = {name for name in packages if plans[name].publish}
         resolved_versions = {
-            package.name: resolve_dependency_versions(edges[package.name], plans, publishing)
-            for package in packages
-            if package.name in publishing
+            name: resolve_dependency_versions(edges[name], plans, publishing) for name in packages if name in publishing
         }
 
         summary = render_summary(plans)
         print(summary)
         append_line(settings.github_step_summary, summary)
 
-    any_package_published = any(plans[package.name].publish for package in packages)
+    any_package_published = any(plans[name].publish for name in packages)
     app_versions: dict[str, str] = {}
     if handle_apps:
         with ci_step("Compute app versions"):
-            for app_config in publish_config.apps:
-                prefix = f"{app_config.tag_prefix}-v"
+            for app_name, app_config in publish_config.apps.items():
+                prefix = f"{app_name}-v"
                 last_version = ledger.latest_version(prefix)
                 last_in_line = ledger.latest_version_in_line(prefix, app_config.major_minor)
                 changed = ledger.has_changes_since(f"{prefix}{last_version}" if last_version else None, app_config.path)
@@ -68,11 +66,11 @@ def main(
                 if any_package_published:
                     changed = True
                 if changed:
-                    new_version = next_version(app_config.major_minor, last_in_line, last_version, app_config.name)
-                    app_versions[app_config.name] = new_version
-                    print(f"  {app_config.name}: {last_version or '(none)'} -> {new_version}")
+                    new_version = next_version(app_config.major_minor, last_in_line, last_version, app_name)
+                    app_versions[app_name] = new_version
+                    print(f"  {app_name}: {last_version or '(none)'} -> {new_version}")
                 else:
-                    print(f"  {app_config.name}: {last_version or '0.0.0'} (unchanged)")
+                    print(f"  {app_name}: {last_version or '0.0.0'} (unchanged)")
 
     if not any_package_published and not app_versions:
         print("Nothing to publish")
@@ -91,15 +89,13 @@ def main(
 
     if packages:
         registries = build_registries(settings.nuget_api_key)
-        for package in packages:
-            plan = plans[package.name]
+        for name, package in packages.items():
+            plan = plans[name]
             if not plan.publish:
                 continue
-            dependency_versions = {
-                identity: resolved.version for identity, resolved in resolved_versions[package.name].items()
-            }
+            dependency_versions = {identity: resolved.version for identity, resolved in resolved_versions[name].items()}
             for registry_name, identity in package.registries.items():
-                with ci_step(f"Publish {registry_name} ({package.name})"):
+                with ci_step(f"Publish {registry_name} ({name})"):
                     registries[registry_name].publish(
                         PublishRequest(
                             path=package.path,
@@ -110,17 +106,17 @@ def main(
                     )
 
     with ci_step("Create version tags"):
-        for package in packages:
-            plan = plans[package.name]
+        for name in packages:
+            plan = plans[name]
             if plan.publish:
-                tag = f"{package.name}-v{plan.version}"
+                tag = f"{name}-v{plan.version}"
                 ledger.create_and_push_tag(tag)
                 print(f"  Tagged: {tag}")
 
         if handle_apps:
-            for app_config in publish_config.apps:
-                if app_config.name in app_versions:
-                    tag = f"{app_config.tag_prefix}-v{app_versions[app_config.name]}"
+            for app_name in publish_config.apps:
+                if app_name in app_versions:
+                    tag = f"{app_name}-v{app_versions[app_name]}"
                     ledger.create_and_push_tag(tag)
                     print(f"  Tagged: {tag}")
 
