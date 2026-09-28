@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
 
 @app.command()
-def main(config: Annotated[Path, typer.Option(help="Publish configuration JSON")]) -> None:
+def main(config: Annotated[Path, typer.Option(help="Publish configuration YAML")]) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
 

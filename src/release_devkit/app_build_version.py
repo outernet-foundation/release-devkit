@@ -6,12 +6,10 @@ from typing import Annotated
 import typer
 from pydantic_settings import BaseSettings
 
-from .config import load_config
+from .config import DEFAULT_CONFIG_PATH, load_config
 from .ledger import GitLedger
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
-
-DEFAULT_CONFIG_PATH = Path("release-devkit.json")
 
 
 class Settings(BaseSettings):
@@ -21,8 +19,8 @@ class Settings(BaseSettings):
 
 @app.command()
 def main(
-    application: Annotated[str, typer.Option("--app", help="App name (the release-devkit.json apps key)")],
-    config: Annotated[Path, typer.Option(help="Publish configuration JSON")] = DEFAULT_CONFIG_PATH,
+    application: Annotated[str, typer.Option("--app", help="App name (the release-devkit.yaml apps key)")],
+    config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
     run_number: Annotated[
         int, typer.Option(help="Build number baked into the version (defaults to GITHUB_RUN_NUMBER)")
     ] = 0,

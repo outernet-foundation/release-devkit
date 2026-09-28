@@ -4,6 +4,9 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .registries import KNOWN_REGISTRIES
+from .yaml_loader import load_yaml
+
+DEFAULT_CONFIG_PATH = Path("release-devkit.yaml")
 
 
 class PackageConfig(BaseModel):
@@ -38,7 +41,7 @@ class PublishConfig(BaseModel):
 
 
 def load_config(path: Path) -> PublishConfig:
-    return PublishConfig.model_validate_json(path.read_text(encoding="utf-8"))
+    return PublishConfig.model_validate(load_yaml(path.read_text(encoding="utf-8")))
 
 
 def select_packages(

@@ -1,4 +1,4 @@
-import json
+import yaml
 from pathlib import Path
 
 import pytest
@@ -25,17 +25,21 @@ class CommandRecorder:
 
 
 def write_config(tmp_path: Path) -> Path:
-    config_path = tmp_path / "release-devkit.json"
+    config_path = tmp_path / "release-devkit.yaml"
     config_path.write_text(
-        json.dumps({
-            "apps": {
-                "capture-tool": {
-                    "path": "apps/CaptureTool",
-                    "major_minor": "1.0",
-                }
+        yaml.safe_dump(
+            {
+                "apps": {
+                    "capture-tool": {
+                        "path": "apps/CaptureTool",
+                        "major_minor": "1.0",
+                    }
+                },
+                "ci_workflow": "ci.yml",
             },
-            "ci_workflow": "ci.yml",
-        }),
+            default_flow_style=False,
+            sort_keys=False,
+        ),
         encoding="utf-8",
     )
     return config_path

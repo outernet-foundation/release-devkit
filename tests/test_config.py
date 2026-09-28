@@ -1,4 +1,4 @@
-import json
+import yaml
 from pathlib import Path
 
 import pytest
@@ -8,8 +8,11 @@ from release_devkit.config import PackageConfig, load_config, select_packages
 
 
 def write_config(tmp_path: Path, payload: dict[str, object]) -> Path:
-    config_path = tmp_path / "release-devkit.json"
-    config_path.write_text(json.dumps(payload), encoding="utf-8")
+    config_path = tmp_path / "release-devkit.yaml"
+    config_path.write_text(
+        yaml.safe_dump(payload, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
     return config_path
 
 
@@ -179,10 +182,10 @@ def test_select_packages_rejects_only_with_exclude(tmp_path: Path):
         select_packages(packages, ["placeframe-core"], ["placeframe-core"])
 
 
-REPO_CONFIG = Path(__file__).resolve().parent.parent / "release-devkit.json"
+REPO_CONFIG = Path(__file__).resolve().parent.parent / "release-devkit.yaml"
 
 
-def test_repo_release_devkit_json_loads() -> None:
+def test_repo_release_devkit_yaml_loads() -> None:
     config = load_config(REPO_CONFIG)
 
     assert "release-devkit" in config.packages

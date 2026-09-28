@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, free_disk_space, install_dotnet, install_node
 
-from .config import load_config, select_packages
+from .config import DEFAULT_CONFIG_PATH, load_config, select_packages
 from .ledger import GitLedger
 from .manifests import resolve_edges
 from .outputs import append_line
@@ -16,8 +16,6 @@ from .plan import compute_plan, next_version, render_summary, resolve_dependency
 from .registries import PublishRequest, build_registries
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
-
-DEFAULT_CONFIG_PATH = Path("release-devkit.json")
 
 
 class Settings(BaseSettings):
@@ -29,7 +27,7 @@ class Settings(BaseSettings):
 
 @app.command()
 def main(
-    config: Annotated[Path, typer.Option(help="Publish configuration JSON")] = DEFAULT_CONFIG_PATH,
+    config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
     dry_run: Annotated[bool, typer.Option(help="Plan publishes without executing them")] = False,
     only: Annotated[list[str] | None, typer.Option(help="Restrict to named packages (repeatable).")] = None,
     exclude: Annotated[list[str] | None, typer.Option(help="Skip named packages (repeatable).")] = None,

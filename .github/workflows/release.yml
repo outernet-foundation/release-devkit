@@ -30,4 +30,4 @@ jobs:
           enable-cache: true
 
       - name: Publish
-        run: uv run publish-stable --config release-devkit.json
+        run: uv run publish-stable --config release-devkit.yaml

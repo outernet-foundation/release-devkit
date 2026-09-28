@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
 @app.command()
 def main(
-    config: Annotated[Path, typer.Option(help="Publish configuration JSON")],
+    config: Annotated[Path, typer.Option(help="Publish configuration YAML")],
     ci_run_id: Annotated[str | None, typer.Option(help="Override CI run lookup with a known run ID")] = None,
 ) -> None:
     settings = Settings.model_validate({})

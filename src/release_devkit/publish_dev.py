@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, free_disk_space, install_dotnet, install_node
 
-from .config import load_config, select_packages
+from .config import DEFAULT_CONFIG_PATH, load_config, select_packages
 from .ledger import GitLedger
 from .manifests import resolve_edges
 from .outputs import append_line
@@ -16,8 +16,6 @@ from .plan import compute_plan, render_dev_summary, resolve_dependency_versions
 from .registries import DEV_VERSION_FORMATS, NPM_DEV_DIST_TAG, PublishRequest, build_registries
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
-
-DEFAULT_CONFIG_PATH = Path("release-devkit.json")
 
 
 class Settings(BaseSettings):
@@ -29,7 +27,7 @@ class Settings(BaseSettings):
 
 @app.command()
 def main(
-    config: Annotated[Path, typer.Option(help="Publish configuration JSON")] = DEFAULT_CONFIG_PATH,
+    config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
     dry_run: Annotated[bool, typer.Option(help="Plan publishes without executing them")] = False,
     run_id: Annotated[
         str, typer.Option(help="CI run id baked into every dev version (defaults to GITHUB_RUN_ID)")
