@@ -32,7 +32,7 @@ def write_config(tmp_path: Path) -> Path:
                 "apps": {
                     "capture-tool": {
                         "path": "apps/CaptureTool",
-                        "major_minor": "1.0",
+                        "major_minor": "0.2",
                     }
                 },
                 "ci_workflow": "ci.yml",
@@ -51,9 +51,8 @@ def invoke(monkeypatch: pytest.MonkeyPatch, tag_output: str, arguments: list[str
     return CliRunner().invoke(app, arguments)
 
 
-def test_dev_spelling_off_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_stamps_next_version_plus_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
-    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     result = invoke(
         monkeypatch,
@@ -62,47 +61,30 @@ def test_dev_spelling_off_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     )
 
     assert result.exit_code == 0
-    assert result.output.strip() == "0.2.7-dev+42"
-
-
-def test_release_spelling_on_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    config_path = write_config(tmp_path)
-    monkeypatch.setenv("GITHUB_REF_NAME", "main")
-
-    result = invoke(
-        monkeypatch,
-        "capture-tool-v0.2.7\n",
-        ["--app", "capture-tool", "--config", str(config_path), "--run-number", "42"],
-    )
-
-    assert result.exit_code == 0
-    assert result.output.strip() == "0.2.7+42"
+    assert result.output.strip() == "0.2.8+42"
 
 
 def test_run_number_defaults_to_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
-    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
     monkeypatch.setenv("GITHUB_RUN_NUMBER", "412")
 
     result = invoke(monkeypatch, "capture-tool-v0.2.7\n", ["--app", "capture-tool", "--config", str(config_path)])
 
     assert result.exit_code == 0
-    assert result.output.strip() == "0.2.7-dev+412"
+    assert result.output.strip() == "0.2.8+412"
 
 
-def test_no_tags_fall_back_to_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_no_tags_defaults_to_first_in_line(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
-    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     result = invoke(monkeypatch, "", ["--app", "capture-tool", "--config", str(config_path), "--run-number", "1"])
 
     assert result.exit_code == 0
-    assert result.output.strip() == "0.0.0-dev+1"
+    assert result.output.strip() == "0.2.0+1"
 
 
 def test_prerelease_tags_do_not_count(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
-    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
 
     result = invoke(
         monkeypatch,
@@ -111,7 +93,7 @@ def test_prerelease_tags_do_not_count(monkeypatch: pytest.MonkeyPatch, tmp_path:
     )
 
     assert result.exit_code == 0
-    assert result.output.strip() == "0.2.7-dev+1"
+    assert result.output.strip() == "0.2.8+1"
 
 
 def test_unknown_app_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -8,13 +8,13 @@ from pydantic_settings import BaseSettings
 
 from .config import DEFAULT_CONFIG_PATH, load_config
 from .ledger import GitLedger
+from .plan import next_version
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 
 class Settings(BaseSettings):
     github_run_number: str = ""
-    github_ref_name: str = ""
 
 
 @app.command()
@@ -31,8 +31,11 @@ def main(
         names = ", ".join(publish_config.apps)
         raise SystemExit(f"Unknown app '{application}'. Valid: {names or '(none)'}")
 
-    base_version = GitLedger().latest_version(f"{application}-v") or "0.0.0"
+    app_config = publish_config.apps[application]
+    ledger = GitLedger()
+    prefix = f"{application}-v"
+    last_version = ledger.latest_version(prefix)
+    last_in_line = ledger.latest_version_in_line(prefix, app_config.major_minor)
+    base_version = next_version(app_config.major_minor, last_in_line, last_version, application)
     resolved_run_number = str(run_number) if run_number else (settings.github_run_number or "0")
-    release = settings.github_ref_name == "main"
-    suffix = f"+{resolved_run_number}" if release else f"-dev+{resolved_run_number}"
-    print(f"{base_version}{suffix}")
+    print(f"{base_version}+{resolved_run_number}")
