@@ -31,9 +31,6 @@ class PublishConfig(BaseModel):
     packages: list[PackageConfig] = Field(default_factory=list)
     apps: list[AppConfig] = Field(default_factory=list)
     ci_workflow: str
-    artifact_dir: Path = Path("/tmp/release-artifacts")
-    artifact_skip_prefixes: list[str] = Field(default_factory=lambda: ["env-lock-", "versions"])
-    artifact_skip_suffixes: list[str] = Field(default_factory=lambda: ["-build-report"])
 
     @model_validator(mode="after")
     def validate_unique_package_names(self) -> "PublishConfig":

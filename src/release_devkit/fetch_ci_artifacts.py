@@ -9,6 +9,7 @@ from bashrun.bash import bash, bash_output
 from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
 
+from .artifacts import ARTIFACT_DIR, is_release_artifact
 from .config import load_config
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -51,7 +52,7 @@ def main(
         with Path(settings.github_output).open("a", encoding="utf-8") as file:
             file.write(f"run_id={run_id}\n")
 
-    artifact_dir = publish_config.artifact_dir
+    artifact_dir = ARTIFACT_DIR
     with ci_step("Download artifacts"):
         bash(f"gh run download {run_id} --repo {repo} --dir {artifact_dir}")
 
@@ -63,9 +64,7 @@ def main(
         for entry in sorted(artifact_dir.iterdir()):
             if not entry.is_dir():
                 continue
-            if any(entry.name.startswith(p) for p in publish_config.artifact_skip_prefixes) or any(
-                entry.name.endswith(s) for s in publish_config.artifact_skip_suffixes
-            ):
+            if not is_release_artifact(entry.name):
                 print(f"  Removed: {entry.name}")
                 rmtree(entry)
                 continue

@@ -58,7 +58,6 @@ def test_load_config_parses_packages(tmp_path: Path):
     ]
     assert config.packages[2].registries == {"npm": "org.outernet.placeframe.arfoundation"}
     assert config.apps[0].tag_prefix == "capture-tool"
-    assert config.artifact_dir == Path("/tmp/release-artifacts")
 
 
 def test_load_config_defaults_empty_collections(tmp_path: Path):

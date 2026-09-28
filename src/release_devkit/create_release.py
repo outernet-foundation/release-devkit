@@ -12,6 +12,7 @@ from bashrun.bash import bash, bash_output
 from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
 
+from .artifacts import ARTIFACT_DIR, is_release_artifact
 from .config import load_config
 from .ledger import GitLedger
 from .plan import UNCHANGED_FALLBACK_VERSION
@@ -38,16 +39,14 @@ def main(config: Annotated[Path, typer.Option(help="Publish configuration JSON")
 
     with ci_step("Package artifacts"):
         assets: list[Path] = []
-        artifact_dir = publish_config.artifact_dir
+        artifact_dir = ARTIFACT_DIR
         if not artifact_dir.is_dir():
             print("No release artifacts directory found")
         else:
             for entry in sorted(artifact_dir.iterdir()):
                 if not entry.is_dir():
                     continue
-                if any(entry.name.startswith(p) for p in publish_config.artifact_skip_prefixes) or any(
-                    entry.name.endswith(s) for s in publish_config.artifact_skip_suffixes
-                ):
+                if not is_release_artifact(entry.name):
                     print(f"  Skipping: {entry.name} (not a release artifact)")
                     continue
 
