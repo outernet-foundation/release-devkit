@@ -1,11 +1,10 @@
 {
-  "packages": [
-    {
-      "name": "release-devkit",
+  "packages": {
+    "release-devkit": {
       "path": ".",
       "major_minor": "0.1",
       "registries": { "pypi": "release-devkit" }
     }
-  ],
+  },
   "ci_workflow": "ci.yml"
 }

@@ -177,3 +177,13 @@ def test_select_packages_rejects_only_with_exclude(tmp_path: Path):
 
     with pytest.raises(SystemExit, match="mutually exclusive"):
         select_packages(packages, ["placeframe-core"], ["placeframe-core"])
+
+
+REPO_CONFIG = Path(__file__).resolve().parent.parent / "release-devkit.json"
+
+
+def test_repo_release_devkit_json_loads() -> None:
+    config = load_config(REPO_CONFIG)
+
+    assert "release-devkit" in config.packages
+    assert config.ci_workflow == "ci.yml"
