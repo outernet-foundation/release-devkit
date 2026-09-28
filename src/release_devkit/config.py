@@ -1,12 +1,15 @@
+import importlib.metadata
 from collections.abc import Sequence
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from packaging.specifiers import SpecifierSet
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from strictyaml import load as load_strict_yaml
 
 from .registries import KNOWN_REGISTRIES
 
 DEFAULT_CONFIG_PATH = Path("release-devkit.yaml")
+DEV_SENTINEL = "0.0.0.dev0"
 
 
 class PackageConfig(BaseModel):
@@ -30,6 +33,15 @@ class PublishConfig(BaseModel):
     packages: dict[str, PackageConfig] = Field(default_factory=dict)
     apps: dict[str, AppConfig] = Field(default_factory=dict)
     ci_workflow: str
+    requires: str | None = None
+
+    @field_validator("requires")
+    @classmethod
+    def validate_requires(cls, value: str | None) -> str | None:
+        if not value:
+            return None
+        SpecifierSet(value)
+        return value
 
     @model_validator(mode="after")
     def validate_registry_names(self) -> "PublishConfig":
@@ -41,7 +53,15 @@ class PublishConfig(BaseModel):
 
 
 def load_config(path: Path) -> PublishConfig:
-    return PublishConfig.model_validate(load_strict_yaml(path.read_text(encoding="utf-8")).data)
+    config = PublishConfig.model_validate(load_strict_yaml(path.read_text(encoding="utf-8")).data)
+    if config.requires is None:
+        return config
+    installed = importlib.metadata.version("release-devkit")
+    if installed == DEV_SENTINEL:
+        return config
+    if not SpecifierSet(config.requires).contains(installed, prereleases=True):
+        raise SystemExit(f"release-devkit {installed} does not satisfy requires={config.requires!r}")
+    return config
 
 
 def select_packages(
