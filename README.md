@@ -2,7 +2,7 @@
 
 Publication machinery for multi-registry package releases: a per-package git-tag ledger, path-diff change detection, ephemeral version patching, manifest-inferred dependency edges, registry adapters (nuget, npm/UPM, PyPI), and release orchestration — all driven by a declarative, consumer-owned config.
 
-Every consuming repo keeps only a root `release-devkit.json` (package identities, paths, version lines, registry mappings) and workflow steps that are thin `uvx` invocations. See [`AGENTS.md`](./AGENTS.md) for the invariants (CI-commit-free releases, tag-ledger versioning, the `0.0.0+local` dependency sentinel and reference regimes, ephemeral manifest version patching) and the command catalog.
+Every consuming repo keeps only a root `release-devkit.yaml` (package identities, paths, version lines, registry mappings) and workflow steps that are thin `uvx` invocations. See [`AGENTS.md`](./AGENTS.md) for the invariants (CI-commit-free releases, tag-ledger versioning, the `0.0.0+local` dependency sentinel and reference regimes, ephemeral manifest version patching) and the command catalog.
 
 ## Requirements
 
@@ -28,13 +28,13 @@ jobs:
       - uses: astral-sh/setup-uv@v7
 
       - name: Publish
-        run: uvx --from release-devkit==0.1.14 publish-stable --config release-devkit.json
+        run: uvx --from release-devkit==0.1.14 publish-stable --config release-devkit.yaml
 ```
 
 The uvx invocation runs inside the caller's job, so the OIDC trusted-publishing identity stays the caller's own workflow — PyPI hard-blocks reusable-workflow publishers, which is why the call inlines in the caller's workflow rather than riding a reusable workflow. Direct uvx is the same shape anywhere else:
 
 ```bash
-uvx --from release-devkit==0.1.14 publish-stable --config release-devkit.json
+uvx --from release-devkit==0.1.14 publish-stable --config release-devkit.yaml
 ```
 
 Build tooling consumes the same ledger at build time: `app-build-version --app <name>` prints the
@@ -43,25 +43,31 @@ version a CI build of an app should stamp — `{version}-dev+{run}` off-main, `{
 emitted string is opaque to the build door that receives it: version derivation lives here,
 stamping belongs to the build tool, and the consumer's workflow bridges the two.
 
-Then author root `release-devkit.json`:
+Then author root `release-devkit.yaml`:
 
-```json
-{
-  "packages": [
-    { "name": "my-api-client", "path": "generated/csharp/api-client/src/MyApiClient",
-      "major_minor": "0.1",
-      "registries": { "nuget": "MyApiClient", "npm": "org.example.myproject.apiclient" } },
-    { "name": "my-core", "path": "packages/unity/Core", "major_minor": "1.0",
-      "registries": { "npm": "org.example.myproject" } },
-    { "name": "my-arfoundation", "path": "packages/unity/ARFoundation", "major_minor": "1.0",
-      "registries": { "npm": "org.example.myproject.arfoundation" } }
-  ],
-  "apps": [
-    { "name": "MyTool", "path": "apps/MyTool", "major_minor": "1.0",
-      "tag_prefix": "my-tool", "display_name": "My Tool" }
-  ],
-  "ci_workflow": "my-ci.yml"
-}
+```yaml
+ci_workflow: my-ci.yml
+packages:
+  my-api-client:
+    path: generated/csharp/api-client/src/MyApiClient
+    major_minor: "0.1"
+    registries:
+      nuget: MyApiClient
+      npm: org.example.myproject.apiclient
+  my-core:
+    path: packages/unity/Core
+    major_minor: "1.0"
+    registries:
+      npm: org.example.myproject
+  my-arfoundation:
+    path: packages/unity/ARFoundation
+    major_minor: "1.0"
+    registries:
+      npm: org.example.myproject.arfoundation
+apps:
+  MyTool:
+    path: apps/MyTool
+    major_minor: "1.0"
 ```
 
 Dependencies between packages in one config are **not** authored here: they are inferred from the manifests (package.json dependencies, `[project].dependencies`, csproj `PackageReference`), and same-unit dependencies are authored in those manifests as the sentinel `0.0.0+local` — the concrete sibling version is injected at publish time from the event's ledger. `AGENTS.md` carries the full dependency-edge law and reference regimes.
@@ -71,12 +77,12 @@ Dependencies between packages in one config are **not** authored here: they are 
 and invoke from CI:
 
 ```bash
-uvx --from release-devkit==0.1.14 publish-stable --config release-devkit.json
-uvx --from release-devkit==0.1.14 publish-dev --config release-devkit.json --run-id ${{ github.event.workflow_run.id }}
-uvx --from release-devkit==0.1.14 create-release --config release-devkit.json
+uvx --from release-devkit==0.1.14 publish-stable --config release-devkit.yaml
+uvx --from release-devkit==0.1.14 publish-dev --config release-devkit.yaml --run-id ${{ github.event.workflow_run.id }}
+uvx --from release-devkit==0.1.14 create-release --config release-devkit.yaml
 ```
 
-The list fields (`packages`, `apps`) may be omitted when empty — an apps-only repo (no registry packages) declares no `packages` key at all.
+The mapping fields (`packages`, `apps`) may be omitted when empty — an apps-only repo (no registry packages) declares no `packages` key at all.
 
 `publish-dev` is the dev-channel job: it publishes immutable `-dev.<run-id>` prereleases (`X.Y.Z.dev<run-id>` on PyPI) of every changed package on a green push — no git tags, npm `latest` untouched — and prints the exact versions to pin.
 
