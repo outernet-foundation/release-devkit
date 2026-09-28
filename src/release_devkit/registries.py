@@ -1,5 +1,6 @@
 import json
 import re
+import tempfile
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -56,12 +57,15 @@ class NuGetRegistry:
         if properties:
             property_flags = " ".join(f"-p:{name}={version}" for name, version in properties.items())
             command += f" {property_flags}"
-        command += " -o ./nupkg"
-        bash(command, cwd=request.path)
-        bash(
-            f"dotnet nuget push ./nupkg/*.nupkg --api-key {self.api_key} --source {NUGET_SOURCE} --skip-duplicate",
-            cwd=request.path,
-        )
+        # Pack outside the package root — NpmRegistry.publish packs request.path next, and a
+        # .nupkg written there rides the npm tarball (bin/obj are relocated out for the same reason).
+        with tempfile.TemporaryDirectory() as outdir:
+            command += f" -o {outdir}"
+            bash(command, cwd=request.path)
+            bash(
+                f"dotnet nuget push {outdir}/*.nupkg --api-key {self.api_key} --source {NUGET_SOURCE} --skip-duplicate",
+                cwd=request.path,
+            )
 
 
 class NpmRegistry:

@@ -284,7 +284,7 @@ def test_nuget_publish_injects_property_flags_beside_the_version(
         )
     )
 
-    assert recorder.commands[0] == "dotnet pack -c Release -p:Version=1.0.6 -p:SiblingVersion=1.0.6 -o ./nupkg"
+    assert recorder.commands[0].startswith("dotnet pack -c Release -p:Version=1.0.6 -p:SiblingVersion=1.0.6 -o ")
 
 
 def test_nuget_publish_without_dependencies_omits_property_flags(
@@ -298,7 +298,24 @@ def test_nuget_publish_without_dependencies_omits_property_flags(
         PublishRequest(path=tmp_path, identity="Org.Consumer", version="1.0.6", dependency_versions={})
     )
 
-    assert recorder.commands[0] == "dotnet pack -c Release -p:Version=1.0.6 -o ./nupkg"
+    assert recorder.commands[0].startswith("dotnet pack -c Release -p:Version=1.0.6 -o ")
+
+
+def test_nuget_publish_writes_the_nupkg_outside_the_package_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_nuget_project(tmp_path)
+    recorder = CommandRecorder()
+    monkeypatch.setattr("release_devkit.registries.bash", recorder)
+
+    NuGetRegistry("key").publish(
+        PublishRequest(path=tmp_path, identity="Org.Consumer", version="1.0.6", dependency_versions={})
+    )
+
+    pack_command, push_command = recorder.commands
+    outdir = pack_command.rsplit(" -o ", 1)[1]
+    assert not Path(outdir).is_relative_to(tmp_path)
+    assert outdir in push_command
 
 
 def test_nuget_injection_properties_without_matching_reference_is_loud(tmp_path: Path) -> None:
