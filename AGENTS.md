@@ -14,7 +14,7 @@ An inline `run:` step executes in the caller's job, so `job_workflow_ref` resolv
 
 ## Self-publication
 
-release-devkit is the one repo that consumes itself from local source rather than from PyPI: it *is* release-devkit, so its own `ci-cd.yml` runs `uv run publish-stable` / `publish-dev` / `publish-dry-run` / `ensure-release-pr` — no uvx, no `RELEASE_DEVKIT_VERSION` self-reference. Everything else in its `ci-cd.yml` follows the shared shape: `check` runs `preflight-python` from the python-devkit dev dependency (release-devkit is not self-preflighting), and the publish jobs carry the same `environment: release`, permissions, and concurrency as every other consumer. Its dependencies must all exist on PyPI before it publishes. The committed `pyproject.toml` version is permanently the `0.0.0.dev0` sentinel; the `release-devkit-v*` tags are the version ledger. All three devkits are preproduction: breaking changes ride the current `0.1` patch line; a `major_minor` bump is reserved for the eventual 1.0.0 stabilization release.
+release-devkit is the one repo that consumes itself from local source rather than from PyPI: it *is* release-devkit, so its own `ci-cd.yml` runs `uv run publish-stable` / `publish-dev` / `ensure-release-pr`, plus `publish-stable --dry-run` as the trailing step of its `check` job — no uvx, no `RELEASE_DEVKIT_VERSION` self-reference. Everything else in its `ci-cd.yml` follows the shared shape: `check` runs `preflight-python` from the python-devkit dev dependency (release-devkit is not self-preflighting), and the publish jobs carry the same `environment: release`, permissions, and concurrency as every other consumer. Its dependencies must all exist on PyPI before it publishes. The committed `pyproject.toml` version is permanently the `0.0.0.dev0` sentinel; the `release-devkit-v*` tags are the version ledger. All three devkits are preproduction: breaking changes ride the current `0.1` patch line; a `major_minor` bump is reserved for the eventual 1.0.0 stabilization release.
 
 ## Commands
 
@@ -31,13 +31,12 @@ Each is a `uv run <name> --config <path>` from the consuming repo's root in rele
 
 ## Consumption shape
 
-Consumers inline the verbs directly in their `ci-cd.yml` publish jobs — no composites in this repo, no consumer-local bootstrap action, no vendored checkout. Each publish job owns its checkout and runs one `uvx --from release-devkit==${{ env.RELEASE_DEVKIT_VERSION }} <name>` step (workflow-level `env:`):
+Consumers inline the verbs directly in their `ci-cd.yml` jobs — no composites in this repo, no consumer-local bootstrap action, no vendored checkout. Each verb-owning job owns its checkout and runs `uvx --from release-devkit==${{ env.RELEASE_DEVKIT_VERSION }} <name>` steps (workflow-level `env:`):
 
-- `publish-dry-run` — checkout (`fetch-depth: 0`, the tag ledger; `persist-credentials: false`) + setup-uv + `publish-stable --dry-run`.
+- `check` (every repo) — checkout (`fetch-depth: 0`, the tag ledger; `persist-credentials: false`) + setup-uv + the python battery, with `publish-stable --dry-run` as the trailing step (the publish-plan gate). App repos fold `app-build-version --app <name>` into the same job, exporting the version as a job output for the build workflow — no separate `resolve-version` job.
 - `ensure-release-pr` — checkout (`persist-credentials: false`) + setup-uv + `ensure-release-pr`. Job env `GH_TOKEN`.
 - `publish-stable` — checkout (`ref: main`; credentials persist for the tag push) + fetch-tags + setup-uv + `publish-stable [--with-apps] [--fetch-ci-artifacts]`, step env `NPM_CONFIG_LOGLEVEL: verbose` (npm OIDC diagnostics; no-op elsewhere). Job env `GH_TOKEN`, `NUGET_API_KEY`; permissions `contents: write` + `id-token: write`, plus `actions: read` when `--fetch-ci-artifacts`. The GitHub Release is cut inside the command — no separate `create-release` step.
 - `publish-dev` — checkout (`ref:` the workflow_run head SHA; `persist-credentials: false`) + fetch-tags + setup-uv + `publish-dev --run-id <run-id>`, step env `NPM_CONFIG_LOGLEVEL: verbose`. No tags, no releases.
-- `app-build-version` (app repos) — checkout (`fetch-depth: 0`) + setup-uv + `app-build-version --app <name>` in a `resolve-version` job.
 
 ## The CI-commit-free invariants
 
