@@ -1,0 +1,103 @@
+name: CI/CD
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_run:
+    workflows: [CI/CD]
+    types: [completed]
+    branches: [dev]
+
+env:
+  PYTHON_DEVKIT_SHA: 048919f2ac485d49f5863a014b4cda628779635a
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    if: github.event_name != 'workflow_run' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/pin-python-devkit
+      - uses: ./.python-devkit/.github/actions/preflight
+
+  publish-dry-run:
+    if: github.event_name != 'workflow_run' && github.ref != 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - shell: bash
+        run: uv run publish-stable --dry-run
+
+  ensure-release-pr:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: [check, publish-dry-run]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - shell: bash
+        run: uv run ensure-release-pr
+
+  publish-stable:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release
+    concurrency:
+      group: publish-stable
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: git fetch --tags origin
+        shell: bash
+      - uses: astral-sh/setup-uv@v7
+      - id: publish-stable
+        shell: bash
+        run: uv run publish-stable
+      - if: steps.publish-stable.outputs.published == 'true'
+        shell: bash
+        run: uv run create-release
+
+  publish-dev:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: release
+    concurrency:
+      group: publish-dev
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - run: git fetch --tags origin
+        shell: bash
+      - uses: astral-sh/setup-uv@v7
+      - shell: bash
+        run: uv run publish-dev --run-id ${{ github.event.workflow_run.id }}
