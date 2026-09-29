@@ -2,7 +2,9 @@
 
 ## What this is
 
-The publication machinery for outernet-foundation repos: the publish pipeline, the per-package tag ledger and path-diff change detection, ephemeral version patching, manifest-inferred dependency edges, and release orchestration. A standalone repo (sibling of `unity-devkit` / `docker-devkit` / `bashrun`), published to PyPI and consumed **uvx-isolated** — it is a project dependency of nothing. The reason is structural: every tool repo it publishes sits inside its own dependency graph (bashrun and ci-devkit are release-devkit's runtime deps), so a project-level release-devkit edge in those repos is a resolver cycle plus a root-version conflict against the committed version sentinel. Consumers outside that graph (placeframe) use uvx for the same shape, keeping one consumption model. Publish jobs in consumer repos inline the same uvx invocation as plain steps in the caller's workflow, so the OIDC trusted-publishing identity stays the caller's own workflow file — PyPI hard-blocks reusable-workflow publishers (warehouse#11096) and npm binds the caller's top-level workflow filename, which is why publication inlines the call in the caller's workflow, never a reusable workflow. The version pin lives in each consumer's workflow file.
+The publication machinery for outernet-foundation repos: the publish pipeline, the per-package tag ledger and path-diff change detection, ephemeral version patching, manifest-inferred dependency edges, and release orchestration. A standalone repo (sibling of `unity-devkit` / `docker-devkit` / `bashrun`), published to PyPI and consumed **uvx-isolated** — it is a project dependency of nothing. The reason is structural: every tool repo it publishes sits inside its own dependency graph (bashrun and ci-devkit are release-devkit's runtime deps), so a project-level release-devkit edge in those repos is a resolver cycle plus a root-version conflict against the committed version sentinel. Consumers outside that graph (placeframe) use uvx for the same shape, keeping one consumption model.
+
+Consumption is via composite actions in this repo's `.github/actions/` (`publish-stable`, `publish-dev`, `publish-dry-run`, `ensure-release-pr`). Each composite is self-contained — it checks out the consumer, installs uv, and runs the `uvx --from .release-devkit <command>` invocation — and run-from-source: the consumer checks out release-devkit at a pinned SHA into `.release-devkit/` (via a consumer-local `pin-release-devkit` bootstrap), then `uses: ./.release-devkit/.github/actions/<name>`. The SHA is the version — no `release-devkit==<version>` string anywhere, so the release SHA and the composite move together (a version-pinned composite would trail the release by one commit, decoupling the two). A composite action is inlined into the caller's job, so `job_workflow_ref` resolves to the **caller's** workflow file: the OIDC trusted-publishing identity is the caller's own, which is the property PyPI hard-requires (warehouse#11096 blocks reusable-workflow publishers) and npm binds (the caller's top-level workflow filename) — composites are OIDC-safe where reusable workflows are not. Consumers carry `RELEASE_DEVKIT_SHA` in their workflow `env:`, bumped manually and independently of other devkits. The composites' consumer checkout uses `clean: false` so the bootstrap's `.release-devkit/` checkout survives the second `actions/checkout`.
 
 The consumer owns everything declarative: package and app identities, paths, and registry mappings live in a consumer-authored `release-devkit.yaml` at the repo root; every command here reads that file. Per-repo copies of this machinery are refused, as are per-ecosystem splits — the seam is internal: one `Registry` adapter per registry over the shared ledger/diff/versioning core.
 
@@ -10,11 +12,11 @@ The package is `release-devkit` (src-layout under `src/release_devkit/`; import 
 
 ## Self-publication
 
-release-devkit publishes itself from its own checkout: `release.yml` — triggered by a successful CI run on a `main` push — runs `uv run publish-stable --config release-devkit.yaml`; the repo *is* release-devkit, so no uvx bootstrap and no self-reference. Its dependencies must all exist on PyPI before it publishes. The committed `pyproject.toml` version is permanently the `0.0.0.dev0` sentinel; the `release-devkit-v*` tags are the version ledger. All three devkits are preproduction: breaking changes ride the current `0.1` patch line; a `major_minor` bump is reserved for the eventual 1.0.0 stabilization release.
+release-devkit is the one repo where the release-devkit commands run inline rather than through the composites: the composites assume an external checkout (`uvx --from .release-devkit`), but release-devkit *is* release-devkit, so its own `ci-cd.yml` runs `uv run publish-stable` / `publish-dev` / `publish-dry-run` / `ensure-release-pr` / `create-release` from its local source — no uvx bootstrap, no self-reference. Everything else in its `ci-cd.yml` follows the shared shape: `check` consumes python-devkit's preflight composite (release-devkit is not self-preflighting), and the publish jobs carry the same `environment: release`, permissions, and concurrency as every other consumer. Its dependencies must all exist on PyPI before it publishes. The committed `pyproject.toml` version is permanently the `0.0.0.dev0` sentinel; the `release-devkit-v*` tags are the version ledger. All three devkits are preproduction: breaking changes ride the current `0.1` patch line; a `major_minor` bump is reserved for the eventual 1.0.0 stabilization release.
 
 ## Commands
 
-All are `uv run <name> --config <path>` from the consuming repo's root (config defaults to `release-devkit.yaml` where optional).
+Each is a `uv run <name> --config <path>` from the consuming repo's root in release-devkit's own self-publish CI; consumers never invoke them directly — the composites below wrap each as `uvx --from .release-devkit <name>`. Config defaults to `release-devkit.yaml` where optional.
 
 | Command | Role |
 |---|---|
@@ -24,6 +26,17 @@ All are `uv run <name> --config <path>` from the consuming repo's root (config d
 | `create-release` | Assemble release notes (package versions with registry links, app versions), package CI artifacts, and cut the CalVer-named (`YYYY.MM.N`, counting releases within the month) GitHub Release. Runs only when something published — consumer workflows gate the step on `publish-stable`'s `published` output. |
 | `ensure-release-pr` | Maintain the standing `dev` → `main` "Next release" gate PR. |
 | `fetch-ci-artifacts` | Locate the successful CI run for the release SHA (via the merge commit's second parent) and download its artifacts, pruning non-release ones per the config's skip rules. |
+
+## Composites
+
+The four composites in `.github/actions/` are the consumer-facing surface; each is self-contained (consumer checkout with a `ref` input + setup-uv + the `uvx --from .release-devkit` command) so a consumer publish job is two steps — `pin-release-devkit` then `uses: ./.release-devkit/.github/actions/<name>` — plus job-level metadata (`environment`, `permissions`, `env`, `if`, `concurrency`).
+
+- `publish-stable` — checkout (`ref`) + fetch-tags + setup-uv + optional `fetch-ci-artifacts` (input `fetch-ci-artifacts`, bool) + `publish-stable [--with-apps]` (input `with-apps`, bool) + `create-release` gated on `publish-stable`'s `published` step output. The `published` output is internal to the composite (consumers don't read it). Step env `NPM_CONFIG_LOGLEVEL=verbose` (npm OIDC diagnostics; no-op elsewhere). Uses job env `GH_TOKEN`, `NUGET_API_KEY`. Pushes tags via `git push origin` — the consumer checkout keeps `persist-credentials` (default) so the token credential reaches the tag push.
+- `publish-dev` — checkout (`ref`) + fetch-tags + setup-uv + `publish-dev --run-id <run-id>` (input `run-id`). Step env `NPM_CONFIG_LOGLEVEL=verbose`. Uses job env `GH_TOKEN`, `NUGET_API_KEY`. No tags, no releases.
+- `publish-dry-run` — checkout (`ref`, `fetch-depth: 0` for the tag ledger) + setup-uv + `publish-stable --dry-run`.
+- `ensure-release-pr` — checkout (`ref`) + setup-uv + `ensure-release-pr`. Uses job env `GH_TOKEN`.
+
+`fetch-ci-artifacts`, `create-release`, and `app-build-version` are release-devkit commands invoked *inside* the composites (or, for `app-build-version`, inside a consumer's `resolve-version` job) — not separate consumer composites.
 
 ## The CI-commit-free invariants
 
