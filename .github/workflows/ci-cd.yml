@@ -75,12 +75,8 @@ jobs:
       - run: git fetch --tags origin
         shell: bash
       - uses: astral-sh/setup-uv@v7
-      - id: publish-stable
-        shell: bash
+      - shell: bash
         run: uv run publish-stable
-      - if: steps.publish-stable.outputs.published == 'true'
-        shell: bash
-        run: uv run create-release
 
   publish-dev:
     if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
