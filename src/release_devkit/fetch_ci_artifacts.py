@@ -26,6 +26,10 @@ def main(
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")],
     ci_run_id: Annotated[str | None, typer.Option(help="Override CI run lookup with a known run ID")] = None,
 ) -> None:
+    run_fetch_ci_artifacts(config, ci_run_id)
+
+
+def run_fetch_ci_artifacts(config: Path, ci_run_id: str | None = None) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
     repo = settings.github_repository
