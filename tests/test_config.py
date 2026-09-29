@@ -193,7 +193,7 @@ def test_repo_release_devkit_yaml_loads() -> None:
     config = load_config(REPO_CONFIG)
 
     assert "release-devkit" in config.packages
-    assert config.ci_workflow == "ci.yml"
+    assert config.ci_workflow == "ci-cd.yml"
 
 
 def test_load_config_rejects_duplicate_keys(tmp_path: Path):
