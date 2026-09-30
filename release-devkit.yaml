@@ -1,8 +1,1 @@
-requires: ">=0.1"
 ci_workflow: ci-cd.yml
-packages:
-  release-devkit:
-    path: .
-    major_minor: "0.1"
-    registries:
-      pypi: release-devkit

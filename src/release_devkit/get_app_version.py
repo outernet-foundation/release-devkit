@@ -22,7 +22,7 @@ def main(
     application: Annotated[str, typer.Option("--app", help="App name (the release-devkit.yaml apps key)")],
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
     run_number: Annotated[
-        int, typer.Option(help="Build number baked into the version (defaults to GITHUB_RUN_NUMBER)")
+        int, typer.Option(help="Build number baked into the version (defaults to the ambient CI run number)")
     ] = 0,
 ) -> None:
     settings = Settings.model_validate({})

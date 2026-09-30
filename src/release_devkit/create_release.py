@@ -4,16 +4,16 @@ import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, mkdtemp
 from typing import Annotated
 
 import typer
 from bashrun.bash import bash, bash_output
 from pydantic_settings import BaseSettings
+from ci_devkit.builds import pull_build
 from ci_devkit.ci_step import ci_step
 
-from .artifacts import ARTIFACT_DIR, is_release_artifact
-from .config import load_config
+from .config import BuildArtifactConfig, PublishConfig, load_config
 from .ledger import GitLedger
 from .plan import UNCHANGED_FALLBACK_VERSION
 
@@ -22,14 +22,11 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 class Settings(BaseSettings):
     github_repository: str
+    github_sha: str
 
 
 @app.command()
-def main(config: Annotated[Path, typer.Option(help="Publish configuration YAML")]) -> None:
-    run_create_release(config)
-
-
-def run_create_release(config: Path) -> None:
+def run_create_release(config: Annotated[Path, typer.Option(help="Publish configuration YAML")]) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
 
@@ -41,38 +38,7 @@ def run_create_release(config: Path) -> None:
     count = int(existing) if existing else 0
     tag = f"{year_month}.{count + 1}"
 
-    with ci_step("Package artifacts"):
-        assets: list[Path] = []
-        artifact_dir = ARTIFACT_DIR
-        if not artifact_dir.is_dir():
-            print("No release artifacts directory found")
-        else:
-            for entry in sorted(artifact_dir.iterdir()):
-                if not entry.is_dir():
-                    continue
-                if not is_release_artifact(entry.name):
-                    print(f"  Skipping: {entry.name} (not a release artifact)")
-                    continue
-
-                files = [path for path in entry.rglob("*") if path.is_file()]
-                if not files:
-                    print(f"  Skipping: {entry.name} (empty)")
-                    continue
-
-                if len(files) == 1:
-                    asset = artifact_dir / f"{entry.name}{files[0].suffix}"
-                    shutil.copy2(files[0], asset)
-                else:
-                    zip_path = artifact_dir / entry.name
-                    shutil.make_archive(str(zip_path), "zip", entry)
-                    asset = zip_path.parent / f"{zip_path.name}.zip"
-                assets.append(asset)
-                print(f"  Asset: {asset.name}" + (f" ({len(files)} files)" if len(files) > 1 else ""))
-
-        if assets:
-            print(f"  {len(assets)} asset(s) ready for upload")
-        else:
-            print("  No build artifacts to attach")
+    assets = collect_build_assets(publish_config, settings.github_repository, settings.github_sha)
 
     with ci_step("Create GitHub Release"):
         registry_urls: dict[str, Callable[[str, str], str]] = {
@@ -119,3 +85,59 @@ def run_create_release(config: Path) -> None:
         )
         Path(notes_path).unlink()
         print(f"  Release created: {tag}")
+
+
+def collect_build_assets(publish_config: PublishConfig, repository: str, sha: str) -> list[Path]:
+    apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds is not None}
+    if not apps_with_builds:
+        return []
+
+    run_number = matched_ci_run_number(repository, sha, publish_config.ci_workflow)
+    build_tag = f"run-{run_number}"
+    staging = Path(mkdtemp(prefix="release-builds-"))
+    assets: list[Path] = []
+
+    for app_name, builds in apps_with_builds.items():
+        with ci_step(f"Pull build artifacts ({app_name})"):
+            for artifact in builds.artifacts:
+                target = staging / f"{artifact.project}-{artifact.platform}"
+                pull_build(builds.registry, artifact.project, artifact.platform, build_tag, target)
+                source = select_artifact_file(artifact, target)
+                asset_name = artifact.name or source.name
+                asset = staging / asset_name
+                shutil.copy2(source, asset)
+                assets.append(asset)
+                print(f"  Asset: {asset_name}")
+
+    return assets
+
+
+def matched_ci_run_number(repository: str, sha: str, ci_workflow: str) -> str:
+    with ci_step("Find successful CI run"):
+        parent = bash_output(f'gh api "/repos/{repository}/git/commits/{sha}" --jq ".parents[1].sha"').strip()
+        run_number = bash_output(
+            f'gh api "/repos/{repository}/actions/workflows/{ci_workflow}/runs'
+            f'?head_sha={parent}&status=success" --jq ".workflow_runs[0].run_number // empty"'
+        ).strip()
+
+        if not run_number:
+            print(f"::error::No successful CI run found for SHA {parent}. Cannot release untested code.")
+            raise typer.Exit(code=1)
+
+        print(f"  CI run number: {run_number}")
+        return run_number
+
+
+def select_artifact_file(artifact: BuildArtifactConfig, target: Path) -> Path:
+    files = sorted(path for path in target.rglob("*") if path.is_file())
+    if artifact.file is not None:
+        for path in files:
+            if path.name == artifact.file:
+                return path
+        raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {target}")
+    if len(files) == 1:
+        return files[0]
+    raise SystemExit(
+        f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
+        f"({', '.join(path.name for path in files)}); declare which one with 'file'"
+    )

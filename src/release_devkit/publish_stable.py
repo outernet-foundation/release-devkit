@@ -10,7 +10,6 @@ from ci_devkit.setup import configure_git, free_disk_space, install_dotnet, inst
 
 from .config import DEFAULT_CONFIG_PATH, load_config, select_packages
 from .create_release import run_create_release
-from .fetch_ci_artifacts import run_fetch_ci_artifacts
 from .ledger import GitLedger
 from .manifests import resolve_edges
 from .outputs import append_line
@@ -33,9 +32,6 @@ def main(
     only: Annotated[list[str] | None, typer.Option(help="Restrict to named packages (repeatable).")] = None,
     exclude: Annotated[list[str] | None, typer.Option(help="Skip named packages (repeatable).")] = None,
     with_apps: Annotated[bool, typer.Option(help="Handle app version bumps and tags in a filtered run.")] = False,
-    fetch_ci_artifacts: Annotated[
-        bool, typer.Option(help="Fetch CI build artifacts and staple them onto the GitHub Release")
-    ] = False,
 ) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
@@ -122,6 +118,4 @@ def main(
                     ledger.create_and_push_tag(tag)
                     print(f"  Tagged: {tag}")
 
-    if fetch_ci_artifacts:
-        run_fetch_ci_artifacts(config)
     run_create_release(config)
