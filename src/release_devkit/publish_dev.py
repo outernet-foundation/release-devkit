@@ -30,7 +30,7 @@ def main(
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
     dry_run: Annotated[bool, typer.Option(help="Plan publishes without executing them")] = False,
     run_id: Annotated[
-        str, typer.Option(help="CI run id baked into every dev version (defaults to GITHUB_RUN_ID)")
+        str, typer.Option(help="CI run id baked into every dev version (defaults to the ambient CI run id)")
     ] = "",
     only: Annotated[list[str] | None, typer.Option(help="Restrict to named packages (repeatable).")] = None,
     exclude: Annotated[list[str] | None, typer.Option(help="Skip named packages (repeatable).")] = None,
@@ -38,7 +38,7 @@ def main(
     settings = Settings.model_validate({})
     resolved_run_id = run_id or settings.github_run_id
     if not resolved_run_id.isdigit():
-        raise SystemExit("dev run id must be all digits: pass --run-id or set GITHUB_RUN_ID")
+        raise SystemExit("dev run id must be all digits: pass --run-id or run inside CI")
 
     publish_config = load_config(config)
     packages = select_packages(publish_config.packages, only or [], exclude or [])

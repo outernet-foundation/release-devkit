@@ -5,7 +5,7 @@ description = "Publication machinery: per-package tag ledger, path-diff change d
 requires-python = ">=3.13"
 dependencies = [
     "bashrun>=0.1.0",
-    "ci-devkit>=0.1.0",
+    "ci-devkit==0.1.15.dev36756330648",
     "packaging>=24.1",
     "pydantic>=2.11.7",
     "pydantic-settings>=2.9.1",
@@ -32,7 +32,6 @@ build-backend = "hatchling.build"
 app-build-version = "release_devkit.app_build_version:app"
 create-release = "release_devkit.create_release:app"
 ensure-release-pr = "release_devkit.ensure_release_pr:app"
-fetch-ci-artifacts = "release_devkit.fetch_ci_artifacts:app"
 publish-dev = "release_devkit.publish_dev:app"
 publish-stable = "release_devkit.publish_stable:app"
 

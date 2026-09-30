@@ -20,11 +20,28 @@ class PackageConfig(BaseModel):
     registries: dict[str, str] = Field(default_factory=dict)
 
 
+class BuildArtifactConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project: str
+    platform: str
+    file: str | None = None
+    name: str | None = None
+
+
+class BuildsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    registry: str
+    artifacts: list[BuildArtifactConfig] = Field(min_length=1)
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: Path
     major_minor: str = Field(pattern=r"^\d+\.\d+$")
+    builds: BuildsConfig | None = None
 
 
 class PublishConfig(BaseModel):
