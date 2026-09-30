@@ -28,6 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/checkout@v5
+        with:
           repository: outernet-foundation/release-devkit
           ref: ${{ env.RELEASE_DEVKIT_SHA }}
           path: .release-devkit
@@ -36,7 +41,7 @@ jobs:
       - uses: ./.release-devkit/.github/actions/publish-stable
 ```
 
-The action owns the consumer checkout (ledger shape, `ref: main`, credentials persisting for the tag push), syncs the tool's venv from the checkout's committed `uv.lock`, and self-serves the env it needs (`GH_TOKEN`, `CI_REGISTRY_*`, `NPM_CONFIG_LOGLEVEL`). Available actions: `publish-stable` (inputs `dry-run`, `with-apps`), `publish-dev`, `ensure-release-pr`, and `get-app-version` (input `app`, output `version`). Every action takes `checkout: false` for jobs that already hold a ledger-shaped checkout (`preflight` jobs).
+The job owns both checkouts: the consumer repo first (ledger shape — `fetch-depth: 0` + `fetch-tags: true`; on `publish-stable` the default persisting credentials are what the tag push needs), then release-devkit beside it. The action syncs the tool's venv from the checkout's committed `uv.lock`, and self-serves the env it needs (`GH_TOKEN`, `CI_REGISTRY_*`, `NPM_CONFIG_LOGLEVEL`). Available actions: `publish-stable` (inputs `dry-run`, `with-apps`), `publish-dev`, `ensure-release-pr`, and `get-app-version` (input `app`, output `version`) — none of them checks anything out; each assumes the caller already holds the consumer checkout.
 
 The steps run inside the caller's job, so the OIDC trusted-publishing identity stays the caller's own workflow — PyPI hard-blocks reusable-workflow publishers, which is why the verbs ride composite actions inlined into the caller's workflow rather than a reusable workflow.
 
