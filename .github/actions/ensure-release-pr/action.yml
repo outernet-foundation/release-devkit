@@ -1,21 +1,9 @@
 name: ensure-release-pr
 description: Maintain the standing dev-to-main "Next release" gate PR
 
-inputs:
-  checkout:
-    description: Check out the consumer repo (ledger shape) before running; false when the job already holds it
-    default: "true"
-
 runs:
   using: composite
   steps:
-    - if: ${{ inputs.checkout == 'true' }}
-      uses: actions/checkout@v5
-      with:
-        fetch-depth: 0
-        fetch-tags: true
-        clean: false
-        persist-credentials: false
     - uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
