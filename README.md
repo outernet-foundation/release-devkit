@@ -36,11 +36,11 @@ jobs:
       - uses: ./.release-devkit/.github/actions/publish-stable
 ```
 
-The action owns the consumer checkout (ledger shape, `ref: main`, credentials persisting for the tag push), syncs the tool's venv from the checkout's committed `uv.lock`, and self-serves the env it needs (`GH_TOKEN`, `CI_REGISTRY_*`, `NPM_CONFIG_LOGLEVEL`). Available actions: `publish-stable` (inputs `dry-run`, `with-apps`), `publish-dev`, `ensure-release-pr`, and `app-build-version` (input `app`, output `version`). Every action takes `checkout: false` for jobs that already hold a ledger-shaped checkout (`check` jobs).
+The action owns the consumer checkout (ledger shape, `ref: main`, credentials persisting for the tag push), syncs the tool's venv from the checkout's committed `uv.lock`, and self-serves the env it needs (`GH_TOKEN`, `CI_REGISTRY_*`, `NPM_CONFIG_LOGLEVEL`). Available actions: `publish-stable` (inputs `dry-run`, `with-apps`), `publish-dev`, `ensure-release-pr`, and `get-app-version` (input `app`, output `version`). Every action takes `checkout: false` for jobs that already hold a ledger-shaped checkout (`preflight` jobs).
 
 The steps run inside the caller's job, so the OIDC trusted-publishing identity stays the caller's own workflow — PyPI hard-blocks reusable-workflow publishers, which is why the verbs ride composite actions inlined into the caller's workflow rather than a reusable workflow.
 
-Build tooling consumes the same ledger at build time: `app-build-version --app <name>` prints the
+Build tooling consumes the same ledger at build time: `get-app-version --app <name>` prints the
 version a CI build of an app should stamp — `{next_version}+{run}`, the run number coming from
 `--run-number` or the ambient CI run number. The emitted string is opaque to the build door that
 receives it: version derivation lives here, stamping belongs to the build tool, and the consumer's
