@@ -317,7 +317,6 @@ source = { editable = "." }
 dependencies = [
     { name = "bashrun" },
     { name = "ci-devkit" },
-    { name = "packaging" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "strictyaml" },
@@ -339,7 +338,6 @@ dev = [
 requires-dist = [
     { name = "bashrun", specifier = ">=0.1.0" },
     { name = "ci-devkit", specifier = "==0.1.15.dev36756330648" },
-    { name = "packaging", specifier = ">=24.1" },
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pydantic-settings", specifier = ">=2.9.1" },
     { name = "strictyaml", specifier = ">=1.7.3" },

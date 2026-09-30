@@ -1,0 +1,39 @@
+name: app-build-version
+description: Print the version a CI build of an app should stamp
+
+inputs:
+  app:
+    description: App name from release-devkit.yaml
+    required: true
+  checkout:
+    description: Check out the consumer repo (ledger shape) before running; false when the job already holds it
+    default: "true"
+
+outputs:
+  version:
+    description: The stamped version ({next_version}+{run})
+    value: ${{ steps.version.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - if: ${{ inputs.checkout == 'true' }}
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+        clean: false
+        persist-credentials: false
+    - uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+    - shell: bash
+      run: uv sync --locked --no-dev
+      working-directory: ${{ github.action_path }}/../../..
+    - id: version
+      shell: bash
+      run: >
+        echo "version=$("$RELEASE_DEVKIT_ROOT/.venv/bin/app-build-version"
+        --app ${{ inputs.app }})" >> "$GITHUB_OUTPUT"
+      env:
+        RELEASE_DEVKIT_ROOT: ${{ github.action_path }}/../../..

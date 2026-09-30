@@ -6,7 +6,6 @@ requires-python = ">=3.13"
 dependencies = [
     "bashrun>=0.1.0",
     "ci-devkit==0.1.15.dev36756330648",
-    "packaging>=24.1",
     "pydantic>=2.11.7",
     "pydantic-settings>=2.9.1",
     "strictyaml>=1.7.3",
