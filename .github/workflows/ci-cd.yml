@@ -7,8 +7,6 @@ on:
   pull_request:
     branches: [dev]
 
-# Cancel superseded runs on the same branch, except main — where nothing
-# runs (check is dev/PR only), so the block is pure noise-control.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -17,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  preflight:
     if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
