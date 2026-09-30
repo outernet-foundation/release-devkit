@@ -31,12 +31,24 @@ Each is a `uv run <name> --config <path>` from the consuming repo's root in rele
 
 ## Consumption shape
 
-Consumers inline the verbs directly in their `ci-cd.yml` jobs — no composites in this repo, no consumer-local bootstrap action, no vendored checkout. Each verb-owning job owns its checkout and runs `uvx --from release-devkit==${{ env.RELEASE_DEVKIT_VERSION }} <name>` steps (workflow-level `env:`):
+Every consumer runs one workflow file, `ci-cd.yml`, combining CI and release. Triggers: `workflow_dispatch`, `push: [main, dev]`, `pull_request: [dev]` — never `workflow_run` (it was only ever the bridge between two files; one file means `needs` is the green gate) and never `pull_request: [main]`: the standing release PR's head is the dev tip that just ran identical CI via the push event, so letting it fire doubles CI (including the QEMU matrices) on every dev push. Consequence: the release PR reports zero checks; `main`'s branch protection must require no status checks. Exactly one workflow-level concurrency block and zero per-job blocks:
 
-- `check` (every repo) — checkout (`fetch-depth: 0`, the tag ledger; `persist-credentials: false`) + setup-uv + the python battery, with `publish-stable --dry-run` as the trailing step (the publish-plan gate). App repos fold `app-build-version --app <name>` into the same job, exporting the version as a job output for the build workflow — no separate `resolve-version` job.
-- `ensure-release-pr` — checkout (`persist-credentials: false`) + setup-uv + `ensure-release-pr`. Job env `GH_TOKEN`.
-- `publish-stable` — checkout (`ref: main`; credentials persist for the tag push) + fetch-tags + setup-uv + `publish-stable [--with-apps] [--fetch-ci-artifacts]`, step env `NPM_CONFIG_LOGLEVEL: verbose` (npm OIDC diagnostics; no-op elsewhere). Job env `GH_TOKEN`, `NUGET_API_KEY`; permissions `contents: write` + `id-token: write`, plus `actions: read` when `--fetch-ci-artifacts`. The GitHub Release is cut inside the command — no separate `create-release` step.
-- `publish-dev` — checkout (`ref:` the workflow_run head SHA; `persist-credentials: false`) + fetch-tags + setup-uv + `publish-dev --run-id <run-id>`, step env `NPM_CONFIG_LOGLEVEL: verbose`. No tags, no releases.
+```yaml
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+```
+
+Superseded runs on the same branch cancel whole; `main` runs queue instead — and `publish-stable`, the one job that must never die mid-release, is only reachable from `main`, where cancel is off (the queue is the publish mutex). A cancelled dev publish is safe by construction: `-dev.<run-id>` prereleases are immutable, create no tags, and the successor run re-points the npm `dev` dist-tag; killing a stale run also kills its `ensure-release-pr` bot tick, which removes the duplicate-PR race. CI jobs (`check`, `mirror`, builds) are gated `if: github.ref != 'refs/heads/main'`; `publish-stable` runs `if: github.event_name == 'push' && github.ref == 'refs/heads/main'`; `publish-dev` and `ensure-release-pr` run on `dev` push.
+
+The needs-chain law: `check` is the root; `publish-dev` needs the DAG sinks of the repo's build jobs; `needs` is transitive, so ancestors are never re-listed. Chaining expensive builds behind `check` matters because `check`'s trailing dry-run fails a broken `release-devkit.yaml` at minute 3 instead of after a 40-minute build that could never ship.
+
+Consumers inline the verbs directly in their `ci-cd.yml` jobs — no composites in this repo, no consumer-local bootstrap action, no vendored checkout. Each verb-owning job owns its checkout and runs `uvx --from release-devkit==${{ env.RELEASE_DEVKIT_VERSION }} <name>` steps (workflow-level `env:`). Any job invoking a ledger-reading verb (`publish-stable` incl. `--dry-run`, `publish-dev`, `ensure-release-pr`, `app-build-version`) checks out with `fetch-depth: 0` + `fetch-tags: true` and no separate fetch step (`fetch-tags` is broken with shallow clones), `persist-credentials: false` everywhere except `publish-stable`, whose credentials must persist for the tag push:
+
+- `check` (every repo) — ledger checkout + setup-uv + the python battery, with `publish-stable --dry-run` as the trailing step (the publish-plan gate). App repos fold `app-build-version --app <name>` into the same job, exporting the version as a job output for the build workflow — no separate `resolve-version` job.
+- `ensure-release-pr` — ledger checkout + setup-uv + `ensure-release-pr`, **no `needs`**: it consumes no CI output, and a standing PR tracking a red dev branch is the accurate state. Job env `GH_TOKEN`.
+- `publish-stable` — checkout (`ref: main`, ledger shape, credentials persisting for the tag push) + setup-uv + `publish-stable [--with-apps] [--fetch-ci-artifacts]`, step env `NPM_CONFIG_LOGLEVEL: verbose` (npm OIDC diagnostics; no-op elsewhere). Job env `GH_TOKEN`, `NUGET_API_KEY`; permissions `contents: write` + `id-token: write`, plus `actions: read` when `--fetch-ci-artifacts`. The GitHub Release is cut inside the command — no separate `create-release` step.
+- `publish-dev` — a normal job in the dev-push run, not a `workflow_run` follow-up: default checkout (the pushed dev SHA, ledger shape) + setup-uv + `publish-dev` with no `--run-id` (the default `GITHUB_RUN_ID` is the correct number), step env `NPM_CONFIG_LOGLEVEL: verbose`. No tags, no releases.
 
 ## The CI-commit-free invariants
 
