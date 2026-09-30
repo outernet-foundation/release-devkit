@@ -1,4 +1,4 @@
-name: app-build-version
+name: get-app-version
 description: Print the version a CI build of an app should stamp
 
 inputs:
@@ -33,7 +33,7 @@ runs:
     - id: version
       shell: bash
       run: >
-        echo "version=$("$RELEASE_DEVKIT_ROOT/.venv/bin/app-build-version"
+        echo "version=$("$RELEASE_DEVKIT_ROOT/.venv/bin/get-app-version"
         --app ${{ inputs.app }})" >> "$GITHUB_OUTPUT"
       env:
         RELEASE_DEVKIT_ROOT: ${{ github.action_path }}/../../..
