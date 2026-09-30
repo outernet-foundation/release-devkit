@@ -251,6 +251,21 @@ wheels = [
 ]
 
 [[package]]
+name = "python-devkit"
+version = "0.1.14"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "bashrun" },
+    { name = "ci-devkit" },
+    { name = "pydantic" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0a/3c/4b64ad57a191fc8f6c1cf7d45619a0cc27e05bc68a1d019f67e61a68a0be/python_devkit-0.1.14.tar.gz", hash = "sha256:0e2d4f4acee43ffb13eb52b03b4f25378d28869864f7e6f4825c936f441dff2f", size = 34183, upload-time = "2026-09-28T23:51:28.654Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/27/7c/c0a7820892b8ba0c889b3ba20f1271f6fb2883b1fd3f846bd49607ad475d/python_devkit-0.1.14-py3-none-any.whl", hash = "sha256:309c7ed1cb6ca8ba831d961cc8725f177c71af2b57083da0a169398535b4dfb8", size = 14261, upload-time = "2026-09-28T23:51:27.769Z" },
+]
+
+[[package]]
 name = "python-dotenv"
 version = "1.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -313,6 +328,7 @@ dependencies = [
 dev = [
     { name = "basedpyright" },
     { name = "pytest" },
+    { name = "python-devkit" },
     { name = "pyyaml" },
     { name = "ruff" },
     { name = "types-pyyaml" },
@@ -334,6 +350,7 @@ requires-dist = [
 dev = [
     { name = "basedpyright", specifier = ">=1.39.10" },
     { name = "pytest", specifier = ">=8.0.0" },
+    { name = "python-devkit", specifier = ">=0.1.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", specifier = ">=0.14.11" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },
