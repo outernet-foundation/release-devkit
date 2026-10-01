@@ -1,0 +1,12 @@
+name: checkout-release-devkit
+description: Check out release-devkit at the commit this action was fetched from
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v5
+      with:
+        repository: ${{ github.action_repository }}
+        ref: ${{ github.action_ref }}
+        path: .release-devkit
+        persist-credentials: false

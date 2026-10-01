@@ -1,22 +1,19 @@
-name: CI/CD
+name: Integrate
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, dev]
   pull_request:
     branches: [dev]
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: integrate-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   preflight:
-    if: github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
