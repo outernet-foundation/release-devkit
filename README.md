@@ -2,24 +2,32 @@
 
 Publication machinery for multi-registry package releases: a per-package git-tag ledger, path-diff change detection, ephemeral version patching, manifest-inferred dependency edges, registry adapters (nuget, npm/UPM, PyPI), and release orchestration — all driven by a declarative, consumer-owned config.
 
-Every consuming repo keeps only a root `release-devkit.yaml` (package identities, paths, version lines, registry mappings, builds shelves) and workflow jobs that check this toolkit out at a pinned commit SHA and invoke its composite actions. See [`AGENTS.md`](./AGENTS.md) for the invariants (CI-commit-free releases, tag-ledger versioning, the `0.0.0+local` dependency sentinel and reference regimes, ephemeral manifest version patching) and the command catalog.
+Every consuming repo keeps only a root `release-devkit.yaml` (package identities, paths, version lines, registry mappings, builds shelves), a one-step wrapper action pinning this toolkit at a full commit SHA, and workflow jobs that invoke its composite actions. See [`AGENTS.md`](./AGENTS.md) for the invariants (CI-commit-free releases, tag-ledger versioning, the `0.0.0+local` dependency sentinel and reference regimes, ephemeral manifest version patching) and the command catalog.
 
 ## Requirements
 
-- Python 3.13+ and [uv](https://docs.astral.sh/uv/) (uv provisions everything; the composite actions run `uv sync` from the checkout's lock)
+- Python 3.13+ and [uv](https://docs.astral.sh/uv/) (uv provisions everything; the composite actions run `uv run --project` against the checkout's lock)
 - At runtime: `git`, `gh`, `dotnet` (nuget publish), `node`/`npm` (npm publish), `uv` (PyPI publish via trusted publishing), `oras` (builds-shelf pulls — auto-provisioned on Linux/Windows)
 
 ## Consuming from another repo
 
-Install nothing and pin a version — release-devkit is **published nowhere**: it is consumed exclusively as a git checkout at a full commit SHA (never a branch or tag — a movable ref reintroduces version float), through the composite actions in this repo. Each verb-owning job checks the toolkit out beside the consumer's own checkout and invokes the action locally, so the action glue and the tool are the same checkout at the same SHA:
+Install nothing and pin a version — release-devkit is **published nowhere**: it is consumed exclusively as a git checkout at a full commit SHA (never a branch or tag — a movable ref reintroduces version float), through the composite actions in this repo. The pin lives in one place per consuming repo — a wrapper action, `.github/actions/checkout-release-devkit/action.yml`, whose single step pins this repo's self-referential `checkout-release-devkit` action (so the checkout fields are versioned by the very commit they fetch). Every verb-owning job runs that wrapper beside the consumer's own checkout and then invokes the verb's action locally, so the action glue and the tool are the same checkout at the same SHA:
 
 ```yaml
-env:
-  RELEASE_DEVKIT_SHA: <full 40-char commit sha>
+# .github/actions/checkout-release-devkit/action.yml — the whole wrapper
+name: checkout-release-devkit
+description: Check out release-devkit at the pinned commit
+runs:
+  using: composite
+  steps:
+    - uses: outernet-foundation/release-devkit/.github/actions/checkout-release-devkit@<full 40-char commit sha>
+```
 
+```yaml
+# a delivery job in .github/workflows/publish.yml
 jobs:
   publish-stable:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -31,17 +39,12 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: actions/checkout@v5
-        with:
-          repository: outernet-foundation/release-devkit
-          ref: ${{ env.RELEASE_DEVKIT_SHA }}
-          path: .release-devkit
-          persist-credentials: false
+      - uses: ./.github/actions/checkout-release-devkit
 
       - uses: ./.release-devkit/.github/actions/publish-stable
 ```
 
-The job owns both checkouts: the consumer repo first (ledger shape — `fetch-depth: 0` + `fetch-tags: true`; on `publish-stable` the default persisting credentials are what the tag push needs), then release-devkit beside it. The action syncs the tool's venv from the checkout's committed `uv.lock`, and self-serves the env it needs (`GH_TOKEN`, `CI_REGISTRY_*`, `NPM_CONFIG_LOGLEVEL`). Available actions: `publish-stable` (inputs `dry-run`, `with-apps`), `publish-dev`, `ensure-release-pr`, and `get-app-version` (input `app`, output `version`) — none of them checks anything out; each assumes the caller already holds the consumer checkout.
+The job owns both checkouts: the consumer repo first (ledger shape — `fetch-depth: 0` + `fetch-tags: true`; on `publish-stable` the default persisting credentials are what the tag push needs), then the wrapper. The action runs the verb as `uv run --project "$GITHUB_WORKSPACE/.release-devkit" --locked --no-dev <verb>` and self-serves the env it needs (`GH_TOKEN`, `CI_REGISTRY_*`). Available actions: `publish-stable` (input `dry-run`), `publish-prerelease`, `ensure-release-pr`, `get-app-version` (input `app`, output `version`), `lint-ci` — none of them checks anything out; each assumes the caller already holds the consumer checkout.
 
 The steps run inside the caller's job, so the OIDC trusted-publishing identity stays the caller's own workflow — PyPI hard-blocks reusable-workflow publishers, which is why the verbs ride composite actions inlined into the caller's workflow rather than a reusable workflow.
 
@@ -54,7 +57,7 @@ workflow bridges the two.
 Then author root `release-devkit.yaml`:
 
 ```yaml
-ci_workflow: my-ci.yml
+ci_workflow: publish.yml
 packages:
   my-api-client:
     path: generated/csharp/api-client/src/MyApiClient
@@ -87,19 +90,19 @@ apps:
 
 Dependencies between packages in one config are **not** authored here: they are inferred from the manifests (package.json dependencies, `[project].dependencies`, csproj `PackageReference`), and same-unit dependencies are authored in those manifests as the sentinel `0.0.0+local` — the concrete sibling version is injected at publish time from the event's ledger. `AGENTS.md` carries the full dependency-edge law and reference regimes.
 
-`ci_workflow` names the CI workflow whose build outputs a release staples (the matched-run lookup key — it disambiguates among the several workflows that run on the release SHA, so it stays explicit). The `builds` section declares the shelf each app's release assets pull from at the matched run: `project`/`platform` compose the shelf address exactly as the push side did (`file` picks the layer when a build pushes several; `name` renames the asset).
+`ci_workflow` names the workflow whose build outputs a release staples (the matched-run lookup key — it disambiguates among the several workflows that run on the release SHA, so it stays explicit; post-split it is `publish.yml`). The `builds` section declares the shelf each app's release assets pull from at the matched run: `project`/`platform` compose the shelf address exactly as the push side did (`file` picks the layer when a build pushes several; `name` renames the asset).
 
 and invoke from a checkout (local runs):
 
 ```bash
 uv run publish-stable --config release-devkit.yaml
-uv run publish-dev --config release-devkit.yaml
+uv run publish-prerelease --config release-devkit.yaml
 uv run create-release --config release-devkit.yaml
 ```
 
 The mapping fields (`packages`, `apps`) may be omitted when empty — an apps-only repo (no registry packages) declares no `packages` key at all.
 
-`publish-dev` is the dev-channel job: it publishes immutable `-dev.<run-id>` prereleases (`X.Y.Z.dev<run-id>` on PyPI) of every changed package on a green push — no git tags, npm `latest` untouched — and prints the exact versions to pin.
+`publish-prerelease` is the dev-channel job: it publishes immutable `-dev.<run-id>` prereleases (`X.Y.Z.dev<run-id>` on PyPI) of every changed package on a green push — no git tags, npm `latest` untouched — and prints the exact versions to pin.
 
 Environment (via pydantic-settings): `GITHUB_WORKSPACE`, `GITHUB_REPOSITORY`, `GITHUB_SHA`, `GITHUB_STEP_SUMMARY`, `GITHUB_OUTPUT`, `GITHUB_RUN_ID`, `NUGET_API_KEY`; builds-shelf pulls authenticate through ci-devkit's neutral chain (`CI_REGISTRY_USERNAME`/`CI_REGISTRY_TOKEN`, or an ambient docker credential config).
 
