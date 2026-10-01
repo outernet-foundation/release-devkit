@@ -70,7 +70,7 @@ class NuGetRegistry:
 
 class NpmRegistry:
     def publish(self, request: PublishRequest) -> None:
-        command = "npm publish --access public --provenance"
+        command = "npm publish --access public --provenance --loglevel verbose"
         if request.dist_tag:
             command += f" --tag {request.dist_tag}"
         with ephemeral_manifest_patch(request.path, request.version, request.dependency_versions):

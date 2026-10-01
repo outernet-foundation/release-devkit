@@ -181,7 +181,7 @@ def test_npm_publish_rides_the_dev_dist_tag(tmp_path: Path, monkeypatch: pytest.
         )
     )
 
-    assert recorder.commands == ["npm publish --access public --provenance --tag dev"]
+    assert recorder.commands == ["npm publish --access public --provenance --loglevel verbose --tag dev"]
     assert json.loads(manifest_path.read_text(encoding="utf-8"))["version"] == "0.0.0-local"
 
 
@@ -194,7 +194,7 @@ def test_npm_publish_without_dist_tag_leaves_latest_alone(tmp_path: Path, monkey
         PublishRequest(path=tmp_path, identity="org.outernet.placeframe", version="0.2.1", dependency_versions={})
     )
 
-    assert recorder.commands == ["npm publish --access public --provenance"]
+    assert recorder.commands == ["npm publish --access public --provenance --loglevel verbose"]
 
 
 class ConflictingCommand:
