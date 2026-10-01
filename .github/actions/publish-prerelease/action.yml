@@ -1,4 +1,4 @@
-name: publish-dev
+name: publish-prerelease
 description: Publish immutable dev-channel prereleases of path-diff-changed packages
 
 runs:
@@ -8,4 +8,4 @@ runs:
       with:
         enable-cache: true
     - shell: bash
-      run: uv run --project "$GITHUB_WORKSPACE/.release-devkit" --locked --no-dev publish-dev
+      run: uv run --project "$GITHUB_WORKSPACE/.release-devkit" --locked --no-dev publish-prerelease
