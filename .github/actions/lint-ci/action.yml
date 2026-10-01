@@ -1,0 +1,11 @@
+name: lint-ci
+description: Run actionlint over workflow files and validate checkout signatures
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+    - shell: bash
+      run: uv run --project "$GITHUB_WORKSPACE/.release-devkit" --locked --no-dev lint-ci
