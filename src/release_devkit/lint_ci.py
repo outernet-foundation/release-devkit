@@ -16,26 +16,22 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 ACTIONLINT_VERSION = "1.7.12"
 CHECKOUT_USES = "actions/checkout@v5"
 DEVKIT_ACTION_PREFIX = "./.release-devkit/.github/actions/"
+DEVKIT_WRAPPER_USES = "./.github/actions/checkout-release-devkit"
+DEVKIT_WRAPPER_PATH = Path(".github/actions/checkout-release-devkit/action.yml")
+DEVKIT_WRAPPER_REF = re.compile(
+    r"^outernet-foundation/release-devkit/\.github/actions/checkout-release-devkit@[0-9a-f]{40}$"
+)
 SNAPSHOT_REF = "${{ github.head_ref || github.ref_name }}"
-DEVKIT_REF = "${{ env.RELEASE_DEVKIT_SHA }}"
-DEVKIT_REPOSITORY = "outernet-foundation/release-devkit"
-DEVKIT_PIN = re.compile(r"^[0-9a-f]{40}$")
+DEFAULT_WORKFLOWS = [Path(".github/workflows/integrate.yml"), Path(".github/workflows/publish.yml")]
 
 CONSUMER_LEDGER = "consumer-ledger"
 CONSUMER_LEDGER_PUSH = "consumer-ledger-push"
 SNAPSHOT = "snapshot"
-HOUSEMATE = "housemate"
 
 SIGNATURES: dict[str, dict[str, object]] = {
     CONSUMER_LEDGER: {"fetch-depth": 0, "fetch-tags": True, "persist-credentials": False},
     CONSUMER_LEDGER_PUSH: {"fetch-depth": 0, "fetch-tags": True},
     SNAPSHOT: {"ref": SNAPSHOT_REF, "persist-credentials": False},
-    HOUSEMATE: {
-        "repository": DEVKIT_REPOSITORY,
-        "ref": DEVKIT_REF,
-        "path": ".release-devkit",
-        "persist-credentials": False,
-    },
 }
 
 PLATFORMS = {
@@ -63,13 +59,16 @@ class VerbStep:
 def main(
     workflows: Annotated[
         list[Path] | None,
-        typer.Option("--workflow", help="Workflow file to signature-validate (repeatable; default ci-cd.yml)"),
+        typer.Option(
+            "--workflow", help="Workflow file to signature-validate (repeatable; default integrate + publish)"
+        ),
     ] = None,
 ) -> None:
-    workflow_paths = workflows or [Path(".github/workflows/ci-cd.yml")]
+    workflow_paths = workflows or DEFAULT_WORKFLOWS
     problems: list[str] = []
     for workflow_path in workflow_paths:
         problems.extend(validate_workflow_file(workflow_path))
+    problems.extend(validate_devkit_wrapper())
     for problem in problems:
         print(problem)
     run_actionlint()
@@ -85,27 +84,42 @@ def is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
+def is_string_mapping(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def validate_devkit_wrapper(path: Path = DEVKIT_WRAPPER_PATH) -> list[str]:
+    if not path.is_file():
+        return [f"{path}: wrapper action not found"]
+    document: object = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not is_mapping(document):
+        return [f"{path}: wrapper is not a YAML mapping"]
+    runs_value = document.get("runs")
+    if not is_mapping(runs_value) or runs_value.get("using") != "composite":
+        return [f"{path}: wrapper must be a composite action"]
+    steps_value = runs_value.get("steps")
+    steps = steps_value if is_object_list(steps_value) else []
+    if len(steps) != 1 or not is_mapping(steps[0]):
+        return [f"{path}: wrapper must contain exactly one step"]
+    uses = steps[0].get("uses")
+    if not isinstance(uses, str) or not DEVKIT_WRAPPER_REF.fullmatch(uses):
+        return [f"{path}: wrapper step must pin {DEVKIT_WRAPPER_REF.pattern}"]
+    return []
+
+
 def validate_workflow_file(path: Path) -> list[str]:
     if not path.is_file():
         return [f"{path}: workflow file not found"]
     document: object = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not is_mapping(document):
         return [f"{path}: workflow is not a YAML mapping"]
-    problems = validate_devkit_pin(document, path)
     jobs_value = document.get("jobs")
     if not is_mapping(jobs_value):
-        return [*problems, f"{path}: no jobs mapping"]
+        return [f"{path}: no jobs mapping"]
+    problems: list[str] = []
     for job_name, job_value in jobs_value.items():
         problems.extend(validate_job(str(job_name), job_value, path))
     return problems
-
-
-def validate_devkit_pin(document: dict[object, object], path: Path) -> list[str]:
-    env_value = document.get("env")
-    pin = env_value.get("RELEASE_DEVKIT_SHA") if is_mapping(env_value) else None
-    if not isinstance(pin, str) or not DEVKIT_PIN.fullmatch(pin):
-        return [f"{path}: env.RELEASE_DEVKIT_SHA must be a full commit SHA at workflow level"]
-    return []
 
 
 def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
@@ -124,16 +138,23 @@ def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
             f"{path}: job '{job_name}': consumer-ledger-push checkout is reserved for real publish-stable jobs"
         )
     first_verb_index = min(verb.step_index for verb in verb_steps)
-    housemates = [step for step in checkout_steps if step.signature == HOUSEMATE and step.step_index < first_verb_index]
-    if not housemates:
-        problems.append(f"{path}: job '{job_name}': no housemate checkout precedes the release-devkit verb")
+    wrapper_indexes = [
+        index
+        for index, step_value in enumerate(steps)
+        if is_mapping(step_value) and step_value.get("uses") == DEVKIT_WRAPPER_USES
+    ]
+    wrappers_before = [index for index in wrapper_indexes if index < first_verb_index]
+    if not wrappers_before:
+        problems.append(f"{path}: job '{job_name}': no {DEVKIT_WRAPPER_USES} step precedes the release-devkit verb")
         return problems
-    earliest_housemate_index = min(step.step_index for step in housemates)
+    earliest_wrapper_index = min(wrappers_before)
     has_consumer = any(
-        step.signature == required_consumer and step.step_index < earliest_housemate_index for step in checkout_steps
+        step.signature == required_consumer and step.step_index < earliest_wrapper_index for step in checkout_steps
     )
     if not has_consumer:
-        problems.append(f"{path}: job '{job_name}': no {required_consumer} checkout precedes the housemate checkout")
+        problems.append(
+            f"{path}: job '{job_name}': no {required_consumer} checkout precedes the checkout-release-devkit step"
+        )
     return problems
 
 
@@ -178,10 +199,6 @@ def collect_checkout_steps(job_name: str, steps: list[object], path: Path) -> tu
         else:
             checkout_steps.append(CheckoutStep(step_index=index, signature=signature))
     return checkout_steps, problems
-
-
-def is_string_mapping(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
 
 
 def run_actionlint() -> None:
