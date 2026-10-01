@@ -17,13 +17,8 @@ runs:
     - uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
-    - shell: bash
-      run: uv sync --locked --no-dev
-      working-directory: ${{ github.action_path }}/../../..
     - id: version
       shell: bash
       run: >
-        echo "version=$("$RELEASE_DEVKIT_ROOT/.venv/bin/get-app-version"
-        --app ${{ inputs.app }})" >> "$GITHUB_OUTPUT"
-      env:
-        RELEASE_DEVKIT_ROOT: ${{ github.action_path }}/../../..
+        echo "version=$(uv run --project "$GITHUB_WORKSPACE/.release-devkit" --locked --no-dev
+        get-app-version --app ${{ inputs.app }})" >> "$GITHUB_OUTPUT"
