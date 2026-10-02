@@ -2,30 +2,31 @@
 
 Publication machinery for multi-registry package releases: a per-package git-tag ledger, path-diff change detection, ephemeral version patching, manifest-inferred dependency edges, registry adapters (nuget, npm/UPM, PyPI), and release orchestration — all driven by a declarative, consumer-owned config.
 
-Every consuming repo keeps only a root `release-devkit.yaml` (package identities, paths, version lines, registry mappings, builds shelves), a one-step wrapper action pinning this toolkit at a full commit SHA, and workflow jobs that invoke its composite actions. See [`AGENTS.md`](./AGENTS.md) for the invariants (CI-commit-free releases, tag-ledger versioning, the `0.0.0+local` dependency sentinel and reference regimes, ephemeral manifest version patching) and the command catalog.
+Every consuming repo keeps only a root `release-devkit.yaml` (package identities, paths, version lines, registry mappings, builds shelves), a two-step setup action pinning this toolkit at a full commit SHA, and workflow jobs whose run steps invoke its verbs. See [`AGENTS.md`](./AGENTS.md) for the invariants (CI-commit-free releases, tag-ledger versioning, the `0.0.0+local` dependency sentinel and reference regimes, ephemeral manifest version patching) and the command catalog.
 
 ## Requirements
 
-- Python 3.13+ and [uv](https://docs.astral.sh/uv/) (uv provisions everything; the composite actions run `uv run --project` against the checkout's lock)
+- Python 3.13+ and [uv](https://docs.astral.sh/uv/) (uv provisions everything; verb run steps execute `uv run --project` against the installed checkout's lock)
 - At runtime: `git`, `gh`, `dotnet` (nuget publish), `node`/`npm` (npm publish), `uv` (PyPI publish via trusted publishing), `oras` (builds-shelf pulls — auto-provisioned on Linux/Windows)
 
 ## Consuming from another repo
 
-Install nothing and pin a version — release-devkit is **published nowhere**: it is consumed exclusively as a git checkout at a full commit SHA (never a branch or tag — a movable ref reintroduces version float), through the composite actions in this repo. The pin lives in one place per consuming repo — a wrapper action, `.github/actions/checkout-release-devkit/action.yml`, whose single step checks this repo out directly. (An earlier design routed the wrapper through a devkit-side "self-versioning" checkout action using `github.action_repository`/`action_ref`; those context values do not rebind through nested composite actions, so the wrapper checked out the wrong repository. The direct checkout is the fix — one step, one SHA mention.) Every verb-owning job runs that wrapper beside the consumer's own checkout and then invokes the verb's action locally, so the action glue and the tool are the same checkout at the same SHA:
+Install nothing and pin a version — release-devkit is **published nowhere**: it is consumed exclusively as a git clone at a full commit SHA (never a branch or tag — a movable ref reintroduces version float), installed onto the runner machine by a per-consumer setup action. The pin lives in one place per consuming repo — `.github/actions/setup-release-devkit/action.yml` — whose first step installs uv and whose second is a tokenless `git clone` of the public repo into `$RUNNER_TEMP/release-devkit` with `git checkout` of the pinned SHA. The install location keeps the devkit out of the consumer's workspace (the consumer's own linters never scan devkit code) and matches where the runner already puts its tooling. Every verb-owning job runs that wrapper after the consumer's own checkout and then invokes verbs as plain run steps:
 
 ```yaml
-# .github/actions/checkout-release-devkit/action.yml — the whole wrapper
-name: checkout-release-devkit
-description: Check out release-devkit at the pinned commit
+# .github/actions/setup-release-devkit/action.yml — the whole wrapper
+name: setup-release-devkit
+description: Install release-devkit at the pinned commit into RUNNER_TEMP
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v5
+    - uses: astral-sh/setup-uv@v7
       with:
-        repository: outernet-foundation/release-devkit
-        ref: <full 40-char commit sha>
-        path: .release-devkit
-        persist-credentials: false
+        enable-cache: true
+    - shell: bash
+      run: >
+        git clone https://github.com/outernet-foundation/release-devkit.git "$RUNNER_TEMP/release-devkit"
+        && git -C "$RUNNER_TEMP/release-devkit" checkout <full 40-char commit sha>
 ```
 
 ```yaml
@@ -44,14 +45,19 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: ./.github/actions/checkout-release-devkit
+      - uses: ./.github/actions/setup-release-devkit
 
-      - uses: ./.release-devkit/.github/actions/publish-stable
+      - name: publish-stable
+        run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev publish-stable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_REGISTRY_USERNAME: ${{ github.actor }}
+          CI_REGISTRY_TOKEN: ${{ github.token }}
 ```
 
-The job owns both checkouts: the consumer repo first (ledger shape — `fetch-depth: 0` + `fetch-tags: true`; on `publish-stable` the default persisting credentials are what the tag push needs), then the wrapper. The action runs the verb as `uv run --project "$GITHUB_WORKSPACE/.release-devkit" --locked --no-dev <verb>` and self-serves the env it needs (`GH_TOKEN`, `CI_REGISTRY_*`). Available actions: `publish-stable` (input `dry-run`), `publish-prerelease`, `ensure-release-pr`, `get-app-version` (input `app`, output `version`), `lint-ci` — none of them checks anything out; each assumes the caller already holds the consumer checkout.
+The job owns its own checkout (ledger shape — `fetch-depth: 0` + `fetch-tags: true`; on `publish-stable` the default persisting credentials are what the tag push needs), then the wrapper installs the tool. Each verb is one run step — `uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev <verb>` from the consumer root, with the env that verb needs spelled in the step (`GH_TOKEN`, `CI_REGISTRY_USERNAME`/`CI_REGISTRY_TOKEN`). Verbs: `publish-stable` (flag `--dry-run`), `publish-prerelease`, `ensure-release-pr` (env `GH_TOKEN`), `get-app-version` (flag `--app <name>`; export via the step output you wrap around it), `lint-ci`. `lint-ci` validates the wrapper shape, the invocation spellings, and the checkout/ordering contract mechanically.
 
-The steps run inside the caller's job, so the OIDC trusted-publishing identity stays the caller's own workflow — PyPI hard-blocks reusable-workflow publishers, which is why the verbs ride composite actions inlined into the caller's workflow rather than a reusable workflow.
+The run steps execute inside the caller's job, so the OIDC trusted-publishing identity stays the caller's own workflow — PyPI hard-blocks reusable-workflow publishers, which is why the verbs are plain run steps in the caller's workflow rather than a reusable workflow.
 
 Build tooling consumes the same ledger at build time: `get-app-version --app <name>` prints the
 version a CI build of an app should stamp — `{next_version}+{run}`, the run number coming from
