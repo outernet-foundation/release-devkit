@@ -18,9 +18,8 @@ CHECKOUT_USES = "actions/checkout@v5"
 DEVKIT_ACTION_PREFIX = "./.release-devkit/.github/actions/"
 DEVKIT_WRAPPER_USES = "./.github/actions/checkout-release-devkit"
 DEVKIT_WRAPPER_PATH = Path(".github/actions/checkout-release-devkit/action.yml")
-DEVKIT_WRAPPER_REF = re.compile(
-    r"^outernet-foundation/release-devkit/\.github/actions/checkout-release-devkit@[0-9a-f]{40}$"
-)
+DEVKIT_REPOSITORY = "outernet-foundation/release-devkit"
+DEVKIT_WRAPPER_REF = re.compile(r"^[0-9a-f]{40}$")
 SNAPSHOT_REF = "${{ github.head_ref || github.ref_name }}"
 DEFAULT_WORKFLOWS = [Path(".github/workflows/integrate.yml"), Path(".github/workflows/publish.yml")]
 
@@ -101,10 +100,22 @@ def validate_devkit_wrapper(path: Path = DEVKIT_WRAPPER_PATH) -> list[str]:
     steps = steps_value if is_object_list(steps_value) else []
     if len(steps) != 1 or not is_mapping(steps[0]):
         return [f"{path}: wrapper must contain exactly one step"]
-    uses = steps[0].get("uses")
-    if not isinstance(uses, str) or not DEVKIT_WRAPPER_REF.fullmatch(uses):
-        return [f"{path}: wrapper step must pin {DEVKIT_WRAPPER_REF.pattern}"]
-    return []
+    if steps[0].get("uses") != CHECKOUT_USES:
+        return [f"{path}: wrapper step must be {CHECKOUT_USES}"]
+    with_value = steps[0].get("with")
+    if not is_mapping(with_value):
+        return [f"{path}: wrapper step must carry a with block"]
+    problems: list[str] = []
+    if with_value.get("repository") != DEVKIT_REPOSITORY:
+        problems.append(f"{path}: wrapper must check out {DEVKIT_REPOSITORY}")
+    ref = with_value.get("ref")
+    if not isinstance(ref, str) or not DEVKIT_WRAPPER_REF.fullmatch(ref):
+        problems.append(f"{path}: wrapper ref must be a 40-hex release-devkit commit")
+    if with_value.get("path") != ".release-devkit":
+        problems.append(f"{path}: wrapper must check out into .release-devkit")
+    if with_value.get("persist-credentials") is not False:
+        problems.append(f"{path}: wrapper must set persist-credentials: false")
+    return problems
 
 
 def validate_workflow_file(path: Path) -> list[str]:

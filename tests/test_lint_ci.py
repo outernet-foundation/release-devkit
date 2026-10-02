@@ -113,7 +113,12 @@ def write_wrapper(tmp_path: Path, steps: str) -> Path:
 
 
 VALID_WRAPPER_STEP = (
-    "    - uses: outernet-foundation/release-devkit/.github/actions/checkout-release-devkit@" + "a" * 40 + "\n"
+    "    - uses: actions/checkout@v5\n"
+    "      with:\n"
+    "        repository: outernet-foundation/release-devkit\n"
+    f"        ref: {'a' * 40}\n"
+    "        path: .release-devkit\n"
+    "        persist-credentials: false\n"
 )
 
 
@@ -122,15 +127,15 @@ def test_valid_wrapper_passes(tmp_path: Path) -> None:
 
 
 def test_wrapper_rejects_short_sha(tmp_path: Path) -> None:
-    steps = "    - uses: outernet-foundation/release-devkit/.github/actions/checkout-release-devkit@4712f1e\n"
+    steps = VALID_WRAPPER_STEP.replace("a" * 40, "4712f1e")
     problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any("must pin" in problem for problem in problems)
+    assert any("40-hex" in problem for problem in problems)
 
 
 def test_wrapper_rejects_mutable_ref(tmp_path: Path) -> None:
-    steps = "    - uses: outernet-foundation/release-devkit/.github/actions/checkout-release-devkit@main\n"
+    steps = VALID_WRAPPER_STEP.replace("a" * 40, "main")
     problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any("must pin" in problem for problem in problems)
+    assert any("40-hex" in problem for problem in problems)
 
 
 def test_wrapper_rejects_extra_steps(tmp_path: Path) -> None:
@@ -140,6 +145,24 @@ def test_wrapper_rejects_extra_steps(tmp_path: Path) -> None:
 
 
 def test_wrapper_rejects_wrong_repository(tmp_path: Path) -> None:
-    steps = "    - uses: someone-else/release-devkit/.github/actions/checkout-release-devkit@" + "a" * 40 + "\n"
+    steps = VALID_WRAPPER_STEP.replace("outernet-foundation/release-devkit", "someone-else/release-devkit")
     problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any("must pin" in problem for problem in problems)
+    assert any("must check out outernet-foundation/release-devkit" in problem for problem in problems)
+
+
+def test_wrapper_rejects_missing_with_block(tmp_path: Path) -> None:
+    steps = "    - uses: actions/checkout@v5\n"
+    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
+    assert any("with block" in problem for problem in problems)
+
+
+def test_wrapper_rejects_wrong_path(tmp_path: Path) -> None:
+    steps = VALID_WRAPPER_STEP.replace("path: .release-devkit", "path: .devkit")
+    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
+    assert any("check out into .release-devkit" in problem for problem in problems)
+
+
+def test_wrapper_rejects_persisted_credentials(tmp_path: Path) -> None:
+    steps = VALID_WRAPPER_STEP.replace("persist-credentials: false", "persist-credentials: true")
+    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
+    assert any("persist-credentials" in problem for problem in problems)
