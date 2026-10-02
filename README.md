@@ -11,7 +11,7 @@ Every consuming repo keeps only a root `release-devkit.yaml` (package identities
 
 ## Consuming from another repo
 
-Install nothing and pin a version — release-devkit is **published nowhere**: it is consumed exclusively as a git checkout at a full commit SHA (never a branch or tag — a movable ref reintroduces version float), through the composite actions in this repo. The pin lives in one place per consuming repo — a wrapper action, `.github/actions/checkout-release-devkit/action.yml`, whose single step pins this repo's self-referential `checkout-release-devkit` action (so the checkout fields are versioned by the very commit they fetch). Every verb-owning job runs that wrapper beside the consumer's own checkout and then invokes the verb's action locally, so the action glue and the tool are the same checkout at the same SHA:
+Install nothing and pin a version — release-devkit is **published nowhere**: it is consumed exclusively as a git checkout at a full commit SHA (never a branch or tag — a movable ref reintroduces version float), through the composite actions in this repo. The pin lives in one place per consuming repo — a wrapper action, `.github/actions/checkout-release-devkit/action.yml`, whose single step checks this repo out directly. (An earlier design routed the wrapper through a devkit-side "self-versioning" checkout action using `github.action_repository`/`action_ref`; those context values do not rebind through nested composite actions, so the wrapper checked out the wrong repository. The direct checkout is the fix — one step, one SHA mention.) Every verb-owning job runs that wrapper beside the consumer's own checkout and then invokes the verb's action locally, so the action glue and the tool are the same checkout at the same SHA:
 
 ```yaml
 # .github/actions/checkout-release-devkit/action.yml — the whole wrapper
@@ -20,7 +20,12 @@ description: Check out release-devkit at the pinned commit
 runs:
   using: composite
   steps:
-    - uses: outernet-foundation/release-devkit/.github/actions/checkout-release-devkit@<full 40-char commit sha>
+    - uses: actions/checkout@v5
+      with:
+        repository: outernet-foundation/release-devkit
+        ref: <full 40-char commit sha>
+        path: .release-devkit
+        persist-credentials: false
 ```
 
 ```yaml
