@@ -190,7 +190,7 @@ def test_repo_release_devkit_yaml_loads() -> None:
 
     assert config.packages == {}
     assert config.apps == {}
-    assert config.ci_workflow == "ci-cd.yml"
+    assert config.ci_workflow == "integrate.yml"
 
 
 def test_load_config_rejects_duplicate_keys(tmp_path: Path):

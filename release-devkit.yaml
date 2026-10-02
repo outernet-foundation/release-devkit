@@ -1,1 +1,1 @@
-ci_workflow: ci-cd.yml
+ci_workflow: integrate.yml

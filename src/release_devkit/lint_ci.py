@@ -15,13 +15,16 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 ACTIONLINT_VERSION = "1.7.12"
 CHECKOUT_USES = "actions/checkout@v5"
-DEVKIT_ACTION_PREFIX = "./.release-devkit/.github/actions/"
-DEVKIT_WRAPPER_USES = "./.github/actions/checkout-release-devkit"
-DEVKIT_WRAPPER_PATH = Path(".github/actions/checkout-release-devkit/action.yml")
+DEVKIT_WRAPPER_USES = "./.github/actions/setup-release-devkit"
+DEVKIT_WRAPPER_PATH = Path(".github/actions/setup-release-devkit/action.yml")
 DEVKIT_REPOSITORY = "outernet-foundation/release-devkit"
-DEVKIT_WRAPPER_REF = re.compile(r"^[0-9a-f]{40}$")
+DEVKIT_INSTALL_PATH = "$RUNNER_TEMP/release-devkit"
+DEVKIT_INVOCATION_PREFIX = f'uv run --project "{DEVKIT_INSTALL_PATH}" --locked --no-dev '
+SETUP_UV_USES = "astral-sh/setup-uv@v7"
 SNAPSHOT_REF = "${{ github.head_ref || github.ref_name }}"
 DEFAULT_WORKFLOWS = [Path(".github/workflows/integrate.yml"), Path(".github/workflows/publish.yml")]
+
+DEAD_USES_PREFIXES = ("./.release-devkit/", "./.github/actions/checkout-release-devkit")
 
 CONSUMER_LEDGER = "consumer-ledger"
 CONSUMER_LEDGER_PUSH = "consumer-ledger-push"
@@ -31,6 +34,32 @@ SIGNATURES: dict[str, dict[str, object]] = {
     CONSUMER_LEDGER: {"fetch-depth": 0, "fetch-tags": True, "persist-credentials": False},
     CONSUMER_LEDGER_PUSH: {"fetch-depth": 0, "fetch-tags": True},
     SNAPSHOT: {"ref": SNAPSHOT_REF, "persist-credentials": False},
+}
+
+WRAPPER_CLONE = re.compile(
+    r"^git clone https://github\.com/outernet-foundation/release-devkit\.git"
+    r' "\$RUNNER_TEMP/release-devkit"'
+    r' && git -C "\$RUNNER_TEMP/release-devkit" checkout [0-9a-f]{40}$'
+)
+DEVKIT_INVOCATION = re.compile(
+    re.escape(DEVKIT_INVOCATION_PREFIX)
+    + r"(?P<verb>get-app-version|publish-stable|publish-prerelease|ensure-release-pr|lint-ci)"
+    + r'(?P<args>(?: [^)"]*)?)'
+)
+VERB_ARGS: dict[str, re.Pattern[str]] = {
+    "get-app-version": re.compile(r"^ --app \S+$"),
+    "publish-stable": re.compile(r"^( --dry-run)?$"),
+    "publish-prerelease": re.compile(r"^$"),
+    "ensure-release-pr": re.compile(r"^$"),
+    "lint-ci": re.compile(r"^$"),
+}
+VERB_ENV: dict[str, dict[str, str]] = {
+    "publish-stable": {
+        "GH_TOKEN": "${{ github.token }}",
+        "CI_REGISTRY_USERNAME": "${{ github.actor }}",
+        "CI_REGISTRY_TOKEN": "${{ github.token }}",
+    },
+    "ensure-release-pr": {"GH_TOKEN": "${{ github.token }}"},
 }
 
 PLATFORMS = {
@@ -98,23 +127,22 @@ def validate_devkit_wrapper(path: Path = DEVKIT_WRAPPER_PATH) -> list[str]:
         return [f"{path}: wrapper must be a composite action"]
     steps_value = runs_value.get("steps")
     steps = steps_value if is_object_list(steps_value) else []
-    if len(steps) != 1 or not is_mapping(steps[0]):
-        return [f"{path}: wrapper must contain exactly one step"]
-    if steps[0].get("uses") != CHECKOUT_USES:
-        return [f"{path}: wrapper step must be {CHECKOUT_USES}"]
-    with_value = steps[0].get("with")
-    if not is_mapping(with_value):
-        return [f"{path}: wrapper step must carry a with block"]
+    if len(steps) != 2 or not is_mapping(steps[0]) or not is_mapping(steps[1]):
+        return [f"{path}: wrapper must contain exactly two steps (setup-uv, clone)"]
     problems: list[str] = []
-    if with_value.get("repository") != DEVKIT_REPOSITORY:
-        problems.append(f"{path}: wrapper must check out {DEVKIT_REPOSITORY}")
-    ref = with_value.get("ref")
-    if not isinstance(ref, str) or not DEVKIT_WRAPPER_REF.fullmatch(ref):
-        problems.append(f"{path}: wrapper ref must be a 40-hex release-devkit commit")
-    if with_value.get("path") != ".release-devkit":
-        problems.append(f"{path}: wrapper must check out into .release-devkit")
-    if with_value.get("persist-credentials") is not False:
-        problems.append(f"{path}: wrapper must set persist-credentials: false")
+    if steps[0].get("uses") != SETUP_UV_USES:
+        problems.append(f"{path}: wrapper first step must be {SETUP_UV_USES}")
+    with_value = steps[0].get("with")
+    if not is_mapping(with_value) or with_value.get("enable-cache") is not True:
+        problems.append(f"{path}: wrapper first step must set enable-cache: true")
+    if steps[1].get("shell") != "bash":
+        problems.append(f"{path}: wrapper second step must set shell: bash")
+    run_value = steps[1].get("run")
+    if not isinstance(run_value, str) or not WRAPPER_CLONE.fullmatch(run_value.strip()):
+        problems.append(
+            f"{path}: wrapper second step must clone {DEVKIT_REPOSITORY} into {DEVKIT_INSTALL_PATH}"
+            " and checkout the pinned commit"
+        )
     return problems
 
 
@@ -139,7 +167,9 @@ def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
     steps_value = job_value.get("steps")
     steps = steps_value if is_object_list(steps_value) else []
     checkout_steps, problems = collect_checkout_steps(job_name, steps, path)
-    verb_steps = collect_verb_steps(steps)
+    verb_steps, verb_problems = collect_verb_steps(job_name, steps, path)
+    problems.extend(verb_problems)
+    problems.extend(collect_dead_uses(job_name, steps, path))
     if not verb_steps:
         return problems
     is_real_publish = any(verb.name == "publish-stable" and not verb.dry_run for verb in verb_steps)
@@ -164,25 +194,65 @@ def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
     )
     if not has_consumer:
         problems.append(
-            f"{path}: job '{job_name}': no {required_consumer} checkout precedes the checkout-release-devkit step"
+            f"{path}: job '{job_name}': no {required_consumer} checkout precedes the setup-release-devkit step"
         )
     return problems
 
 
-def collect_verb_steps(steps: list[object]) -> list[VerbStep]:
-    verb_steps: list[VerbStep] = []
+def collect_dead_uses(job_name: str, steps: list[object], path: Path) -> list[str]:
+    problems: list[str] = []
     for index, step_value in enumerate(steps):
         if not is_mapping(step_value):
             continue
         uses_value = step_value.get("uses")
-        if not (isinstance(uses_value, str) and uses_value.startswith(DEVKIT_ACTION_PREFIX)):
+        if isinstance(uses_value, str) and uses_value.startswith(DEAD_USES_PREFIXES):
+            problems.append(
+                f"{path}: job '{job_name}' step {index}: {uses_value} is the dead composite-action model;"
+                " verbs are plain run steps against $RUNNER_TEMP/release-devkit"
+            )
+    return problems
+
+
+def collect_verb_steps(job_name: str, steps: list[object], path: Path) -> tuple[list[VerbStep], list[str]]:
+    verb_steps: list[VerbStep] = []
+    problems: list[str] = []
+    for index, step_value in enumerate(steps):
+        if not is_mapping(step_value):
             continue
-        with_value = step_value.get("with")
-        dry_run = is_mapping(with_value) and with_value.get("dry-run") is True
-        verb_steps.append(
-            VerbStep(step_index=index, name=uses_value.removeprefix(DEVKIT_ACTION_PREFIX), dry_run=dry_run)
-        )
-    return verb_steps
+        run_value = step_value.get("run")
+        if not isinstance(run_value, str) or DEVKIT_INSTALL_PATH not in run_value:
+            continue
+        prefix_count = run_value.count(DEVKIT_INVOCATION_PREFIX)
+        matches = list(DEVKIT_INVOCATION.finditer(run_value))
+        if not prefix_count or len(matches) != prefix_count:
+            problems.append(
+                f"{path}: job '{job_name}' step {index}: mentions {DEVKIT_INSTALL_PATH}"
+                f" without a canonical {DEVKIT_INVOCATION_PREFIX.strip()}<verb> invocation"
+            )
+            continue
+        for match in matches:
+            verb = match.group("verb")
+            args = match.group("args")
+            if not VERB_ARGS[verb].fullmatch(args):
+                problems.append(
+                    f"{path}: job '{job_name}' step {index}: {verb} carries rejected arguments ({args.strip()})"
+                )
+                continue
+            problems.extend(validate_verb_env(job_name, index, verb, step_value, path))
+            verb_steps.append(VerbStep(step_index=index, name=verb, dry_run=args == " --dry-run"))
+    return verb_steps, problems
+
+
+def validate_verb_env(
+    job_name: str, step_index: int, verb: str, step_value: dict[object, object], path: Path
+) -> list[str]:
+    problems: list[str] = []
+    env_value = step_value.get("env")
+    env: dict[object, object] = env_value if is_mapping(env_value) else {}
+    for key, value in VERB_ENV.get(verb, {}).items():
+        if env.get(key) != value:
+            problems.append(f"{path}: job '{job_name}' step {step_index}: {verb} requires env {key}: {value}")
+    return problems
 
 
 def collect_checkout_steps(job_name: str, steps: list[object], path: Path) -> tuple[list[CheckoutStep], list[str]]:
