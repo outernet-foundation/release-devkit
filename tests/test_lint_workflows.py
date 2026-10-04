@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from release_devkit.lint_ci import validate_devkit_wrapper, validate_workflow_file
+from release_devkit.lint_workflows import validate_devkit_wrapper, validate_workflow_file
 
 
-def write_workflow(tmp_path: Path, text: str) -> Path:
-    workflow_path = tmp_path / "integrate.yml"
+def write_workflow(tmp_path: Path, text: str, name: str = "integrate.yml") -> Path:
+    workflow_path = tmp_path / name
     workflow_path.write_text(text, encoding="utf-8")
     return workflow_path
 
@@ -33,16 +33,16 @@ GET_APP_VERSION_RUN = (
     ' --locked --no-dev get-app-version --app capture-tool)" >> "$GITHUB_OUTPUT"\n'
 )
 
-LINT_CI_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-ci\n'
+LINT_CI_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
 
 PUBLISH_PRERELEASE_RUN = (
     '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev publish-prerelease\n'
 )
 
-PUBLISH_STABLE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev publish-stable\n'
+PUBLISH_STABLE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release\n'
 
 PUBLISH_STABLE_DRY_RUN = (
-    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev publish-stable --dry-run\n'
+    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release --dry-run\n'
 )
 
 PUBLISH_STABLE_ENV = (
@@ -50,6 +50,30 @@ PUBLISH_STABLE_ENV = (
     "          GH_TOKEN: ${{ github.token }}\n"
     "          CI_REGISTRY_USERNAME: ${{ github.actor }}\n"
     "          CI_REGISTRY_TOKEN: ${{ github.token }}\n"
+)
+
+MERGE_BOT_CHECKOUT_BLOCK = (
+    "      - uses: actions/checkout@v5\n"
+    "        with:\n"
+    "          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}\n"
+    "          fetch-depth: 0\n"
+    "          persist-credentials: false\n"
+)
+
+MINT_STEP = (
+    "      - uses: actions/create-github-app-token@v3\n"
+    "        id: mint\n"
+    "        with:\n"
+    "          app-id: ${{ vars.MERGE_BOT_APP_ID }}\n"
+    "          private-key: ${{ secrets.MERGE_BOT_APP_PRIVATE_KEY }}\n"
+)
+
+MERGE_GATE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev merge-gate\n'
+
+MERGE_GATE_ENV = (
+    "        env:\n"
+    "          GH_TOKEN: ${{ steps.mint.outputs.token }}\n"
+    "          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}\n"
 )
 
 
@@ -80,12 +104,12 @@ def test_bare_checkout_is_rejected(tmp_path: Path) -> None:
 
 
 def test_publish_stable_requires_persisting_consumer_checkout(tmp_path: Path) -> None:
-    jobs = f"  publish-stable:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_RUN}{PUBLISH_STABLE_ENV}"
+    jobs = f"  release:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_RUN}{PUBLISH_STABLE_ENV}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("consumer-ledger-push" in problem for problem in problems)
 
     good_jobs = (
-        f"  publish-stable:\n    steps:{CONSUMER_LEDGER_PUSH_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_RUN}"
+        f"  release:\n    steps:{CONSUMER_LEDGER_PUSH_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_RUN}"
         f"{PUBLISH_STABLE_ENV}"
     )
     assert validate_workflow_file(write_workflow(tmp_path, workflow(good_jobs))) == []
@@ -99,7 +123,7 @@ def test_preflight_dry_run_uses_plain_consumer_ledger(tmp_path: Path) -> None:
 def test_push_signature_reserved_for_real_publish_stable(tmp_path: Path) -> None:
     jobs = f"  publish-prerelease:\n    steps:{CONSUMER_LEDGER_PUSH_BLOCK}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
-    assert any("reserved for real publish-stable" in problem for problem in problems)
+    assert any("reserved for real release" in problem for problem in problems)
 
 
 def test_verb_job_requires_wrapper_before_the_verb(tmp_path: Path) -> None:
@@ -115,15 +139,15 @@ def test_consumer_checkout_must_precede_wrapper(tmp_path: Path) -> None:
 
 
 def test_publish_stable_requires_canonical_env(tmp_path: Path) -> None:
-    jobs = f"  publish-stable:\n    steps:{CONSUMER_LEDGER_PUSH_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_RUN}"
+    jobs = f"  release:\n    steps:{CONSUMER_LEDGER_PUSH_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_RUN}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
-    assert any("publish-stable requires env GH_TOKEN" in problem for problem in problems)
-    assert any("publish-stable requires env CI_REGISTRY_USERNAME" in problem for problem in problems)
-    assert any("publish-stable requires env CI_REGISTRY_TOKEN" in problem for problem in problems)
+    assert any("release requires env GH_TOKEN" in problem for problem in problems)
+    assert any("release requires env CI_REGISTRY_USERNAME" in problem for problem in problems)
+    assert any("release requires env CI_REGISTRY_TOKEN" in problem for problem in problems)
 
 
 def test_directory_invocation_is_rejected(tmp_path: Path) -> None:
-    step = '      - run: uv run --directory "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-ci\n'
+    step = '      - run: uv run --directory "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
     jobs = f"  preflight:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("without a canonical" in problem for problem in problems)
@@ -137,7 +161,7 @@ def test_unknown_verb_is_rejected(tmp_path: Path) -> None:
 
 
 def test_unlocked_invocation_is_rejected(tmp_path: Path) -> None:
-    step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --no-dev lint-ci\n'
+    step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --no-dev lint-workflows\n'
     jobs = f"  preflight:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("without a canonical" in problem for problem in problems)
@@ -188,6 +212,150 @@ def test_checkout_major_pin_is_enforced(tmp_path: Path) -> None:
 def test_missing_workflow_file_reports_problem(tmp_path: Path) -> None:
     problems = validate_workflow_file(tmp_path / "absent.yml")
     assert any("not found" in problem for problem in problems)
+
+
+def merge_gate_document(steps: str) -> str:
+    return (
+        "name: Merge gate\n"
+        "on:\n"
+        "  pull_request:\n"
+        "    branches: [dev]\n"
+        "    types: [labeled]\n"
+        "  workflow_run:\n"
+        "    workflows: [Integrate]\n"
+        "    types: [completed]\n"
+        "concurrency:\n"
+        "  group: merge-gate-${{ github.event.pull_request.number || github.event.workflow_run.head_branch }}\n"
+        "jobs:\n"
+        "  merge-gate:\n"
+        "    if: github.event.label.name == 'ready-to-merge' || (github.event_name == 'workflow_run'"
+        " && github.event.workflow_run.conclusion == 'success')\n"
+        f"    steps:\n{steps}"
+    )
+
+
+def test_valid_merge_gate_job_has_no_problems(tmp_path: Path) -> None:
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
+    assert validate_workflow_file(path) == []
+
+
+def test_merge_gate_requires_merge_bot_checkout(tmp_path: Path) -> None:
+    steps = f"{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("no merge-bot checkout precedes" in problem for problem in problems)
+
+
+def test_merge_bot_checkout_reserved_for_merge_gate_jobs(tmp_path: Path) -> None:
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
+    jobs = f"jobs:\n  publish-prerelease:\n    steps:\n{steps}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("merge-bot checkout is reserved" in problem for problem in problems)
+
+
+def test_merge_gate_requires_canonical_mint_step(tmp_path: Path) -> None:
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("requires a canonical actions/create-github-app-token@v3 mint step" in problem for problem in problems)
+
+
+def test_merge_gate_rejects_non_canonical_mint_inputs(tmp_path: Path) -> None:
+    renamed_app_step = MINT_STEP.replace("app-id: ${{ vars.MERGE_BOT_APP_ID }}", "app-id: 123456")
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{renamed_app_step}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("canonical mint step" in problem for problem in problems)
+
+
+def test_merge_gate_requires_minted_token_env(tmp_path: Path) -> None:
+    wrong_env = MERGE_GATE_ENV.replace("${{ steps.mint.outputs.token }}", "${{ github.token }}")
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{wrong_env}"
+    path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("merge-gate requires env GH_TOKEN" in problem for problem in problems)
+
+
+def test_merge_gate_requires_the_dispatch_head_sha_env(tmp_path: Path) -> None:
+    missing_env = MERGE_GATE_ENV.replace("          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}\n", "")
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{missing_env}"
+    path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("merge-gate requires env HEAD_SHA" in problem for problem in problems)
+
+
+def test_merge_gate_requires_head_sha_env(tmp_path: Path) -> None:
+    missing_env = MERGE_GATE_ENV.replace("          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}\n", "")
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{missing_env}"
+    path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("merge-gate requires env HEAD_SHA" in problem for problem in problems)
+
+
+def test_merge_gate_workflow_requires_labeled_trigger_only(tmp_path: Path) -> None:
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    document = merge_gate_document(steps).replace("    types: [labeled]\n", "    types: [labeled, opened]\n")
+    path = write_workflow(tmp_path, document, name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("must trigger on pull_request to dev" in problem for problem in problems)
+
+
+def test_merge_gate_workflow_requires_dev_branch_scope(tmp_path: Path) -> None:
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    document = merge_gate_document(steps).replace("    branches: [dev]\n", "")
+    path = write_workflow(tmp_path, document, name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("must trigger on pull_request to dev" in problem for problem in problems)
+
+
+def test_merge_gate_workflow_requires_workflow_run_wake(tmp_path: Path) -> None:
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    document = merge_gate_document(steps).replace(
+        "  workflow_run:\n    workflows: [Integrate]\n    types: [completed]\n", ""
+    )
+    path = write_workflow(tmp_path, document, name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("must trigger on workflow_run from Integrate" in problem for problem in problems)
+
+
+def test_merge_gate_workflow_pins_the_integrate_workflow_name(tmp_path: Path) -> None:
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    document = merge_gate_document(steps).replace("workflows: [Integrate]", "workflows: [CI]")
+    path = write_workflow(tmp_path, document, name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("must trigger on workflow_run from Integrate" in problem for problem in problems)
+
+
+def test_merge_gate_workflow_requires_the_per_pr_concurrency_group(tmp_path: Path) -> None:
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    document = merge_gate_document(steps).replace(
+        "group: merge-gate-${{ github.event.pull_request.number || github.event.workflow_run.head_branch }}",
+        "group: merge-gate",
+    )
+    path = write_workflow(tmp_path, document, name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("concurrency group must be" in problem for problem in problems)
+
+
+def test_merge_gate_workflow_refuses_cancel_in_progress(tmp_path: Path) -> None:
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    document = merge_gate_document(steps).replace("head_branch }}\n", "head_branch }}\n  cancel-in-progress: true\n")
+    path = write_workflow(tmp_path, document, name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("cancel-in-progress" in problem for problem in problems)
+
+
+def test_merge_gate_workflow_jobs_require_the_dual_wake_gate(tmp_path: Path) -> None:
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    document = merge_gate_document(steps).replace(
+        "    if: github.event.label.name == 'ready-to-merge' || (github.event_name == 'workflow_run'"
+        " && github.event.workflow_run.conclusion == 'success')\n",
+        "",
+    )
+    path = write_workflow(tmp_path, document, name="merge-gate.yml")
+    problems = validate_workflow_file(path)
+    assert any("must gate on" in problem for problem in problems)
 
 
 def write_wrapper(tmp_path: Path, steps: str) -> Path:

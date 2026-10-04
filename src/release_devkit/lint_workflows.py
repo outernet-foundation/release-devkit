@@ -22,18 +22,35 @@ DEVKIT_INSTALL_PATH = "$RUNNER_TEMP/release-devkit"
 DEVKIT_INVOCATION_PREFIX = f'uv run --project "{DEVKIT_INSTALL_PATH}" --locked --no-dev '
 SETUP_UV_USES = "astral-sh/setup-uv@v7"
 SNAPSHOT_REF = "${{ github.head_ref || github.ref_name }}"
-DEFAULT_WORKFLOWS = [Path(".github/workflows/integrate.yml"), Path(".github/workflows/publish.yml")]
+MERGE_BOT_REF = "${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}"
+MERGE_GATE_JOB_IF = (
+    "github.event.label.name == 'ready-to-merge'"
+    " || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')"
+)
+MERGE_GATE_CONCURRENCY = "merge-gate-${{ github.event.pull_request.number || github.event.workflow_run.head_branch }}"
+MINT_STEP_USES = "actions/create-github-app-token@v3"
+MINT_STEP_INPUTS = {
+    "app-id": "${{ vars.MERGE_BOT_APP_ID }}",
+    "private-key": "${{ secrets.MERGE_BOT_APP_PRIVATE_KEY }}",
+}
+DEFAULT_WORKFLOWS = [
+    Path(".github/workflows/integrate.yml"),
+    Path(".github/workflows/release.yml"),
+    Path(".github/workflows/merge-gate.yml"),
+]
 
 DEAD_USES_PREFIXES = ("./.release-devkit/", "./.github/actions/checkout-release-devkit")
 
 CONSUMER_LEDGER = "consumer-ledger"
 CONSUMER_LEDGER_PUSH = "consumer-ledger-push"
 SNAPSHOT = "snapshot"
+MERGE_BOT = "merge-bot"
 
 SIGNATURES: dict[str, dict[str, object]] = {
     CONSUMER_LEDGER: {"fetch-depth": 0, "fetch-tags": True, "persist-credentials": False},
     CONSUMER_LEDGER_PUSH: {"fetch-depth": 0, "fetch-tags": True},
     SNAPSHOT: {"ref": SNAPSHOT_REF, "persist-credentials": False},
+    MERGE_BOT: {"ref": MERGE_BOT_REF, "fetch-depth": 0, "persist-credentials": False},
 }
 
 WRAPPER_CLONE = re.compile(
@@ -43,23 +60,28 @@ WRAPPER_CLONE = re.compile(
 )
 DEVKIT_INVOCATION = re.compile(
     re.escape(DEVKIT_INVOCATION_PREFIX)
-    + r"(?P<verb>get-app-version|publish-stable|publish-prerelease|ensure-release-pr|lint-ci)"
+    + r"(?P<verb>get-app-version|release|publish-prerelease|ensure-release-pr|lint-workflows|merge-gate)"
     + r'(?P<args>(?: [^)"]*)?)'
 )
 VERB_ARGS: dict[str, re.Pattern[str]] = {
     "get-app-version": re.compile(r"^ --app \S+$"),
-    "publish-stable": re.compile(r"^( --dry-run)?$"),
+    "release": re.compile(r"^( --dry-run)?$"),
     "publish-prerelease": re.compile(r"^$"),
     "ensure-release-pr": re.compile(r"^$"),
-    "lint-ci": re.compile(r"^$"),
+    "lint-workflows": re.compile(r"^$"),
+    "merge-gate": re.compile(r"^$"),
 }
 VERB_ENV: dict[str, dict[str, str]] = {
-    "publish-stable": {
+    "release": {
         "GH_TOKEN": "${{ github.token }}",
         "CI_REGISTRY_USERNAME": "${{ github.actor }}",
         "CI_REGISTRY_TOKEN": "${{ github.token }}",
     },
     "ensure-release-pr": {"GH_TOKEN": "${{ github.token }}"},
+    "merge-gate": {
+        "GH_TOKEN": "${{ steps.mint.outputs.token }}",
+        "HEAD_SHA": "${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}",
+    },
 }
 
 PLATFORMS = {
@@ -158,7 +180,48 @@ def validate_workflow_file(path: Path) -> list[str]:
     problems: list[str] = []
     for job_name, job_value in jobs_value.items():
         problems.extend(validate_job(str(job_name), job_value, path))
+    if path.name == "merge-gate.yml":
+        problems.extend(validate_merge_gate_triggers(document, path))
+        problems.extend(validate_merge_gate_concurrency(document, path))
+        for job_name, job_value in jobs_value.items():
+            if is_mapping(job_value) and job_value.get("if") != MERGE_GATE_JOB_IF:
+                problems.append(f"{path}: job '{job_name}': merge-gate.yml jobs must gate on if: {MERGE_GATE_JOB_IF}")
     return problems
+
+
+def validate_merge_gate_triggers(document: dict[object, object], path: Path) -> list[str]:
+    on_value = document.get("on")
+    if not is_mapping(on_value):
+        on_value = document.get(True)
+    problems: list[str] = []
+    if is_mapping(on_value):
+        pull_request = on_value.get("pull_request")
+        workflow_run = on_value.get("workflow_run")
+    else:
+        pull_request = None
+        workflow_run = None
+    if (
+        not is_mapping(pull_request)
+        or pull_request.get("types") != ["labeled"]
+        or pull_request.get("branches") != ["dev"]
+    ):
+        problems.append(f"{path}: must trigger on pull_request to dev, types [labeled] only")
+    if (
+        not is_mapping(workflow_run)
+        or workflow_run.get("workflows") != ["Integrate"]
+        or workflow_run.get("types") != ["completed"]
+    ):
+        problems.append(f"{path}: must trigger on workflow_run from Integrate, types [completed] only")
+    return problems
+
+
+def validate_merge_gate_concurrency(document: dict[object, object], path: Path) -> list[str]:
+    concurrency = document.get("concurrency")
+    if not is_mapping(concurrency) or concurrency.get("group") != MERGE_GATE_CONCURRENCY:
+        return [f"{path}: concurrency group must be {MERGE_GATE_CONCURRENCY} (the || fallback is load-bearing)"]
+    if "cancel-in-progress" in concurrency:
+        return [f"{path}: concurrency must omit cancel-in-progress — serialization is the policy"]
+    return []
 
 
 def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
@@ -172,12 +235,22 @@ def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
     problems.extend(collect_dead_uses(job_name, steps, path))
     if not verb_steps:
         return problems
-    is_real_publish = any(verb.name == "publish-stable" and not verb.dry_run for verb in verb_steps)
-    required_consumer = CONSUMER_LEDGER_PUSH if is_real_publish else CONSUMER_LEDGER
-    if not is_real_publish and any(step.signature == CONSUMER_LEDGER_PUSH for step in checkout_steps):
+    is_merge_gate_job = any(verb.name == "merge-gate" for verb in verb_steps)
+    is_real_publish = any(verb.name == "release" and not verb.dry_run for verb in verb_steps)
+    if is_merge_gate_job:
+        required_consumer = MERGE_BOT
+    elif is_real_publish:
+        required_consumer = CONSUMER_LEDGER_PUSH
+    else:
+        required_consumer = CONSUMER_LEDGER
+    if required_consumer != CONSUMER_LEDGER_PUSH and any(
+        step.signature == CONSUMER_LEDGER_PUSH for step in checkout_steps
+    ):
         problems.append(
-            f"{path}: job '{job_name}': consumer-ledger-push checkout is reserved for real publish-stable jobs"
+            f"{path}: job '{job_name}': consumer-ledger-push checkout is reserved for real release jobs"
         )
+    if required_consumer != MERGE_BOT and any(step.signature == MERGE_BOT for step in checkout_steps):
+        problems.append(f"{path}: job '{job_name}': merge-bot checkout is reserved for merge-gate jobs")
     first_verb_index = min(verb.step_index for verb in verb_steps)
     wrapper_indexes = [
         index
@@ -195,6 +268,23 @@ def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
     if not has_consumer:
         problems.append(
             f"{path}: job '{job_name}': no {required_consumer} checkout precedes the setup-release-devkit step"
+        )
+    mint_indexes: list[int] = []
+    for index, step_value in enumerate(steps):
+        if not is_mapping(step_value) or step_value.get("uses") != MINT_STEP_USES:
+            continue
+        with_value = step_value.get("with")
+        if step_value.get("id") != "mint" or with_value != MINT_STEP_INPUTS:
+            problems.append(
+                f"{path}: job '{job_name}' step {index}: create-github-app-token must be the canonical mint step"
+                " (id: mint, app-id from the MERGE_BOT_APP_ID var, private-key from the MERGE_BOT_APP_PRIVATE_KEY secret)"
+            )
+            continue
+        mint_indexes.append(index)
+    if is_merge_gate_job and not any(earliest_wrapper_index < index < first_verb_index for index in mint_indexes):
+        problems.append(
+            f"{path}: job '{job_name}': merge-gate requires a canonical {MINT_STEP_USES} mint step"
+            " between the wrapper and the verb"
         )
     return problems
 
