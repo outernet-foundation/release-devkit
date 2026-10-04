@@ -21,11 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # Check out the exact certified head SHA; the workflow_run payload carries no branch identity.
           ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
-          # Perform a full clone, required for validating fast forward: the gate proves dev is an ancestor before pushing.
+          # Perform a full clone, required so merge-gate can validate that this PR is a fast forward from dev
           fetch-depth: 0
-          # Remove credentials after checkout.
           persist-credentials: false
       - uses: astral-sh/setup-uv@v7
         with:
