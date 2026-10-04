@@ -1,27 +1,66 @@
 from pathlib import Path
 
-from release_devkit.lint_workflows import validate_devkit_wrapper, validate_workflow_file
+import pytest
+
+from release_devkit.lint_workflows import (
+    WRAPPER_COMMIT_ENV_VAR,
+    default_workflows,
+    validate_devkit_wrapper,
+    validate_workflow_file,
+)
 
 
-def write_workflow(tmp_path: Path, text: str, name: str = "integrate.yml") -> Path:
+def write_workflow(tmp_path: Path, text: str, name: str = "workflow.yml") -> Path:
     workflow_path = tmp_path / name
     workflow_path.write_text(text, encoding="utf-8")
     return workflow_path
 
 
-CONSUMER_LEDGER_BLOCK = """
+CHECKOUT_BLOCK = """
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+"""
+
+CHECKOUT_WITH_TAGS_BLOCK = """
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
 """
 
-CONSUMER_LEDGER_PUSH_BLOCK = """
+CHECKOUT_WITH_TAGS_PUSH_BLOCK = """
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: true
+"""
+
+RELEASE_CHECKOUT_WITH_TAGS_PUSH_BLOCK = """
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: true
+"""
+
+SETUP_UV_RESTORE_STEP = """
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          save-cache: "false"
+"""
+
+SAVER_SETUP_UV_STEP = """
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          save-cache: "true"
 """
 
 WRAPPER_STEP = """
@@ -29,21 +68,24 @@ WRAPPER_STEP = """
 """
 
 GET_APP_VERSION_RUN = (
-    '      - run: echo "version=$(uv run --project "$RUNNER_TEMP/release-devkit"'
-    ' --locked --no-dev get-app-version --app capture-tool)" >> "$GITHUB_OUTPUT"\n'
+    "      - id: version\n"
+    '        run: uv run --project "$RUNNER_TEMP/release-devkit"'
+    " --locked --no-dev get-app-version --app capture-tool\n"
 )
 
-LINT_CI_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
+LINT_WORKFLOWS_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
 
 PUBLISH_PRERELEASE_RUN = (
     '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev publish-prerelease\n'
 )
 
-PUBLISH_STABLE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release\n'
+RELEASE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release\n'
 
-VALIDATE_PLAN_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev validate-release-plan\n'
+VALIDATE_RELEASE_PLAN_RUN = (
+    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev validate-release-plan\n'
+)
 
-PUBLISH_STABLE_ENV = "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n"
+RELEASE_ENV = "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n"
 
 MERGE_BOT_CHECKOUT_BLOCK = (
     "      - uses: actions/checkout@v5\n"
@@ -69,93 +111,231 @@ MERGE_GATE_ENV = (
     "          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}\n"
 )
 
+NUGET_LOGIN_STEP = (
+    "      - uses: NuGet/login@v1\n        id: nuget-login\n        with:\n          user: ${{ secrets.NUGET_USER }}\n"
+)
+
+NUGET_API_KEY_ENV = "        env:\n          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}\n"
+
+RELEASE_NUGET_ENV = (
+    "        env:\n"
+    "          GITHUB_TOKEN: ${{ github.token }}\n"
+    "          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}\n"
+)
+
 
 def workflow(jobs: str) -> str:
     return f"jobs:\n{jobs}"
 
 
 def test_valid_verb_job_has_no_problems(tmp_path: Path) -> None:
-    jobs = f"  preflight:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{GET_APP_VERSION_RUN}"
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{PUBLISH_PRERELEASE_RUN}"
+    )
+    assert validate_workflow_file(write_workflow(tmp_path, workflow(jobs))) == []
+
+
+def test_nuget_delivery_job_with_mint_step_has_no_problems(tmp_path: Path) -> None:
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{NUGET_LOGIN_STEP}{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+    )
+    assert validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True) == []
+
+
+def test_nuget_delivery_job_requires_the_mint_step(tmp_path: Path) -> None:
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+    )
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True)
+    assert any("require a canonical NuGet/login@v1 mint step" in problem for problem in problems)
+
+
+def test_nuget_delivery_job_rejects_mint_step_outside_the_window(tmp_path: Path) -> None:
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{NUGET_LOGIN_STEP}{SETUP_UV_RESTORE_STEP}"
+        f"{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+    )
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True)
+    assert any("between the wrapper and the verb" in problem for problem in problems)
+
+
+def test_non_nuget_repo_rejects_the_mint_step(tmp_path: Path) -> None:
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{NUGET_LOGIN_STEP}{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+    )
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=False)
+    assert any("reserved for the delivery jobs" in problem for problem in problems)
+    assert any("must not carry NUGET_API_KEY env" in problem for problem in problems)
+
+
+def test_nuget_job_rejects_non_canonical_login_inputs(tmp_path: Path) -> None:
+    hard_coded_user = NUGET_LOGIN_STEP.replace("${{ secrets.NUGET_USER }}", "some-profile")
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{hard_coded_user}{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+    )
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True)
+    assert any("must be the canonical mint step" in problem for problem in problems)
+
+
+def test_nuget_verb_env_source_must_be_the_minted_key(tmp_path: Path) -> None:
+    stale_secret_source = NUGET_API_KEY_ENV.replace("steps.nuget-login.outputs.NUGET_API_KEY", "secrets.NUGET_API_KEY")
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{NUGET_LOGIN_STEP}{PUBLISH_PRERELEASE_RUN}{stale_secret_source}"
+    )
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True)
+    assert any("requires env NUGET_API_KEY" in problem for problem in problems)
+
+
+def test_environment_key_is_rejected(tmp_path: Path) -> None:
+    jobs = (
+        f"  publish-prerelease:\n    environment: release\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}"
+        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+    )
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True)
+    assert any("environment: key is forbidden" in problem for problem in problems)
+
+
+def test_get_app_version_job_uses_the_tags_checkout(tmp_path: Path) -> None:
+    jobs = (
+        f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{GET_APP_VERSION_RUN}{VALIDATE_RELEASE_PLAN_RUN}"
+    )
     assert validate_workflow_file(write_workflow(tmp_path, workflow(jobs))) == []
 
 
 def test_aliases_resolve_before_validation(tmp_path: Path) -> None:
+    ensure_release_pr_run = (
+        '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev ensure-release-pr\n'
+        "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n"
+    )
     jobs = (
-        "  preflight:\n    steps:\n      - uses: actions/checkout@v5\n        with: &consumer-ledger\n"
-        "          fetch-depth: 0\n          fetch-tags: true\n          persist-credentials: false"
-        f"{WRAPPER_STEP}{LINT_CI_RUN}  publish-prerelease:\n    steps:\n"
-        "      - uses: actions/checkout@v5\n        with: *consumer-ledger"
-        f"{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
+        "  lint-workflows:\n    steps:\n      - &checkout\n"
+        "        uses: actions/checkout@v5\n"
+        "        with:\n"
+        "          ref: ${{ github.event.pull_request.head.sha }}\n"
+        "          persist-credentials: false\n"
+        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        "  ensure-release-pr:\n    steps:\n      - *checkout\n"
+        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{ensure_release_pr_run}"
     )
     assert validate_workflow_file(write_workflow(tmp_path, workflow(jobs))) == []
 
 
 def test_bare_checkout_is_rejected(tmp_path: Path) -> None:
-    jobs = "  legs:\n    steps:\n      - uses: actions/checkout@v5\n"
+    jobs = "  legs:\n    steps:\n      - uses: actions/checkout@v5\n        with:\n          fetch-depth: 0\n"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("matches no signature" in problem for problem in problems)
 
 
-def test_publish_stable_requires_persisting_consumer_checkout(tmp_path: Path) -> None:
-    jobs = f"  release:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_RUN}{PUBLISH_STABLE_ENV}"
+def test_untagged_ledger_checkout_is_rejected(tmp_path: Path) -> None:
+    jobs = (
+        "  validate-release-plan:\n    steps:\n      - uses: actions/checkout@v5\n        with:\n"
+        "          fetch-depth: 0\n          fetch-tags: true\n          persist-credentials: false\n"
+        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{VALIDATE_RELEASE_PLAN_RUN}"
+    )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
-    assert any("consumer-ledger-push" in problem for problem in problems)
+    assert any("no checkout-with-tags checkout precedes" in problem for problem in problems)
+
+
+def test_release_requires_persisting_consumer_checkout(tmp_path: Path) -> None:
+    jobs = (
+        f"  release:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{RELEASE_RUN}{RELEASE_ENV}"
+    )
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("no checkout-with-tags-push checkout precedes" in problem for problem in problems)
 
     good_jobs = (
-        f"  release:\n    steps:{CONSUMER_LEDGER_PUSH_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_RUN}"
-        f"{PUBLISH_STABLE_ENV}"
+        f"  release:\n    steps:{CHECKOUT_WITH_TAGS_PUSH_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{RELEASE_RUN}{RELEASE_ENV}"
     )
     assert validate_workflow_file(write_workflow(tmp_path, workflow(good_jobs))) == []
 
 
-def test_publish_stable_rejects_the_dead_dry_run_flag(tmp_path: Path) -> None:
-    step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release --dry-run\n'
-    jobs = f"  preflight:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
+def test_implicit_persisting_checkout_is_rejected(tmp_path: Path) -> None:
+    implicit = """
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+"""
+    jobs = f"  release:\n    steps:{implicit}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{RELEASE_RUN}{RELEASE_ENV}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
-    assert any("carries rejected arguments" in problem for problem in problems)
+    assert any("matches no signature" in problem for problem in problems)
 
 
-def test_push_signature_reserved_for_real_publish_stable(tmp_path: Path) -> None:
-    jobs = f"  publish-prerelease:\n    steps:{CONSUMER_LEDGER_PUSH_BLOCK}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
+def test_push_signature_reserved_for_real_release(tmp_path: Path) -> None:
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_PUSH_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{PUBLISH_PRERELEASE_RUN}"
+    )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
-    assert any("reserved for real release" in problem for problem in problems)
+    assert any("reserved for release jobs" in problem for problem in problems)
 
 
 def test_verb_job_requires_wrapper_before_the_verb(tmp_path: Path) -> None:
-    jobs = f"  publish-prerelease:\n    steps:{CONSUMER_LEDGER_BLOCK}{PUBLISH_PRERELEASE_RUN}{WRAPPER_STEP}"
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{PUBLISH_PRERELEASE_RUN}"
+        f"{WRAPPER_STEP}"
+    )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("no ./.github/actions/setup-release-devkit step precedes" in problem for problem in problems)
 
 
 def test_consumer_checkout_must_precede_wrapper(tmp_path: Path) -> None:
-    jobs = f"  publish-prerelease:\n    steps:{WRAPPER_STEP}{CONSUMER_LEDGER_BLOCK}{PUBLISH_PRERELEASE_RUN}"
+    jobs = (
+        f"  publish-prerelease:\n    steps:{WRAPPER_STEP}{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}"
+        f"{PUBLISH_PRERELEASE_RUN}"
+    )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("precedes the setup-release-devkit step" in problem for problem in problems)
 
 
-def test_publish_stable_requires_canonical_env(tmp_path: Path) -> None:
-    jobs = f"  release:\n    steps:{CONSUMER_LEDGER_PUSH_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_RUN}"
+def test_verb_job_requires_canonical_setup_uv_before_the_wrapper(tmp_path: Path) -> None:
+    jobs = f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("no canonical astral-sh/setup-uv@v7 step" in problem for problem in problems)
+
+
+def test_setup_uv_without_explicit_save_cache_is_not_canonical(tmp_path: Path) -> None:
+    loose_uv = "      - uses: astral-sh/setup-uv@v7\n        with:\n          enable-cache: true\n"
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{loose_uv}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
+    )
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("no canonical astral-sh/setup-uv@v7 step" in problem for problem in problems)
+
+
+def test_release_requires_canonical_env(tmp_path: Path) -> None:
+    jobs = f"  release:\n    steps:{CHECKOUT_WITH_TAGS_PUSH_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{RELEASE_RUN}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("release requires env GITHUB_TOKEN" in problem for problem in problems)
 
 
 def test_directory_invocation_is_rejected(tmp_path: Path) -> None:
     step = '      - run: uv run --directory "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
-    jobs = f"  preflight:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
+    jobs = f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("without a canonical" in problem for problem in problems)
 
 
 def test_unknown_verb_is_rejected(tmp_path: Path) -> None:
     step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev create-release\n'
-    jobs = f"  preflight:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
+    jobs = f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("without a canonical" in problem for problem in problems)
 
 
 def test_unlocked_invocation_is_rejected(tmp_path: Path) -> None:
     step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --no-dev lint-workflows\n'
-    jobs = f"  preflight:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
+    jobs = f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("without a canonical" in problem for problem in problems)
 
@@ -164,38 +344,41 @@ def test_rejected_verb_flags_are_flagged(tmp_path: Path) -> None:
     step = (
         '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev publish-prerelease --run-id 42\n'
     )
-    jobs = f"  publish-prerelease:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
+    jobs = f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("carries rejected arguments" in problem for problem in problems)
 
 
-def test_validate_plan_rejects_flags(tmp_path: Path) -> None:
+def test_validate_release_plan_rejects_flags(tmp_path: Path) -> None:
     step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev validate-release-plan --foo\n'
-    jobs = f"  validate-release-plan:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
+    jobs = f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("carries rejected arguments" in problem for problem in problems)
 
 
 def test_get_app_version_requires_app(tmp_path: Path) -> None:
     step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev get-app-version\n'
-    jobs = f"  preflight:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
+    jobs = f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("carries rejected arguments" in problem for problem in problems)
 
 
 def test_dead_composite_action_uses_are_rejected(tmp_path: Path) -> None:
     step = "      - uses: ./.release-devkit/.github/actions/publish-prerelease\n"
-    jobs = f"  publish-prerelease:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
+    jobs = (
+        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
+        f"{PUBLISH_PRERELEASE_RUN}"
+    )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("dead composite-action model" in problem for problem in problems)
 
     old_wrapper = "      - uses: ./.github/actions/checkout-release-devkit\n"
-    old_jobs = f"  publish-prerelease:\n    steps:{CONSUMER_LEDGER_BLOCK}{old_wrapper}{PUBLISH_PRERELEASE_RUN}"
+    old_jobs = f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{old_wrapper}{PUBLISH_PRERELEASE_RUN}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(old_jobs)))
     assert any("dead composite-action model" in problem for problem in problems)
 
 
-def test_snapshot_signature_is_exact(tmp_path: Path) -> None:
+def test_branch_name_ref_is_rejected(tmp_path: Path) -> None:
     jobs = "  legs:\n    steps:\n      - uses: actions/checkout@v5\n        with:\n          ref: ${{ github.head_ref || github.ref_name }}\n"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("matches no signature" in problem for problem in problems)
@@ -212,6 +395,290 @@ def test_checkout_major_pin_is_enforced(tmp_path: Path) -> None:
 def test_missing_workflow_file_reports_problem(tmp_path: Path) -> None:
     problems = validate_workflow_file(tmp_path / "absent.yml")
     assert any("not found" in problem for problem in problems)
+
+
+def test_folded_devkit_invocation_is_rejected(tmp_path: Path) -> None:
+    step = (
+        "      - run: >-\n"
+        '          uv run --project "$RUNNER_TEMP/release-devkit"\n'
+        "          --locked --no-dev lint-workflows\n"
+    )
+    jobs = f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("single physical line" in problem for problem in problems)
+
+
+def test_literal_run_block_is_rejected(tmp_path: Path) -> None:
+    step = "      - run: |\n          uv run preflight-python\n          uv run other\n"
+    jobs = f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}{step}"
+    document = f"jobs:\n{jobs}"
+    path = write_workflow(tmp_path, document, name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=False)
+    assert any("single physical line" in problem for problem in problems)
+
+
+def test_plain_continuation_run_is_rejected(tmp_path: Path) -> None:
+    step = "      - run: uv run compile-check-unity\n          --project thing\n"
+    jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{step}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("single physical line" in problem for problem in problems)
+
+
+def test_folded_long_command_is_accepted(tmp_path: Path) -> None:
+    step = (
+        "      - run: >-\n"
+        "          uv run ci-build-unity --project ${{ matrix.project-name }}\n"
+        "          --platform ${{ matrix.platform }} --cache-key ${{ matrix.cache-key }}\n"
+        '          --run-number ${{ github.run_number }} --branch "$BRANCH"\n'
+        "          --registry ghcr.io/${{ github.repository }}/cache\n"
+        "          --builds-registry ghcr.io/${{ github.repository }}/builds\n"
+    )
+    jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{step}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert not any("single physical line" in problem for problem in problems)
+
+
+def test_folded_short_command_is_rejected(tmp_path: Path) -> None:
+    step = "      - run: >-\n          uv run build-docker\n          --variant cuda\n"
+    jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{step}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("commands longer than 120 characters" in problem for problem in problems)
+
+
+def test_folded_long_devkit_invocation_is_rejected(tmp_path: Path) -> None:
+    step = (
+        "      - run: >-\n"
+        '          uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev\n'
+        "          validate-release-plan --with-a-very-long-flag-that-pushes-this-past-the-threshold-value\n"
+    )
+    jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("devkit verb invocations never fold" in problem for problem in problems)
+
+
+def test_folded_block_with_blank_line_is_rejected(tmp_path: Path) -> None:
+    step = (
+        "      - run: >-\n"
+        "          uv run ci-build-unity --project ${{ matrix.project-name }}\n"
+        "\n"
+        "          --platform ${{ matrix.platform }} --cache-key ${{ matrix.cache-key }}\n"
+        '          --run-number ${{ github.run_number }} --branch "$BRANCH"\n'
+        "          --registry ghcr.io/${{ github.repository }}/cache\n"
+        "          --builds-registry ghcr.io/${{ github.repository }}/builds\n"
+    )
+    jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{step}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("may not contain blank lines" in problem for problem in problems)
+
+
+def test_folded_block_with_uneven_indent_is_rejected(tmp_path: Path) -> None:
+    step = (
+        "      - run: >-\n"
+        "          uv run ci-build-unity --project ${{ matrix.project-name }}\n"
+        "            --platform ${{ matrix.platform }} --cache-key ${{ matrix.cache-key }}\n"
+        '          --run-number ${{ github.run_number }} --branch "$BRANCH"\n'
+        "          --registry ghcr.io/${{ github.repository }}/cache\n"
+        "          --builds-registry ghcr.io/${{ github.repository }}/builds\n"
+    )
+    jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{step}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("must share one indent" in problem for problem in problems)
+
+
+def integrate_document(jobs: str) -> str:
+    return f"jobs:\n{jobs}"
+
+
+def test_publishing_integrate_requires_the_validate_release_plan_job(tmp_path: Path) -> None:
+    jobs = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
+    )
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=True)
+    assert any("must run the validate-release-plan job" in problem for problem in problems)
+
+
+def test_publishing_integrate_with_split_jobs_is_clean(tmp_path: Path) -> None:
+    jobs = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
+        f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{VALIDATE_RELEASE_PLAN_RUN}"
+    )
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    assert validate_workflow_file(path, publishing=True) == []
+
+
+def test_non_publishing_integrate_needs_no_validate_release_plan_job(tmp_path: Path) -> None:
+    jobs = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
+    )
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    assert validate_workflow_file(path, publishing=False) == []
+
+
+def test_integrate_requires_the_lint_workflows_job(tmp_path: Path) -> None:
+    jobs = f"  preflight:\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=False)
+    assert any("must run the lint-workflows job" in problem for problem in problems)
+
+
+def test_integrate_checkout_requires_the_head_sha_literal(tmp_path: Path) -> None:
+    branch_form = (
+        "  lint-workflows:\n    steps:\n      - uses: actions/checkout@v5\n        with:\n"
+        "          ref: ${{ github.head_ref || github.ref_name }}\n          persist-credentials: false\n"
+        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+    )
+    path = write_workflow(tmp_path, integrate_document(branch_form), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=False)
+    assert any("matches no signature" in problem for problem in problems)
+
+
+def test_lint_workflows_verb_must_live_in_its_own_job(tmp_path: Path) -> None:
+    jobs = f"  preflight:\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=False)
+    assert any("must run in the 'lint-workflows' job" in problem for problem in problems)
+
+
+def test_preflight_must_need_lint_workflows(tmp_path: Path) -> None:
+    jobs = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  preflight:\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
+        f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{VALIDATE_RELEASE_PLAN_RUN}"
+    )
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=True)
+    assert any("must need" in problem for problem in problems)
+
+
+def test_lint_workflows_is_a_parallel_root(tmp_path: Path) -> None:
+    jobs = (
+        f"  validate-release-plan:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}"
+        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{VALIDATE_RELEASE_PLAN_RUN}"
+        f"  lint-workflows:\n    needs: [validate-release-plan]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
+        f"{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+    )
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=True)
+    assert any("parallel root and must carry no needs" in problem for problem in problems)
+
+
+def test_integrate_requires_exactly_one_cache_writer(tmp_path: Path) -> None:
+    two_writers = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
+        f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{VALIDATE_RELEASE_PLAN_RUN}"
+    )
+    path = write_workflow(tmp_path, integrate_document(two_writers), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=True)
+    assert any("exactly one cache-writing setup-uv step" in problem for problem in problems)
+
+    zero_writers = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}"
+        f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{VALIDATE_RELEASE_PLAN_RUN}"
+    )
+    path = write_workflow(tmp_path, integrate_document(zero_writers), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=True)
+    assert any("exactly one cache-writing setup-uv step" in problem for problem in problems)
+
+
+def test_lint_workflows_is_the_cache_writer_when_preflight_dissolves(tmp_path: Path) -> None:
+    jobs = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}"
+        f"{WRAPPER_STEP}{VALIDATE_RELEASE_PLAN_RUN}"
+    )
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    assert validate_workflow_file(path, publishing=True) == []
+
+    misplaced = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SAVER_SETUP_UV_STEP}"
+        f"{WRAPPER_STEP}{VALIDATE_RELEASE_PLAN_RUN}"
+    )
+    path = write_workflow(tmp_path, integrate_document(misplaced), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=True)
+    assert any("cache-writing setup-uv must live in 'lint-workflows'" in problem for problem in problems)
+
+
+def test_default_workflows_include_release_iff_the_config_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert default_workflows()[1].name == "merge-gate.yml"
+
+    (tmp_path / "release-devkit.yaml").write_text("packages: {}\n", encoding="utf-8")
+    assert default_workflows()[1].name == "release.yml"
+
+
+def release_document(jobs: str, name: str = "Release", group: str = "release-${{ github.ref }}") -> str:
+    return f"name: {name}\nconcurrency:\n  group: {group}\njobs:\n{jobs}"
+
+
+def test_valid_release_workflow_has_no_problems(tmp_path: Path) -> None:
+    jobs = f"  release:\n    steps:{RELEASE_CHECKOUT_WITH_TAGS_PUSH_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+    jobs += f"{RELEASE_RUN}{RELEASE_ENV}"
+    path = write_workflow(tmp_path, release_document(jobs), name="release.yml")
+    assert validate_workflow_file(path) == []
+
+
+def test_nuget_release_job_with_mint_step_is_clean(tmp_path: Path) -> None:
+    jobs = f"  release:\n    steps:{RELEASE_CHECKOUT_WITH_TAGS_PUSH_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+    jobs += f"{NUGET_LOGIN_STEP}{RELEASE_RUN}{RELEASE_NUGET_ENV}"
+    path = write_workflow(tmp_path, release_document(jobs), name="release.yml")
+    assert validate_workflow_file(path, nuget=True) == []
+
+
+def test_release_workflow_name_is_pinned(tmp_path: Path) -> None:
+    jobs = f"  release:\n    steps:{RELEASE_CHECKOUT_WITH_TAGS_PUSH_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+    jobs += f"{RELEASE_RUN}{RELEASE_ENV}"
+    path = write_workflow(tmp_path, release_document(jobs, name="Publish"), name="release.yml")
+    problems = validate_workflow_file(path)
+    assert any("workflow name must be Release" in problem for problem in problems)
+
+
+def test_release_workflow_concurrency_is_pinned(tmp_path: Path) -> None:
+    jobs = f"  release:\n    steps:{RELEASE_CHECKOUT_WITH_TAGS_PUSH_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+    jobs += f"{RELEASE_RUN}{RELEASE_ENV}"
+    document = release_document(jobs, group="publish-${{ github.ref }}")
+    path = write_workflow(tmp_path, document, name="release.yml")
+    problems = validate_workflow_file(path)
+    assert any("concurrency group must be release-" in problem for problem in problems)
+
+    cancelling = release_document(jobs).replace(
+        "  group: release-${{ github.ref }}\n", "  group: release-${{ github.ref }}\n  cancel-in-progress: true\n"
+    )
+    path = write_workflow(tmp_path, cancelling, name="release.yml")
+    problems = validate_workflow_file(path)
+    assert any("cancel-in-progress" in problem for problem in problems)
+
+
+def test_release_verb_must_live_in_the_release_job(tmp_path: Path) -> None:
+    jobs = f"  deliver:\n    steps:{RELEASE_CHECKOUT_WITH_TAGS_PUSH_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+    jobs += f"{RELEASE_RUN}{RELEASE_ENV}"
+    path = write_workflow(tmp_path, release_document(jobs), name="release.yml")
+    problems = validate_workflow_file(path)
+    assert any("must run in the 'release' job" in problem for problem in problems)
+
+
+def test_release_checkout_must_not_spell_a_ref(tmp_path: Path) -> None:
+    with_ref = (
+        "  release:\n    steps:\n      - uses: actions/checkout@v5\n        with:\n"
+        "          ref: ${{ github.event.pull_request.head.sha }}\n"
+        "          fetch-depth: 0\n          fetch-tags: true\n          persist-credentials: true\n"
+        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{RELEASE_RUN}{RELEASE_ENV}"
+    )
+    path = write_workflow(tmp_path, release_document(with_ref), name="release.yml")
+    problems = validate_workflow_file(path)
+    assert any("matches no signature" in problem for problem in problems)
 
 
 def merge_gate_document(steps: str) -> str:
@@ -235,27 +702,29 @@ def merge_gate_document(steps: str) -> str:
 
 
 def test_valid_merge_gate_job_has_no_problems(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = (
+        f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    )
     path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
     assert validate_workflow_file(path) == []
 
 
 def test_merge_gate_requires_merge_bot_checkout(tmp_path: Path) -> None:
-    steps = f"{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = f"{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
     path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
     problems = validate_workflow_file(path)
     assert any("no merge-bot checkout precedes" in problem for problem in problems)
 
 
 def test_merge_bot_checkout_reserved_for_merge_gate_jobs(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
     jobs = f"jobs:\n  publish-prerelease:\n    steps:\n{steps}"
-    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    problems = validate_workflow_file(write_workflow(tmp_path, jobs))
     assert any("merge-bot checkout is reserved" in problem for problem in problems)
 
 
 def test_merge_gate_requires_canonical_mint_step(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
     path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
     problems = validate_workflow_file(path)
     assert any("requires a canonical actions/create-github-app-token@v3 mint step" in problem for problem in problems)
@@ -263,7 +732,7 @@ def test_merge_gate_requires_canonical_mint_step(tmp_path: Path) -> None:
 
 def test_merge_gate_rejects_non_canonical_mint_inputs(tmp_path: Path) -> None:
     renamed_app_step = MINT_STEP.replace("app-id: ${{ vars.MERGE_BOT_APP_ID }}", "app-id: 123456")
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{renamed_app_step}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{renamed_app_step}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
     path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
     problems = validate_workflow_file(path)
     assert any("canonical mint step" in problem for problem in problems)
@@ -271,30 +740,27 @@ def test_merge_gate_rejects_non_canonical_mint_inputs(tmp_path: Path) -> None:
 
 def test_merge_gate_requires_minted_token_env(tmp_path: Path) -> None:
     wrong_env = MERGE_GATE_ENV.replace("${{ steps.mint.outputs.token }}", "${{ github.token }}")
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{wrong_env}"
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{wrong_env}"
     path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
     problems = validate_workflow_file(path)
     assert any("merge-gate requires env GITHUB_TOKEN" in problem for problem in problems)
 
 
 def test_merge_gate_requires_the_dispatch_head_sha_env(tmp_path: Path) -> None:
-    missing_env = MERGE_GATE_ENV.replace("          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}\n", "")
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{missing_env}"
-    path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
-    problems = validate_workflow_file(path)
-    assert any("merge-gate requires env HEAD_SHA" in problem for problem in problems)
-
-
-def test_merge_gate_requires_head_sha_env(tmp_path: Path) -> None:
-    missing_env = MERGE_GATE_ENV.replace("          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}\n", "")
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{missing_env}"
+    wrong_env = MERGE_GATE_ENV.replace(
+        "${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}",
+        "${{ github.event.workflow_run.head_sha }}",
+    )
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{wrong_env}"
     path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
     problems = validate_workflow_file(path)
     assert any("merge-gate requires env HEAD_SHA" in problem for problem in problems)
 
 
 def test_merge_gate_workflow_requires_labeled_trigger_only(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = (
+        f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    )
     document = merge_gate_document(steps).replace("    types: [labeled]\n", "    types: [labeled, opened]\n")
     path = write_workflow(tmp_path, document, name="merge-gate.yml")
     problems = validate_workflow_file(path)
@@ -302,7 +768,9 @@ def test_merge_gate_workflow_requires_labeled_trigger_only(tmp_path: Path) -> No
 
 
 def test_merge_gate_workflow_requires_dev_branch_scope(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = (
+        f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    )
     document = merge_gate_document(steps).replace("    branches: [dev]\n", "")
     path = write_workflow(tmp_path, document, name="merge-gate.yml")
     problems = validate_workflow_file(path)
@@ -310,7 +778,9 @@ def test_merge_gate_workflow_requires_dev_branch_scope(tmp_path: Path) -> None:
 
 
 def test_merge_gate_workflow_requires_workflow_run_wake(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = (
+        f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    )
     document = merge_gate_document(steps).replace(
         "  workflow_run:\n    workflows: [Integrate]\n    types: [completed]\n", ""
     )
@@ -320,7 +790,9 @@ def test_merge_gate_workflow_requires_workflow_run_wake(tmp_path: Path) -> None:
 
 
 def test_merge_gate_workflow_pins_the_integrate_workflow_name(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = (
+        f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    )
     document = merge_gate_document(steps).replace("workflows: [Integrate]", "workflows: [CI]")
     path = write_workflow(tmp_path, document, name="merge-gate.yml")
     problems = validate_workflow_file(path)
@@ -328,7 +800,9 @@ def test_merge_gate_workflow_pins_the_integrate_workflow_name(tmp_path: Path) ->
 
 
 def test_merge_gate_workflow_requires_the_per_pr_concurrency_group(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = (
+        f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    )
     document = merge_gate_document(steps).replace(
         "group: merge-gate-${{ github.event.pull_request.number || github.event.workflow_run.head_branch }}",
         "group: merge-gate",
@@ -339,7 +813,9 @@ def test_merge_gate_workflow_requires_the_per_pr_concurrency_group(tmp_path: Pat
 
 
 def test_merge_gate_workflow_refuses_cancel_in_progress(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = (
+        f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    )
     document = merge_gate_document(steps).replace("head_branch }}\n", "head_branch }}\n  cancel-in-progress: true\n")
     path = write_workflow(tmp_path, document, name="merge-gate.yml")
     problems = validate_workflow_file(path)
@@ -347,7 +823,9 @@ def test_merge_gate_workflow_refuses_cancel_in_progress(tmp_path: Path) -> None:
 
 
 def test_merge_gate_workflow_jobs_require_the_dual_wake_gate(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    steps = (
+        f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{MERGE_GATE_ENV}"
+    )
     document = merge_gate_document(steps).replace(
         "    if: github.event.label.name == 'ready-to-merge' || (github.event_name == 'workflow_run'"
         " && github.event.workflow_run.conclusion == 'success')\n",
@@ -365,14 +843,13 @@ def write_wrapper(tmp_path: Path, steps: str) -> Path:
 
 
 VALID_WRAPPER_STEPS = (
-    "    - uses: astral-sh/setup-uv@v7\n"
-    "      with:\n"
-    "        enable-cache: true\n"
     "    - shell: bash\n"
-    "      run: >-\n"
+    "      env:\n"
+    f"        {WRAPPER_COMMIT_ENV_VAR}: " + "a" * 40 + "\n"
+    "      run: |\n"
     "        git clone https://github.com/outernet-foundation/release-devkit.git"
     ' "$RUNNER_TEMP/release-devkit"\n'
-    '        && git -C "$RUNNER_TEMP/release-devkit" checkout ' + "a" * 40 + "\n"
+    f'        git -C "$RUNNER_TEMP/release-devkit" checkout "${WRAPPER_COMMIT_ENV_VAR}"\n'
 )
 
 
@@ -383,25 +860,24 @@ def test_valid_wrapper_passes(tmp_path: Path) -> None:
 def test_wrapper_rejects_short_sha(tmp_path: Path) -> None:
     steps = VALID_WRAPPER_STEPS.replace("a" * 40, "4712f1e")
     problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any("clone" in problem for problem in problems)
+    assert any(WRAPPER_COMMIT_ENV_VAR in problem for problem in problems)
 
 
 def test_wrapper_rejects_mutable_ref(tmp_path: Path) -> None:
     steps = VALID_WRAPPER_STEPS.replace("a" * 40, "main")
     problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any("clone" in problem for problem in problems)
+    assert any(WRAPPER_COMMIT_ENV_VAR in problem for problem in problems)
 
 
 def test_wrapper_rejects_extra_steps(tmp_path: Path) -> None:
-    steps = VALID_WRAPPER_STEPS + "    - run: echo hello\n"
+    steps = VALID_WRAPPER_STEPS + "    - uses: astral-sh/setup-uv@v7\n"
     problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any("exactly two steps" in problem for problem in problems)
+    assert any("exactly one step" in problem for problem in problems)
 
 
-def test_wrapper_rejects_single_step(tmp_path: Path) -> None:
-    steps = VALID_WRAPPER_STEPS.split("    - shell: bash\n")[0]
-    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any("exactly two steps" in problem for problem in problems)
+def test_wrapper_rejects_zero_steps(tmp_path: Path) -> None:
+    problems = validate_devkit_wrapper(write_wrapper(tmp_path, ""))
+    assert any("exactly one step" in problem for problem in problems)
 
 
 def test_wrapper_rejects_wrong_repository(tmp_path: Path) -> None:
@@ -413,19 +889,45 @@ def test_wrapper_rejects_wrong_repository(tmp_path: Path) -> None:
     assert any("clone" in problem for problem in problems)
 
 
-def test_wrapper_rejects_missing_enable_cache(tmp_path: Path) -> None:
-    steps = VALID_WRAPPER_STEPS.replace("      with:\n        enable-cache: true\n", "")
-    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any("enable-cache" in problem for problem in problems)
-
-
 def test_wrapper_rejects_missing_checkout(tmp_path: Path) -> None:
-    steps = VALID_WRAPPER_STEPS.replace('\n        && git -C "$RUNNER_TEMP/release-devkit" checkout ' + "a" * 40, "")
+    steps = VALID_WRAPPER_STEPS.replace(
+        f'        git -C "$RUNNER_TEMP/release-devkit" checkout "${WRAPPER_COMMIT_ENV_VAR}"\n', ""
+    )
     problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
     assert any("clone" in problem for problem in problems)
 
 
+def test_wrapper_rejects_missing_env_pin(tmp_path: Path) -> None:
+    steps = VALID_WRAPPER_STEPS.replace(
+        "    - shell: bash\n      env:\n" + f"        {WRAPPER_COMMIT_ENV_VAR}: " + "a" * 40 + "\n",
+        "    - shell: bash\n",
+    )
+    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
+    assert any(WRAPPER_COMMIT_ENV_VAR in problem for problem in problems)
+
+
+def test_wrapper_rejects_extra_env_entries(tmp_path: Path) -> None:
+    steps = VALID_WRAPPER_STEPS.replace(
+        f"        {WRAPPER_COMMIT_ENV_VAR}: " + "a" * 40 + "\n",
+        f"        {WRAPPER_COMMIT_ENV_VAR}: " + "a" * 40 + "\n        OTHER: value\n",
+    )
+    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
+    assert any(WRAPPER_COMMIT_ENV_VAR in problem for problem in problems)
+
+
+def test_wrapper_rejects_legacy_inline_sha(tmp_path: Path) -> None:
+    steps = (
+        "    - shell: bash\n"
+        "      run: >-\n"
+        "        git clone https://github.com/outernet-foundation/release-devkit.git"
+        ' "$RUNNER_TEMP/release-devkit"\n'
+        '        && git -C "$RUNNER_TEMP/release-devkit" checkout ' + "a" * 40 + "\n"
+    )
+    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
+    assert len(problems) >= 1
+
+
 def test_wrapper_rejects_missing_shell(tmp_path: Path) -> None:
-    steps = VALID_WRAPPER_STEPS.replace("    - shell: bash\n      run: >-\n", "    - run: >-\n")
+    steps = VALID_WRAPPER_STEPS.replace("    - shell: bash\n      env:\n", "    - env:\n")
     problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
     assert any("shell: bash" in problem for problem in problems)

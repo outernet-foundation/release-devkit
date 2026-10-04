@@ -11,6 +11,8 @@ import typer
 import yaml
 from bashrun.bash import CalledProcessError, bash, bash_output
 
+from .config import load_config
+
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 ACTIONLINT_VERSION = "1.7.12"
@@ -21,7 +23,8 @@ DEVKIT_REPOSITORY = "outernet-foundation/release-devkit"
 DEVKIT_INSTALL_PATH = "$RUNNER_TEMP/release-devkit"
 DEVKIT_INVOCATION_PREFIX = f'uv run --project "{DEVKIT_INSTALL_PATH}" --locked --no-dev '
 SETUP_UV_USES = "astral-sh/setup-uv@v7"
-SNAPSHOT_REF = "${{ github.head_ref || github.ref_name }}"
+CONFIG_PATH = Path("release-devkit.yaml")
+INTEGRATE_HEAD_SHA = "${{ github.event.pull_request.head.sha }}"
 MERGE_BOT_REF = "${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}"
 MERGE_GATE_JOB_IF = (
     "github.event.label.name == 'ready-to-merge'"
@@ -33,35 +36,53 @@ MINT_STEP_INPUTS = {
     "app-id": "${{ vars.MERGE_BOT_APP_ID }}",
     "private-key": "${{ secrets.MERGE_BOT_APP_PRIVATE_KEY }}",
 }
-DEFAULT_WORKFLOWS = [
-    Path(".github/workflows/integrate.yml"),
-    Path(".github/workflows/release.yml"),
-    Path(".github/workflows/merge-gate.yml"),
-]
+NUGET_LOGIN_USES = "NuGet/login@v1"
+NUGET_LOGIN_INPUTS = {"user": "${{ secrets.NUGET_USER }}"}
+NUGET_API_KEY_ENV = "NUGET_API_KEY"
+NUGET_API_KEY_SOURCE = "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
+NUGET_DELIVERY_VERBS = ("publish-prerelease", "release")
+INTEGRATE_WORKFLOW = Path(".github/workflows/integrate.yml")
+RELEASE_WORKFLOW = Path(".github/workflows/release.yml")
+RELEASE_WORKFLOW_NAME = "Release"
+RELEASE_CONCURRENCY = "release-${{ github.ref }}"
+MERGE_GATE_WORKFLOW = Path(".github/workflows/merge-gate.yml")
+LINT_WORKFLOWS_JOB = "lint-workflows"
+VALIDATE_RELEASE_PLAN_JOB = "validate-release-plan"
+PREFLIGHT_JOB = "preflight"
+MIRROR_IMAGES_JOB = "mirror-images"
+RELEASE_JOB = "release"
 
 DEAD_USES_PREFIXES = ("./.release-devkit/", "./.github/actions/checkout-release-devkit")
 
-CONSUMER_LEDGER = "consumer-ledger"
-CONSUMER_LEDGER_PUSH = "consumer-ledger-push"
-SNAPSHOT = "snapshot"
+CHECKOUT = "checkout"
+CHECKOUT_WITH_TAGS = "checkout-with-tags"
+CHECKOUT_WITH_TAGS_PUSH = "checkout-with-tags-push"
 MERGE_BOT = "merge-bot"
 
-SIGNATURES: dict[str, dict[str, object]] = {
-    CONSUMER_LEDGER: {"fetch-depth": 0, "fetch-tags": True, "persist-credentials": False},
-    CONSUMER_LEDGER_PUSH: {"fetch-depth": 0, "fetch-tags": True},
-    SNAPSHOT: {"ref": SNAPSHOT_REF, "persist-credentials": False},
-    MERGE_BOT: {"ref": MERGE_BOT_REF, "fetch-depth": 0, "persist-credentials": False},
+VERB_CHECKOUTS: dict[str, str] = {
+    "get-app-version": CHECKOUT_WITH_TAGS,
+    "release": CHECKOUT_WITH_TAGS_PUSH,
+    "publish-prerelease": CHECKOUT_WITH_TAGS,
+    "ensure-release-pr": CHECKOUT,
+    "lint-workflows": CHECKOUT,
+    "merge-gate": MERGE_BOT,
+    "validate-release-plan": CHECKOUT_WITH_TAGS,
 }
 
+SETUP_UV_RESTORE_INPUTS = {"enable-cache": True, "save-cache": "false"}
+SETUP_UV_SAVE_INPUTS = {"enable-cache": True, "save-cache": "true"}
+
+WRAPPER_COMMIT_ENV_VAR = "RELEASE_DEVKIT_COMMIT"
+WRAPPER_COMMIT_ENV = re.compile(r"^[0-9a-f]{40}$")
 WRAPPER_CLONE = re.compile(
     r"^git clone https://github\.com/outernet-foundation/release-devkit\.git"
     r' "\$RUNNER_TEMP/release-devkit"'
-    r' && git -C "\$RUNNER_TEMP/release-devkit" checkout [0-9a-f]{40}$'
+    rf'\ngit -C "\$RUNNER_TEMP/release-devkit" checkout "\${WRAPPER_COMMIT_ENV_VAR}"$'
 )
 DEVKIT_INVOCATION = re.compile(
     re.escape(DEVKIT_INVOCATION_PREFIX)
-    + r"(?P<verb>get-app-version|release|publish-prerelease|ensure-release-pr|lint-workflows|merge-gate|validate-release-plan)"
-    + r'(?P<args>(?: [^)"]*)?)'
+    + r"(?P<verb>get-app-version|release|publish-prerelease|ensure-release-pr|lint-workflows|merge-gate"
+    r"|validate-release-plan)" + r'(?P<args>(?: [^)"]*)?)'
 )
 VERB_ARGS: dict[str, re.Pattern[str]] = {
     "get-app-version": re.compile(r"^ --app \S+$"),
@@ -77,10 +98,14 @@ VERB_ENV: dict[str, dict[str, str]] = {
     "ensure-release-pr": {"GITHUB_TOKEN": "${{ github.token }}"},
     "merge-gate": {
         "GITHUB_TOKEN": "${{ steps.mint.outputs.token }}",
-        "HEAD_SHA": "${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}",
+        "HEAD_SHA": MERGE_BOT_REF,
     },
     "validate-release-plan": {},
 }
+
+RUN_STEP_LINE = re.compile(r"^(?P<prefix>\s*(?:- )?)run:(?:\s*(?P<value>.*))?$")
+BLOCK_SCALAR_HEADS = {"|", ">", "|-", ">-", "|+", ">+", "|1", ">1", "|2", ">2", "|3", ">3", "|4", ">4"}
+RUN_STEP_FOLD_THRESHOLD = 120
 
 PLATFORMS = {
     ("Linux", "x86_64"): "linux_amd64",
@@ -107,20 +132,38 @@ def main(
     workflows: Annotated[
         list[Path] | None,
         typer.Option(
-            "--workflow", help="Workflow file to signature-validate (repeatable; default integrate + publish)"
+            "--workflow",
+            help="Workflow file to signature-validate (repeatable; default integrate + release + merge-gate)",
         ),
     ] = None,
 ) -> None:
-    workflow_paths = workflows or DEFAULT_WORKFLOWS
+    workflow_paths = workflows or default_workflows()
     problems: list[str] = []
     for workflow_path in workflow_paths:
-        problems.extend(validate_workflow_file(workflow_path))
+        problems.extend(validate_workflow_file(workflow_path, publishing=is_publishing(), nuget=declares_nuget()))
     problems.extend(validate_devkit_wrapper())
     for problem in problems:
         print(problem)
     run_actionlint()
     if problems:
         raise SystemExit(1)
+
+
+def default_workflows() -> list[Path]:
+    if is_publishing():
+        return [INTEGRATE_WORKFLOW, RELEASE_WORKFLOW, MERGE_GATE_WORKFLOW]
+    return [INTEGRATE_WORKFLOW, MERGE_GATE_WORKFLOW]
+
+
+def is_publishing() -> bool:
+    return CONFIG_PATH.is_file()
+
+
+def declares_nuget() -> bool:
+    if not CONFIG_PATH.is_file():
+        return False
+    config = load_config(CONFIG_PATH)
+    return any("nuget" in package.registries for package in config.packages.values())
 
 
 def is_mapping(value: object) -> TypeGuard[dict[object, object]]:
@@ -146,43 +189,115 @@ def validate_devkit_wrapper(path: Path = DEVKIT_WRAPPER_PATH) -> list[str]:
         return [f"{path}: wrapper must be a composite action"]
     steps_value = runs_value.get("steps")
     steps = steps_value if is_object_list(steps_value) else []
-    if len(steps) != 2 or not is_mapping(steps[0]) or not is_mapping(steps[1]):
-        return [f"{path}: wrapper must contain exactly two steps (setup-uv, clone)"]
+    if len(steps) != 1 or not is_mapping(steps[0]):
+        return [f"{path}: wrapper must contain exactly one step (the clone)"]
     problems: list[str] = []
-    if steps[0].get("uses") != SETUP_UV_USES:
-        problems.append(f"{path}: wrapper first step must be {SETUP_UV_USES}")
-    with_value = steps[0].get("with")
-    if not is_mapping(with_value) or with_value.get("enable-cache") is not True:
-        problems.append(f"{path}: wrapper first step must set enable-cache: true")
-    if steps[1].get("shell") != "bash":
-        problems.append(f"{path}: wrapper second step must set shell: bash")
-    run_value = steps[1].get("run")
+    if steps[0].get("shell") != "bash":
+        problems.append(f"{path}: wrapper step must set shell: bash")
+    env_value = steps[0].get("env")
+    if (
+        not is_string_mapping(env_value)
+        or list(env_value) != [WRAPPER_COMMIT_ENV_VAR]
+        or not WRAPPER_COMMIT_ENV.fullmatch(str(env_value[WRAPPER_COMMIT_ENV_VAR]))
+    ):
+        problems.append(f"{path}: wrapper step must carry the pinned commit in env {WRAPPER_COMMIT_ENV_VAR}")
+    run_value = steps[0].get("run")
     if not isinstance(run_value, str) or not WRAPPER_CLONE.fullmatch(run_value.strip()):
         problems.append(
-            f"{path}: wrapper second step must clone {DEVKIT_REPOSITORY} into {DEVKIT_INSTALL_PATH}"
+            f"{path}: wrapper step must clone {DEVKIT_REPOSITORY} into {DEVKIT_INSTALL_PATH}"
             " and checkout the pinned commit"
         )
     return problems
 
 
-def validate_workflow_file(path: Path) -> list[str]:
+def validate_workflow_file(path: Path, publishing: bool = True, nuget: bool = False) -> list[str]:
     if not path.is_file():
         return [f"{path}: workflow file not found"]
-    document: object = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw_lines = path.read_text(encoding="utf-8").splitlines()
+    document: object = yaml.safe_load("\n".join(raw_lines))
     if not is_mapping(document):
         return [f"{path}: workflow is not a YAML mapping"]
     jobs_value = document.get("jobs")
     if not is_mapping(jobs_value):
         return [f"{path}: no jobs mapping"]
     problems: list[str] = []
+    verbs_by_job: dict[str, list[str]] = {}
     for job_name, job_value in jobs_value.items():
-        problems.extend(validate_job(str(job_name), job_value, path))
+        job_problems, verb_steps = validate_job(str(job_name), job_value, path, nuget)
+        problems.extend(job_problems)
+        verbs_by_job[str(job_name)] = [verb.name for verb in verb_steps]
+    problems.extend(validate_run_steps_single_line(raw_lines, path))
+    if path.name == "integrate.yml":
+        problems.extend(validate_integrate_contract(jobs_value, verbs_by_job, publishing, path))
+    if path.name == "release.yml":
+        problems.extend(validate_release_contract(document, verbs_by_job, path))
     if path.name == "merge-gate.yml":
         problems.extend(validate_merge_gate_triggers(document, path))
         problems.extend(validate_merge_gate_concurrency(document, path))
         for job_name, job_value in jobs_value.items():
             if is_mapping(job_value) and job_value.get("if") != MERGE_GATE_JOB_IF:
                 problems.append(f"{path}: job '{job_name}': merge-gate.yml jobs must gate on if: {MERGE_GATE_JOB_IF}")
+    return problems
+
+
+def validate_integrate_contract(
+    jobs_value: dict[object, object], verbs_by_job: dict[str, list[str]], publishing: bool, path: Path
+) -> list[str]:
+    problems: list[str] = []
+    if publishing and VALIDATE_RELEASE_PLAN_JOB not in jobs_value:
+        problems.append(
+            f"{path}: publishing repos must run the {VALIDATE_RELEASE_PLAN_JOB} job (release-devkit.yaml is present)"
+        )
+    if LINT_WORKFLOWS_JOB not in jobs_value:
+        problems.append(f"{path}: integrate.yml must run the {LINT_WORKFLOWS_JOB} job (the lint root)")
+    for verb_job in (LINT_WORKFLOWS_JOB, VALIDATE_RELEASE_PLAN_JOB):
+        carrying = [job_name for job_name, verbs in verbs_by_job.items() if verb_job in verbs]
+        if carrying and carrying != [verb_job]:
+            problems.append(f"{path}: the {verb_job} verb must run in the '{verb_job}' job, got {carrying}")
+    for root in (LINT_WORKFLOWS_JOB, VALIDATE_RELEASE_PLAN_JOB, MIRROR_IMAGES_JOB):
+        needs = job_needs(jobs_value[root]) if root in jobs_value else []
+        if needs:
+            problems.append(f"{path}: job '{root}' is a parallel root and must carry no needs, got {needs}")
+    if PREFLIGHT_JOB in jobs_value:
+        expected: set[str] = {LINT_WORKFLOWS_JOB}
+        if MIRROR_IMAGES_JOB in jobs_value:
+            expected.add(MIRROR_IMAGES_JOB)
+        actual = set(job_needs(jobs_value[PREFLIGHT_JOB]))
+        if actual != expected:
+            problems.append(
+                f"{path}: job '{PREFLIGHT_JOB}' must need {sorted(expected)} (contract breaks kill the battery early),"
+                f" got {sorted(actual)}"
+            )
+    writer_jobs = [
+        str(job_name)
+        for job_name, job_value in jobs_value.items()
+        if is_mapping(job_value) and job_has_cache_writing_setup_uv(job_value)
+    ]
+    expected_writer = PREFLIGHT_JOB if PREFLIGHT_JOB in jobs_value else LINT_WORKFLOWS_JOB
+    if len(writer_jobs) != 1:
+        problems.append(
+            f"{path}: integrate.yml must carry exactly one cache-writing setup-uv step ({expected_writer}'s saver),"
+            f" found {len(writer_jobs)}"
+        )
+    elif writer_jobs != [expected_writer]:
+        problems.append(f"{path}: the cache-writing setup-uv must live in '{expected_writer}', found {writer_jobs}")
+    return problems
+
+
+def validate_release_contract(
+    document: dict[object, object], verbs_by_job: dict[str, list[str]], path: Path
+) -> list[str]:
+    problems: list[str] = []
+    if document.get("name") != RELEASE_WORKFLOW_NAME:
+        problems.append(f"{path}: workflow name must be {RELEASE_WORKFLOW_NAME}")
+    concurrency = document.get("concurrency")
+    if not is_mapping(concurrency) or concurrency.get("group") != RELEASE_CONCURRENCY:
+        problems.append(f"{path}: concurrency group must be {RELEASE_CONCURRENCY} (the per-ref delivery queue)")
+    elif "cancel-in-progress" in concurrency:
+        problems.append(f"{path}: concurrency must omit cancel-in-progress — the queue is the delivery mutex")
+    carrying = [job_name for job_name, verbs in verbs_by_job.items() if RELEASE_JOB in verbs]
+    if carrying and carrying != [RELEASE_JOB]:
+        problems.append(f"{path}: the release verb must run in the '{RELEASE_JOB}' job, got {carrying}")
     return problems
 
 
@@ -221,32 +336,27 @@ def validate_merge_gate_concurrency(document: dict[object, object], path: Path) 
     return []
 
 
-def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
+def validate_job(job_name: str, job_value: object, path: Path, nuget: bool = False) -> tuple[list[str], list[VerbStep]]:
     if not is_mapping(job_value):
-        return [f"{path}: job '{job_name}' is not a mapping"]
+        return [f"{path}: job '{job_name}' is not a mapping"], []
+    problems: list[str] = []
+    if "environment" in job_value:
+        problems.append(f"{path}: job '{job_name}': environment: key is forbidden (the fleet runs environment-less)")
     steps_value = job_value.get("steps")
     steps = steps_value if is_object_list(steps_value) else []
-    checkout_steps, problems = collect_checkout_steps(job_name, steps, path)
-    verb_steps, verb_problems = collect_verb_steps(job_name, steps, path)
+    checkout_steps, checkout_problems = collect_checkout_steps(job_name, steps, path)
+    problems.extend(checkout_problems)
+    verb_steps, verb_problems = collect_verb_steps(job_name, steps, path, nuget)
     problems.extend(verb_problems)
     problems.extend(collect_dead_uses(job_name, steps, path))
     if not verb_steps:
-        return problems
+        return problems, verb_steps
     is_merge_gate_job = any(verb.name == "merge-gate" for verb in verb_steps)
-    is_real_publish = any(verb.name == "release" for verb in verb_steps)
-    if is_merge_gate_job:
-        required_consumer = MERGE_BOT
-    elif is_real_publish:
-        required_consumer = CONSUMER_LEDGER_PUSH
-    else:
-        required_consumer = CONSUMER_LEDGER
-    if required_consumer != CONSUMER_LEDGER_PUSH and any(
-        step.signature == CONSUMER_LEDGER_PUSH for step in checkout_steps
-    ):
-        problems.append(
-            f"{path}: job '{job_name}': consumer-ledger-push checkout is reserved for real release jobs"
-        )
-    if required_consumer != MERGE_BOT and any(step.signature == MERGE_BOT for step in checkout_steps):
+    is_release_job = any(verb.name == "release" for verb in verb_steps)
+    is_delivery_job = any(verb.name in NUGET_DELIVERY_VERBS for verb in verb_steps)
+    if not is_release_job and any(step.signature == CHECKOUT_WITH_TAGS_PUSH for step in checkout_steps):
+        problems.append(f"{path}: job '{job_name}': checkout-with-tags-push is reserved for release jobs")
+    if not is_merge_gate_job and any(step.signature == MERGE_BOT for step in checkout_steps):
         problems.append(f"{path}: job '{job_name}': merge-bot checkout is reserved for merge-gate jobs")
     first_verb_index = min(verb.step_index for verb in verb_steps)
     wrapper_indexes = [
@@ -257,14 +367,19 @@ def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
     wrappers_before = [index for index in wrapper_indexes if index < first_verb_index]
     if not wrappers_before:
         problems.append(f"{path}: job '{job_name}': no {DEVKIT_WRAPPER_USES} step precedes the release-devkit verb")
-        return problems
+        return problems, verb_steps
     earliest_wrapper_index = min(wrappers_before)
-    has_consumer = any(
-        step.signature == required_consumer and step.step_index < earliest_wrapper_index for step in checkout_steps
-    )
-    if not has_consumer:
+    required_checkouts = {VERB_CHECKOUTS[verb.name] for verb in verb_steps}
+    for required in sorted(required_checkouts):
+        if not any(step.signature == required and step.step_index < earliest_wrapper_index for step in checkout_steps):
+            problems.append(f"{path}: job '{job_name}': no {required} checkout precedes the setup-release-devkit step")
+    if not any(
+        is_mapping(step_value) and is_canonical_setup_uv(step_value) and index < earliest_wrapper_index
+        for index, step_value in enumerate(steps)
+    ):
         problems.append(
-            f"{path}: job '{job_name}': no {required_consumer} checkout precedes the setup-release-devkit step"
+            f"{path}: job '{job_name}': no canonical {SETUP_UV_USES} step"
+            " (enable-cache: true with an explicit save-cache) precedes the setup-release-devkit step"
         )
     mint_indexes: list[int] = []
     for index, step_value in enumerate(steps):
@@ -283,7 +398,123 @@ def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
             f"{path}: job '{job_name}': merge-gate requires a canonical {MINT_STEP_USES} mint step"
             " between the wrapper and the verb"
         )
+    nuget_login_indexes: list[int] = []
+    for index, step_value in enumerate(steps):
+        if not is_mapping(step_value) or step_value.get("uses") != NUGET_LOGIN_USES:
+            continue
+        if step_value.get("id") != "nuget-login" or step_value.get("with") != NUGET_LOGIN_INPUTS:
+            problems.append(
+                f"{path}: job '{job_name}' step {index}: NuGet/login must be the canonical mint step"
+                " (id: nuget-login, user from the NUGET_USER org secret)"
+            )
+            continue
+        nuget_login_indexes.append(index)
+    if (
+        is_delivery_job
+        and nuget
+        and not any(earliest_wrapper_index < index < first_verb_index for index in nuget_login_indexes)
+    ):
+        problems.append(
+            f"{path}: job '{job_name}': nuget delivery jobs require a canonical {NUGET_LOGIN_USES} mint step"
+            " between the wrapper and the verb"
+        )
+    if not is_delivery_job or not nuget:
+        if any(is_mapping(step_value) and step_value.get("uses") == NUGET_LOGIN_USES for step_value in steps):
+            problems.append(
+                f"{path}: job '{job_name}': {NUGET_LOGIN_USES} is reserved for the delivery jobs"
+                " of repos whose release-devkit.yaml declares a nuget registry"
+            )
+    return problems, verb_steps
+
+
+def job_needs(job_value: object) -> list[str]:
+    if not is_mapping(job_value):
+        return []
+    needs_value = job_value.get("needs")
+    if isinstance(needs_value, str):
+        return [needs_value]
+    if is_object_list(needs_value):
+        return [str(entry) for entry in needs_value]
+    return []
+
+
+def job_has_cache_writing_setup_uv(job_value: dict[object, object]) -> bool:
+    steps_value = job_value.get("steps")
+    steps = steps_value if is_object_list(steps_value) else []
+    return any(is_mapping(step_value) and is_cache_writing_setup_uv(step_value) for step_value in steps)
+
+
+def validate_run_steps_single_line(raw_lines: list[str], path: Path) -> list[str]:
+    problems: list[str] = []
+    for index, line in enumerate(raw_lines):
+        match = RUN_STEP_LINE.match(line)
+        if not match:
+            continue
+        value = (match.group("value") or "").strip()
+        run_column = len(line) - len(line.lstrip()) + len(match.group("prefix").lstrip())
+        if not value or value in BLOCK_SCALAR_HEADS:
+            if value == ">-":
+                block: list[str] = []
+                for entry in raw_lines[index + 1 :]:
+                    if entry.strip() and len(entry) - len(entry.lstrip()) <= run_column:
+                        break
+                    block.append(entry)
+                stripped = [entry.strip() for entry in block if entry.strip()]
+                if len(stripped) != len(block):
+                    problems.append(
+                        f"{path}: line {index + 1}: run: steps must be a single physical line"
+                        " (folded blocks may not contain blank lines)"
+                    )
+                elif not stripped:
+                    problems.append(
+                        f"{path}: line {index + 1}: run: steps must be a single physical line (empty folded block)"
+                    )
+                elif len({len(entry) - len(entry.lstrip()) for entry in block}) != 1:
+                    problems.append(
+                        f"{path}: line {index + 1}: run: steps must be a single physical line"
+                        " (folded continuations must share one indent)"
+                    )
+                else:
+                    joined = " ".join(stripped)
+                    if len(joined) <= RUN_STEP_FOLD_THRESHOLD:
+                        problems.append(
+                            f"{path}: line {index + 1}: run: steps must be a single physical line"
+                            f" (folds are allowed only for commands longer than {RUN_STEP_FOLD_THRESHOLD} characters)"
+                        )
+                    elif "release-devkit" in joined:
+                        problems.append(
+                            f"{path}: line {index + 1}: run: steps must be a single physical line"
+                            " (devkit verb invocations never fold)"
+                        )
+            else:
+                problems.append(
+                    f"{path}: line {index + 1}: run: steps must be a single physical line (no folded or literal blocks)"
+                )
+            continue
+        follow_up = next((entry for entry in raw_lines[index + 1 :] if entry.strip()), "")
+        if follow_up and len(follow_up) - len(follow_up.lstrip()) > run_column:
+            problems.append(
+                f"{path}: line {index + 1}: run: steps must be a single physical line (folded continuation follows)"
+            )
     return problems
+
+
+def is_canonical_setup_uv(step_value: dict[object, object]) -> bool:
+    if step_value.get("uses") != SETUP_UV_USES:
+        return False
+    with_block = step_value.get("with")
+    if not is_string_mapping(with_block):
+        return False
+    return any(with_block == inputs for inputs in (SETUP_UV_RESTORE_INPUTS, SETUP_UV_SAVE_INPUTS))
+
+
+def is_cache_writing_setup_uv(step_value: dict[object, object]) -> bool:
+    if step_value.get("uses") != SETUP_UV_USES:
+        return False
+    with_block = step_value.get("with")
+    if not is_string_mapping(with_block):
+        return False
+    return with_block.get("enable-cache") is True and with_block.get("save-cache") != "false"
 
 
 def collect_dead_uses(job_name: str, steps: list[object], path: Path) -> list[str]:
@@ -300,7 +531,9 @@ def collect_dead_uses(job_name: str, steps: list[object], path: Path) -> list[st
     return problems
 
 
-def collect_verb_steps(job_name: str, steps: list[object], path: Path) -> tuple[list[VerbStep], list[str]]:
+def collect_verb_steps(
+    job_name: str, steps: list[object], path: Path, nuget: bool = False
+) -> tuple[list[VerbStep], list[str]]:
     verb_steps: list[VerbStep] = []
     problems: list[str] = []
     for index, step_value in enumerate(steps):
@@ -325,13 +558,13 @@ def collect_verb_steps(job_name: str, steps: list[object], path: Path) -> tuple[
                     f"{path}: job '{job_name}' step {index}: {verb} carries rejected arguments ({args.strip()})"
                 )
                 continue
-            problems.extend(validate_verb_env(job_name, index, verb, step_value, path))
+            problems.extend(validate_verb_env(job_name, index, verb, step_value, path, nuget))
             verb_steps.append(VerbStep(step_index=index, name=verb))
     return verb_steps, problems
 
 
 def validate_verb_env(
-    job_name: str, step_index: int, verb: str, step_value: dict[object, object], path: Path
+    job_name: str, step_index: int, verb: str, step_value: dict[object, object], path: Path, nuget: bool = False
 ) -> list[str]:
     problems: list[str] = []
     env_value = step_value.get("env")
@@ -339,6 +572,18 @@ def validate_verb_env(
     for key, value in VERB_ENV.get(verb, {}).items():
         if env.get(key) != value:
             problems.append(f"{path}: job '{job_name}' step {step_index}: {verb} requires env {key}: {value}")
+    if verb in NUGET_DELIVERY_VERBS:
+        api_key_value = env.get(NUGET_API_KEY_ENV)
+        if nuget and api_key_value != NUGET_API_KEY_SOURCE:
+            problems.append(
+                f"{path}: job '{job_name}' step {step_index}: {verb} requires env"
+                f" {NUGET_API_KEY_ENV}: {NUGET_API_KEY_SOURCE}"
+            )
+        if not nuget and api_key_value is not None:
+            problems.append(
+                f"{path}: job '{job_name}' step {step_index}: {verb} must not carry {NUGET_API_KEY_ENV} env"
+                " (the release-devkit.yaml declares no nuget registry)"
+            )
     return problems
 
 
@@ -360,13 +605,28 @@ def collect_checkout_steps(job_name: str, steps: list[object], path: Path) -> tu
             continue
         with_value = step_value.get("with")
         with_block: dict[str, object] = with_value if is_string_mapping(with_value) else {}
-        signature = next((name for name, expected in SIGNATURES.items() if with_block == expected), None)
+        signature = next((name for name, expected in signatures_for(path).items() if with_block == expected), None)
         if signature is None:
             rendered = json.dumps(with_block, sort_keys=True)
             problems.append(f"{path}: job '{job_name}' step {index}: checkout matches no signature; with={rendered}")
         else:
             checkout_steps.append(CheckoutStep(step_index=index, signature=signature))
     return checkout_steps, problems
+
+
+def signatures_for(path: Path) -> dict[str, dict[str, object]]:
+    checkout_ref: dict[str, object] = {} if path.name == RELEASE_WORKFLOW.name else {"ref": INTEGRATE_HEAD_SHA}
+    return {
+        CHECKOUT: {**checkout_ref, "persist-credentials": False},
+        CHECKOUT_WITH_TAGS: {**checkout_ref, "fetch-depth": 0, "fetch-tags": True, "persist-credentials": False},
+        CHECKOUT_WITH_TAGS_PUSH: {
+            **checkout_ref,
+            "fetch-depth": 0,
+            "fetch-tags": True,
+            "persist-credentials": True,
+        },
+        MERGE_BOT: {"ref": MERGE_BOT_REF, "fetch-depth": 0, "persist-credentials": False},
+    }
 
 
 def run_actionlint() -> None:
