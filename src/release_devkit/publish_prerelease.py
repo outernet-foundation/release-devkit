@@ -9,11 +9,10 @@ from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, free_disk_space, install_dotnet, install_node
 
 from .config import DEFAULT_CONFIG_PATH, load_config, select_packages
-from .tags import GitTags
-from .manifests import resolve_edges
 from .outputs import append_line
-from .plan import compute_plan, render_dev_summary, resolve_dependency_versions
+from .plan import compute_release_plan, render_dev_summary
 from .registries import DEV_VERSION_FORMATS, NPM_DEV_DIST_TAG, PublishRequest, build_registries
+from .tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -45,18 +44,13 @@ def main(
     tags = GitTags()
 
     with ci_step("Compute dev publish plan"):
-        edges = resolve_edges(publish_config.packages)
-        plans = compute_plan(publish_config.packages, tags, edges)
-        publishing = {name for name in packages if plans[name].publish}
-        resolved_versions = {
-            name: resolve_dependency_versions(edges[name], plans, publishing) for name in packages if name in publishing
-        }
+        release_plan = compute_release_plan(publish_config, packages, tags)
 
-        summary = render_dev_summary(packages, plans, resolved_run_id)
+        summary = render_dev_summary(packages, release_plan.plans, resolved_run_id)
         print(summary)
         append_line(settings.github_step_summary, summary)
 
-        if not any(plan.publish for plan in plans.values()):
+        if not release_plan.publishing:
             print("Nothing to publish")
             return
 
@@ -73,7 +67,7 @@ def main(
     registries = build_registries(settings.nuget_api_key)
     published: list[tuple[str, str, str]] = []
     for name, package in packages.items():
-        plan = plans[name]
+        plan = release_plan.plans[name]
         if not plan.publish:
             continue
         for registry_name, identity in package.registries.items():
@@ -90,7 +84,7 @@ def main(
                                 if resolved.co_publishing
                                 else resolved.version
                             )
-                            for dependency_identity, resolved in resolved_versions[name].items()
+                            for dependency_identity, resolved in release_plan.resolved_versions[name].items()
                         },
                         dist_tag=NPM_DEV_DIST_TAG if registry_name == "npm" else None,
                     )

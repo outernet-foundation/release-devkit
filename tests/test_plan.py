@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from release_devkit.config import PackageConfig
+from release_devkit.config import AppConfig, PackageConfig, PublishConfig
 from release_devkit.tags import GitTags, parse_major_minor, parse_version
 from release_devkit.manifests import DependencyEdge
 from release_devkit.plan import (
@@ -10,8 +10,10 @@ from release_devkit.plan import (
     ResolvedDependency,
     TagSource,
     compute_plan,
+    compute_release_plan,
     next_version,
     render_dev_summary,
+    render_plan_summary,
     render_summary,
     resolve_dependency_versions,
     topological_order,
@@ -355,3 +357,51 @@ def test_fake_tag_source_satisfies_protocol():
 def test_package_plan_dataclass_shape():
     plan = PackagePlan(name="pkg", publish=True, version="1.0.0", last_version="0.9.0")
     assert plan.name == "pkg"
+
+
+RELEASE_CONFIG = PublishConfig(
+    packages={"pkg": PackageConfig(path=Path("pkg"), major_minor="0.1")},
+    apps={"app": AppConfig(path=Path("app"), major_minor="0.2")},
+    ci_workflow="release.yml",
+)
+RELEASE_PACKAGES = {"pkg": PackageConfig(path=Path("pkg"), major_minor="0.1")}
+
+
+def test_release_plan_bumps_apps_when_any_package_publishes():
+    tags = FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": True, "app": False})
+
+    release_plan = compute_release_plan(RELEASE_CONFIG, RELEASE_PACKAGES, tags)
+
+    assert release_plan.publishing == {"pkg"}
+    assert release_plan.plans["pkg"].version == "0.1.0"
+    assert release_plan.app_versions == {"app": "0.2.4"}
+    assert release_plan.anything_releases() is True
+
+
+def test_release_plan_leaves_everything_unchanged_when_nothing_changed():
+    tags = FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": False, "app": False})
+
+    release_plan = compute_release_plan(RELEASE_CONFIG, RELEASE_PACKAGES, tags)
+
+    assert release_plan.publishing == set()
+    assert release_plan.app_versions == {}
+    assert release_plan.anything_releases() is False
+
+
+def test_release_plan_bumps_app_on_its_own_path_change():
+    tags = FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": False, "app": True})
+
+    release_plan = compute_release_plan(RELEASE_CONFIG, RELEASE_PACKAGES, tags)
+
+    assert release_plan.publishing == set()
+    assert release_plan.app_versions == {"app": "0.2.4"}
+
+
+def test_render_plan_summary_lists_apps_with_old_and_new_versions():
+    tags = FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": True, "app": False})
+
+    release_plan = compute_release_plan(RELEASE_CONFIG, RELEASE_PACKAGES, tags)
+
+    summary = render_plan_summary(release_plan)
+    assert "### Publish Plan" in summary
+    assert "- app: 0.2.3 -> 0.2.4" in summary

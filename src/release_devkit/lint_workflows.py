@@ -60,16 +60,17 @@ WRAPPER_CLONE = re.compile(
 )
 DEVKIT_INVOCATION = re.compile(
     re.escape(DEVKIT_INVOCATION_PREFIX)
-    + r"(?P<verb>get-app-version|release|publish-prerelease|ensure-release-pr|lint-workflows|merge-gate)"
+    + r"(?P<verb>get-app-version|release|publish-prerelease|ensure-release-pr|lint-workflows|merge-gate|validate-release-plan)"
     + r'(?P<args>(?: [^)"]*)?)'
 )
 VERB_ARGS: dict[str, re.Pattern[str]] = {
     "get-app-version": re.compile(r"^ --app \S+$"),
-    "release": re.compile(r"^( --dry-run)?$"),
+    "release": re.compile(r"^$"),
     "publish-prerelease": re.compile(r"^$"),
     "ensure-release-pr": re.compile(r"^$"),
     "lint-workflows": re.compile(r"^$"),
     "merge-gate": re.compile(r"^$"),
+    "validate-release-plan": re.compile(r"^$"),
 }
 VERB_ENV: dict[str, dict[str, str]] = {
     "release": {"GITHUB_TOKEN": "${{ github.token }}"},
@@ -78,6 +79,7 @@ VERB_ENV: dict[str, dict[str, str]] = {
         "GITHUB_TOKEN": "${{ steps.mint.outputs.token }}",
         "HEAD_SHA": "${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}",
     },
+    "validate-release-plan": {},
 }
 
 PLATFORMS = {
@@ -98,7 +100,6 @@ class CheckoutStep:
 class VerbStep:
     step_index: int
     name: str
-    dry_run: bool
 
 
 @app.command()
@@ -232,7 +233,7 @@ def validate_job(job_name: str, job_value: object, path: Path) -> list[str]:
     if not verb_steps:
         return problems
     is_merge_gate_job = any(verb.name == "merge-gate" for verb in verb_steps)
-    is_real_publish = any(verb.name == "release" and not verb.dry_run for verb in verb_steps)
+    is_real_publish = any(verb.name == "release" for verb in verb_steps)
     if is_merge_gate_job:
         required_consumer = MERGE_BOT
     elif is_real_publish:
@@ -325,7 +326,7 @@ def collect_verb_steps(job_name: str, steps: list[object], path: Path) -> tuple[
                 )
                 continue
             problems.extend(validate_verb_env(job_name, index, verb, step_value, path))
-            verb_steps.append(VerbStep(step_index=index, name=verb, dry_run=args == " --dry-run"))
+            verb_steps.append(VerbStep(step_index=index, name=verb))
     return verb_steps, problems
 
 

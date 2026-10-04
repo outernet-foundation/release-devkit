@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from .config import PackageConfig
+from .config import PackageConfig, PublishConfig
 from .tags import parse_major_minor, parse_version
-from .manifests import DependencyEdge
+from .manifests import DependencyEdge, resolve_edges
 from .registries import DEV_VERSION_FORMATS
 
 UNCHANGED_FALLBACK_VERSION = "0.0.0"
@@ -30,6 +30,50 @@ class PackagePlan:
 class ResolvedDependency:
     version: str
     co_publishing: bool
+
+
+@dataclass(frozen=True)
+class ReleasePlan:
+    plans: dict[str, PackagePlan]
+    publishing: set[str]
+    resolved_versions: dict[str, dict[str, ResolvedDependency]]
+    app_last_versions: dict[str, str | None]
+    app_versions: dict[str, str]
+
+    def anything_releases(self) -> bool:
+        return bool(self.publishing) or bool(self.app_versions)
+
+
+def compute_release_plan(
+    publish_config: PublishConfig, packages: dict[str, PackageConfig], tags: TagSource
+) -> ReleasePlan:
+    edges = resolve_edges(publish_config.packages)
+    plans = compute_plan(publish_config.packages, tags, edges)
+    publishing = {name for name in packages if plans[name].publish}
+    resolved_versions = {
+        name: resolve_dependency_versions(edges[name], plans, publishing) for name in packages if name in publishing
+    }
+    any_package_published = any(plans[name].publish for name in packages)
+    app_last_versions: dict[str, str | None] = {}
+    app_versions: dict[str, str] = {}
+    for app_name, app_config in publish_config.apps.items():
+        prefix = f"{app_name}-v"
+        last_version = tags.latest_version(prefix)
+        last_in_line = tags.latest_version_in_line(prefix, app_config.major_minor)
+        app_last_versions[app_name] = last_version
+        changed = tags.has_changes_since(f"{prefix}{last_version}" if last_version else None, app_config.path)
+        # Apps depend on packages — bump if any package changed
+        if any_package_published:
+            changed = True
+        if changed:
+            app_versions[app_name] = next_version(app_config.major_minor, last_in_line, last_version, app_name)
+    return ReleasePlan(
+        plans=plans,
+        publishing=publishing,
+        resolved_versions=resolved_versions,
+        app_last_versions=app_last_versions,
+        app_versions=app_versions,
+    )
 
 
 def compute_plan(
@@ -108,6 +152,17 @@ def render_summary(plans: dict[str, PackagePlan]) -> str:
         "|---|---|---|",
     ]
     lines.extend(f"| {plan.name} | {plan.publish} | {plan.version} |" for plan in plans.values())
+    return "\n".join(lines)
+
+
+def render_plan_summary(release_plan: ReleasePlan) -> str:
+    lines = [render_summary(release_plan.plans), "", "### App Versions"]
+    for app_name, last_version in release_plan.app_last_versions.items():
+        new_version = release_plan.app_versions.get(app_name)
+        if new_version is not None:
+            lines.append(f"- {app_name}: {last_version or '(none)'} -> {new_version}")
+        else:
+            lines.append(f"- {app_name}: {last_version or '0.0.0'} (unchanged)")
     return "\n".join(lines)
 
 

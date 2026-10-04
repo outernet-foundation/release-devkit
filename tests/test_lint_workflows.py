@@ -41,9 +41,7 @@ PUBLISH_PRERELEASE_RUN = (
 
 PUBLISH_STABLE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release\n'
 
-PUBLISH_STABLE_DRY_RUN = (
-    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release --dry-run\n'
-)
+VALIDATE_PLAN_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev validate-release-plan\n'
 
 PUBLISH_STABLE_ENV = "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n"
 
@@ -110,9 +108,11 @@ def test_publish_stable_requires_persisting_consumer_checkout(tmp_path: Path) ->
     assert validate_workflow_file(write_workflow(tmp_path, workflow(good_jobs))) == []
 
 
-def test_preflight_dry_run_uses_plain_consumer_ledger(tmp_path: Path) -> None:
-    jobs = f"  preflight:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_DRY_RUN}{PUBLISH_STABLE_ENV}"
-    assert validate_workflow_file(write_workflow(tmp_path, workflow(jobs))) == []
+def test_publish_stable_rejects_the_dead_dry_run_flag(tmp_path: Path) -> None:
+    step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release --dry-run\n'
+    jobs = f"  preflight:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("carries rejected arguments" in problem for problem in problems)
 
 
 def test_push_signature_reserved_for_real_publish_stable(tmp_path: Path) -> None:
@@ -165,6 +165,13 @@ def test_rejected_verb_flags_are_flagged(tmp_path: Path) -> None:
         '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev publish-prerelease --run-id 42\n'
     )
     jobs = f"  publish-prerelease:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("carries rejected arguments" in problem for problem in problems)
+
+
+def test_validate_plan_rejects_flags(tmp_path: Path) -> None:
+    step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev validate-release-plan --foo\n'
+    jobs = f"  validate-release-plan:\n    steps:{CONSUMER_LEDGER_BLOCK}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("carries rejected arguments" in problem for problem in problems)
 
