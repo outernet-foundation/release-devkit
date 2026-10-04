@@ -45,12 +45,7 @@ PUBLISH_STABLE_DRY_RUN = (
     '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release --dry-run\n'
 )
 
-PUBLISH_STABLE_ENV = (
-    "        env:\n"
-    "          GH_TOKEN: ${{ github.token }}\n"
-    "          CI_REGISTRY_USERNAME: ${{ github.actor }}\n"
-    "          CI_REGISTRY_TOKEN: ${{ github.token }}\n"
-)
+PUBLISH_STABLE_ENV = "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n"
 
 MERGE_BOT_CHECKOUT_BLOCK = (
     "      - uses: actions/checkout@v5\n"
@@ -72,7 +67,7 @@ MERGE_GATE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --
 
 MERGE_GATE_ENV = (
     "        env:\n"
-    "          GH_TOKEN: ${{ steps.mint.outputs.token }}\n"
+    "          GITHUB_TOKEN: ${{ steps.mint.outputs.token }}\n"
     "          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}\n"
 )
 
@@ -141,9 +136,7 @@ def test_consumer_checkout_must_precede_wrapper(tmp_path: Path) -> None:
 def test_publish_stable_requires_canonical_env(tmp_path: Path) -> None:
     jobs = f"  release:\n    steps:{CONSUMER_LEDGER_PUSH_BLOCK}{WRAPPER_STEP}{PUBLISH_STABLE_RUN}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
-    assert any("release requires env GH_TOKEN" in problem for problem in problems)
-    assert any("release requires env CI_REGISTRY_USERNAME" in problem for problem in problems)
-    assert any("release requires env CI_REGISTRY_TOKEN" in problem for problem in problems)
+    assert any("release requires env GITHUB_TOKEN" in problem for problem in problems)
 
 
 def test_directory_invocation_is_rejected(tmp_path: Path) -> None:
@@ -274,7 +267,7 @@ def test_merge_gate_requires_minted_token_env(tmp_path: Path) -> None:
     steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{wrong_env}"
     path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
     problems = validate_workflow_file(path)
-    assert any("merge-gate requires env GH_TOKEN" in problem for problem in problems)
+    assert any("merge-gate requires env GITHUB_TOKEN" in problem for problem in problems)
 
 
 def test_merge_gate_requires_the_dispatch_head_sha_env(tmp_path: Path) -> None:

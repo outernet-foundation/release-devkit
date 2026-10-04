@@ -72,14 +72,10 @@ VERB_ARGS: dict[str, re.Pattern[str]] = {
     "merge-gate": re.compile(r"^$"),
 }
 VERB_ENV: dict[str, dict[str, str]] = {
-    "release": {
-        "GH_TOKEN": "${{ github.token }}",
-        "CI_REGISTRY_USERNAME": "${{ github.actor }}",
-        "CI_REGISTRY_TOKEN": "${{ github.token }}",
-    },
-    "ensure-release-pr": {"GH_TOKEN": "${{ github.token }}"},
+    "release": {"GITHUB_TOKEN": "${{ github.token }}"},
+    "ensure-release-pr": {"GITHUB_TOKEN": "${{ github.token }}"},
     "merge-gate": {
-        "GH_TOKEN": "${{ steps.mint.outputs.token }}",
+        "GITHUB_TOKEN": "${{ steps.mint.outputs.token }}",
         "HEAD_SHA": "${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}",
     },
 }

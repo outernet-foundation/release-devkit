@@ -23,6 +23,8 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 class Settings(BaseSettings):
     github_repository: str
     github_sha: str
+    github_actor: str = ""
+    github_token: str = ""
 
 
 @app.command()
@@ -38,7 +40,7 @@ def run_create_release(config: Annotated[Path, typer.Option(help="Publish config
     count = int(existing) if existing else 0
     tag = f"{year_month}.{count + 1}"
 
-    assets = collect_build_assets(publish_config, settings.github_repository, settings.github_sha)
+    assets = collect_build_assets(publish_config, settings)
 
     with ci_step("Create GitHub Release"):
         registry_urls: dict[str, Callable[[str, str], str]] = {
@@ -87,12 +89,12 @@ def run_create_release(config: Annotated[Path, typer.Option(help="Publish config
         print(f"  Release created: {tag}")
 
 
-def collect_build_assets(publish_config: PublishConfig, repository: str, sha: str) -> list[Path]:
+def collect_build_assets(publish_config: PublishConfig, settings: Settings) -> list[Path]:
     apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds is not None}
     if not apps_with_builds:
         return []
 
-    run_number = matched_ci_run_number(repository, sha, publish_config.ci_workflow)
+    run_number = matched_ci_run_number(settings.github_repository, settings.github_sha, publish_config.ci_workflow)
     build_tag = f"run-{run_number}"
     staging = Path(mkdtemp(prefix="release-builds-"))
     assets: list[Path] = []
@@ -101,7 +103,15 @@ def collect_build_assets(publish_config: PublishConfig, repository: str, sha: st
         with ci_step(f"Pull build artifacts ({app_name})"):
             for artifact in builds.artifacts:
                 target = staging / f"{artifact.project}-{artifact.platform}"
-                pull_build(builds.registry, artifact.project, artifact.platform, build_tag, target)
+                pull_build(
+                    builds.registry,
+                    artifact.project,
+                    artifact.platform,
+                    build_tag,
+                    target,
+                    registry_username=settings.github_actor,
+                    registry_token=settings.github_token,
+                )
                 source = select_artifact_file(artifact, target)
                 asset_name = artifact.name or source.name
                 asset = staging / asset_name
