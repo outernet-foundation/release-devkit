@@ -10,7 +10,7 @@ from ci_devkit.setup import configure_git, free_disk_space, install_dotnet, inst
 
 from .config import DEFAULT_CONFIG_PATH, load_config, select_packages
 from .create_release import run_create_release
-from .ledger import GitLedger
+from .tags import GitTags
 from .manifests import resolve_edges
 from .outputs import append_line
 from .plan import compute_plan, next_version, render_summary, resolve_dependency_versions
@@ -35,11 +35,11 @@ def main(
     settings = Settings.model_validate({})
     publish_config = load_config(config)
     packages = select_packages(publish_config.packages, only or [], exclude or [])
-    ledger = GitLedger()
+    tags = GitTags()
 
     with ci_step("Compute publish plan"):
         edges = resolve_edges(publish_config.packages)
-        plans = compute_plan(publish_config.packages, ledger, edges)
+        plans = compute_plan(publish_config.packages, tags, edges)
         publishing = {name for name in packages if plans[name].publish}
         resolved_versions = {
             name: resolve_dependency_versions(edges[name], plans, publishing) for name in packages if name in publishing
@@ -54,9 +54,9 @@ def main(
     with ci_step("Compute app versions"):
         for app_name, app_config in publish_config.apps.items():
             prefix = f"{app_name}-v"
-            last_version = ledger.latest_version(prefix)
-            last_in_line = ledger.latest_version_in_line(prefix, app_config.major_minor)
-            changed = ledger.has_changes_since(f"{prefix}{last_version}" if last_version else None, app_config.path)
+            last_version = tags.latest_version(prefix)
+            last_in_line = tags.latest_version_in_line(prefix, app_config.major_minor)
+            changed = tags.has_changes_since(f"{prefix}{last_version}" if last_version else None, app_config.path)
             # Apps depend on packages — bump if any package changed
             if any_package_published:
                 changed = True
@@ -105,13 +105,13 @@ def main(
             plan = plans[name]
             if plan.publish:
                 tag = f"{name}-v{plan.version}"
-                ledger.create_and_push_tag(tag)
+                tags.create_and_push_tag(tag)
                 print(f"  Tagged: {tag}")
 
         for app_name in publish_config.apps:
             if app_name in app_versions:
                 tag = f"{app_name}-v{app_versions[app_name]}"
-                ledger.create_and_push_tag(tag)
+                tags.create_and_push_tag(tag)
                 print(f"  Tagged: {tag}")
 
     run_create_release(config)

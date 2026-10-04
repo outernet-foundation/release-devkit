@@ -14,7 +14,7 @@ from ci_devkit.builds import pull_build
 from ci_devkit.ci_step import ci_step
 
 from .config import BuildArtifactConfig, PublishConfig, load_config
-from .ledger import GitLedger
+from .tags import GitTags
 from .plan import UNCHANGED_FALLBACK_VERSION
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -47,12 +47,12 @@ def run_create_release(config: Annotated[Path, typer.Option(help="Publish config
             "pypi": lambda identity, version: f"https://pypi.org/project/{identity}/{version}",
         }
 
-        ledger = GitLedger()
+        tags = GitTags()
         lines: list[str] = []
 
         lines.extend(["## Packages", "", "| Package | Version | Registry |", "|---|---|---|"])
         for name, package in publish_config.packages.items():
-            version = ledger.latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
+            version = tags.latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
             links: list[str] = []
             for registry_name, identity in package.registries.items():
                 url_builder = registry_urls.get(registry_name)
@@ -65,7 +65,7 @@ def run_create_release(config: Annotated[Path, typer.Option(help="Publish config
             lines.append(f"| {name} | {version} | {', '.join(links)} |")
 
         for app_name in publish_config.apps:
-            version = ledger.latest_version(f"{app_name}-v")
+            version = tags.latest_version(f"{app_name}-v")
             if version:
                 lines.append(f"| {app_name} | {version} | — |")
 

@@ -3,14 +3,14 @@ from pathlib import Path
 from typing import Protocol
 
 from .config import PackageConfig
-from .ledger import parse_major_minor, parse_version
+from .tags import parse_major_minor, parse_version
 from .manifests import DependencyEdge
 from .registries import DEV_VERSION_FORMATS
 
 UNCHANGED_FALLBACK_VERSION = "0.0.0"
 
 
-class TagLedger(Protocol):
+class TagSource(Protocol):
     def latest_version(self, prefix: str) -> str | None: ...
 
     def latest_version_in_line(self, prefix: str, major_minor: str) -> str | None: ...
@@ -33,15 +33,15 @@ class ResolvedDependency:
 
 
 def compute_plan(
-    packages: dict[str, PackageConfig], ledger: TagLedger, edges: dict[str, list[DependencyEdge]]
+    packages: dict[str, PackageConfig], tags: TagSource, edges: dict[str, list[DependencyEdge]]
 ) -> dict[str, PackagePlan]:
     plans: dict[str, PackagePlan] = {}
     for name in topological_order(packages, edges):
         package = packages[name]
         prefix = f"{name}-v"
-        last_version = ledger.latest_version(prefix)
-        last_in_line = ledger.latest_version_in_line(prefix, package.major_minor)
-        changed = ledger.has_changes_since(f"{prefix}{last_version}" if last_version else None, package.path)
+        last_version = tags.latest_version(prefix)
+        last_in_line = tags.latest_version_in_line(prefix, package.major_minor)
+        changed = tags.has_changes_since(f"{prefix}{last_version}" if last_version else None, package.path)
         plans[name] = PackagePlan(
             name=name,
             publish=changed,
@@ -92,7 +92,7 @@ def next_version(major_minor: str, last_in_line: str | None, last_overall: str |
     line = parse_major_minor(major_minor)
     if last_overall is not None and parse_version(last_overall)[:2] > line:
         raise ValueError(
-            f"{subject}: declared major.minor {major_minor} is below ledger version {last_overall}; "
+            f"{subject}: declared major.minor {major_minor} is below tags version {last_overall}; "
             "bump major_minor in release-devkit.yaml"
         )
     if last_in_line is None:

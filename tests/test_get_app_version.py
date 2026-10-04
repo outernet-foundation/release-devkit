@@ -46,7 +46,7 @@ def write_config(tmp_path: Path) -> Path:
 
 
 def invoke(monkeypatch: pytest.MonkeyPatch, tag_output: str, arguments: list[str]) -> Result:
-    monkeypatch.setattr("release_devkit.ledger.bash_output", CommandRecorder(output=tag_output))
+    monkeypatch.setattr("release_devkit.tags.bash_output", CommandRecorder(output=tag_output))
     return CliRunner().invoke(app, arguments)
 
 

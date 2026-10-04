@@ -7,7 +7,7 @@ import typer
 from pydantic_settings import BaseSettings
 
 from .config import DEFAULT_CONFIG_PATH, load_config
-from .ledger import GitLedger
+from .tags import GitTags
 from .plan import next_version
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -32,10 +32,10 @@ def main(
         raise SystemExit(f"Unknown app '{application}'. Valid: {names or '(none)'}")
 
     app_config = publish_config.apps[application]
-    ledger = GitLedger()
+    tags = GitTags()
     prefix = f"{application}-v"
-    last_version = ledger.latest_version(prefix)
-    last_in_line = ledger.latest_version_in_line(prefix, app_config.major_minor)
+    last_version = tags.latest_version(prefix)
+    last_in_line = tags.latest_version_in_line(prefix, app_config.major_minor)
     base_version = next_version(app_config.major_minor, last_in_line, last_version, application)
     resolved_run_number = str(run_number) if run_number else (settings.github_run_number or "0")
     print(f"{base_version}+{resolved_run_number}")

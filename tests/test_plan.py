@@ -3,12 +3,12 @@ from pathlib import Path
 import pytest
 
 from release_devkit.config import PackageConfig
-from release_devkit.ledger import GitLedger, parse_major_minor, parse_version
+from release_devkit.tags import GitTags, parse_major_minor, parse_version
 from release_devkit.manifests import DependencyEdge
 from release_devkit.plan import (
     PackagePlan,
     ResolvedDependency,
-    TagLedger,
+    TagSource,
     compute_plan,
     next_version,
     render_dev_summary,
@@ -20,34 +20,34 @@ from release_devkit.plan import (
 
 def test_latest_version_skips_prerelease_tags(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "release_devkit.ledger.list_tag_versions",
+        "release_devkit.tags.list_tag_versions",
         preview_and_stable_tags,
     )
 
-    assert GitLedger().latest_version("pkg-v") == "1.0.5"
+    assert GitTags().latest_version("pkg-v") == "1.0.5"
 
 
 def test_latest_version_returns_none_when_no_stable_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "release_devkit.ledger.list_tag_versions",
+        "release_devkit.tags.list_tag_versions",
         prerelease_only_tags,
     )
 
-    assert GitLedger().latest_version("pkg-v") is None
+    assert GitTags().latest_version("pkg-v") is None
 
 
 def test_latest_version_in_line_filters_to_declared_line(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "release_devkit.ledger.list_tag_versions",
+        "release_devkit.tags.list_tag_versions",
         multi_line_tags,
     )
 
-    ledger = GitLedger()
-    assert ledger.latest_version_in_line("pkg-v", "1.0") == "1.0.10"
-    assert ledger.latest_version_in_line("pkg-v", "1.9") == "1.9.2"
-    assert ledger.latest_version_in_line("pkg-v", "2.4") == "2.4.1"
-    assert ledger.latest_version_in_line("pkg-v", "1.10") == "1.10.3"
-    assert ledger.latest_version_in_line("pkg-v", "0.1") is None
+    tags = GitTags()
+    assert tags.latest_version_in_line("pkg-v", "1.0") == "1.0.10"
+    assert tags.latest_version_in_line("pkg-v", "1.9") == "1.9.2"
+    assert tags.latest_version_in_line("pkg-v", "2.4") == "2.4.1"
+    assert tags.latest_version_in_line("pkg-v", "1.10") == "1.10.3"
+    assert tags.latest_version_in_line("pkg-v", "0.1") is None
 
 
 def preview_and_stable_tags(_prefix: str) -> list[str]:
@@ -62,7 +62,7 @@ def multi_line_tags(_prefix: str) -> list[str]:
     return ["2.4.1", "2.4.0", "1.10.3", "1.9.2", "1.0.10", "1.0.9", "1.0.10-dev.5", "v1.0.9"]
 
 
-class FakeLedger:
+class FakeTagSource:
     def __init__(self, versions: dict[str, list[str]], changed: dict[str, bool]) -> None:
         self.versions = versions
         self.changed = changed
@@ -119,7 +119,7 @@ def test_next_version_first_in_line_and_patch_bump():
     assert next_version("1.9", "1.9.10", "1.9.10", "pkg") == "1.9.11"
 
 
-def test_next_version_new_line_above_old_ledger():
+def test_next_version_new_line_above_old_tag():
     assert next_version("1.4", None, "1.0.9", "pkg") == "1.4.0"
     assert next_version("2.0", None, "1.9.3", "pkg") == "2.0.0"
 
@@ -129,22 +129,22 @@ def test_next_version_app_derivation():
     assert next_version("1.0", "1.0.0", "1.0.0", "capture-tool") == "1.0.1"
 
 
-def test_next_version_guard_rejects_line_below_ledger():
-    with pytest.raises(ValueError, match=r"below ledger version 1\.5\.2"):
+def test_next_version_guard_rejects_line_below_tagged():
+    with pytest.raises(ValueError, match=r"below tags version 1\.5\.2"):
         next_version("1.0", None, "1.5.2", "pkg")
-    with pytest.raises(ValueError, match=r"below ledger version 1\.0\.0"):
+    with pytest.raises(ValueError, match=r"below tags version 1\.0\.0"):
         next_version("0.9", None, "1.0.0", "pkg")
 
 
 def test_plan_first_publish_uses_declared_line():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={},
         changed={"packages/generated/csharp/api-client": True, "packages/unity/Core": True},
     )
 
     plans = compute_plan(
         {"placeframe-api-client": API_CLIENT, "placeframe-core": CORE},
-        ledger,
+        tags,
         {"placeframe-api-client": [], "placeframe-core": []},
     )
 
@@ -155,38 +155,38 @@ def test_plan_first_publish_uses_declared_line():
 
 
 def test_plan_unchanged_package_carries_last_version():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={"placeframe-api-client-v": ["0.1.7"]},
         changed={"packages/generated/csharp/api-client": False},
     )
 
-    plans = compute_plan({"placeframe-api-client": API_CLIENT}, ledger, {"placeframe-api-client": []})
+    plans = compute_plan({"placeframe-api-client": API_CLIENT}, tags, {"placeframe-api-client": []})
 
     assert plans["placeframe-api-client"].publish is False
     assert plans["placeframe-api-client"].version == "0.1.7"
 
 
 def test_plan_changed_package_patch_bumps_within_line():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={"placeframe-api-client-v": ["0.1.7"]},
         changed={"packages/generated/csharp/api-client": True},
     )
 
-    plans = compute_plan({"placeframe-api-client": API_CLIENT}, ledger, {"placeframe-api-client": []})
+    plans = compute_plan({"placeframe-api-client": API_CLIENT}, tags, {"placeframe-api-client": []})
 
     assert plans["placeframe-api-client"].publish is True
     assert plans["placeframe-api-client"].version == "0.1.8"
 
 
 def test_plan_line_bump_publishes_first_version_of_new_line():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={"placeframe-api-client-v": ["1.0.9"]},
         changed={"packages/generated/csharp/api-client": True},
     )
 
     plans = compute_plan(
         {"placeframe-api-client": API_CLIENT.model_copy(update={"major_minor": "1.4"})},
-        ledger,
+        tags,
         {"placeframe-api-client": []},
     )
 
@@ -194,22 +194,22 @@ def test_plan_line_bump_publishes_first_version_of_new_line():
     assert plans["placeframe-api-client"].version == "1.4.0"
 
 
-def test_plan_guard_errors_when_line_is_below_ledger():
-    ledger = FakeLedger(
+def test_plan_guard_errors_when_line_is_below_tagged():
+    tags = FakeTagSource(
         versions={"placeframe-api-client-v": ["1.5.2"]},
         changed={"packages/generated/csharp/api-client": True},
     )
 
-    with pytest.raises(ValueError, match=r"placeframe-api-client: declared major\.minor 1\.4 is below ledger"):
+    with pytest.raises(ValueError, match=r"placeframe-api-client: declared major\.minor 1\.4 is below tags"):
         compute_plan(
             {"placeframe-api-client": API_CLIENT.model_copy(update={"major_minor": "1.4"})},
-            ledger,
+            tags,
             {"placeframe-api-client": []},
         )
 
 
 def test_plan_no_cascade_unchanged_dependent_does_not_publish():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={"placeframe-core-v": ["1.0.5"]},
         changed={
             "packages/unity/Core": True,
@@ -217,7 +217,7 @@ def test_plan_no_cascade_unchanged_dependent_does_not_publish():
         },
     )
 
-    plans = compute_plan(PACKAGES, ledger, EDGES)
+    plans = compute_plan(PACKAGES, tags, EDGES)
 
     assert plans["placeframe-core"].publish is True
     assert plans["placeframe-core"].version == "1.0.6"
@@ -262,11 +262,11 @@ def test_topological_order_rejects_self_edges():
 
 
 def test_resolve_dependency_versions_co_publishing_rides_the_next_version():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={"placeframe-core-v": ["1.0.5"]},
         changed={"packages/unity/Core": True, "packages/unity/ARFoundation": True},
     )
-    plans = compute_plan(PACKAGES, ledger, EDGES)
+    plans = compute_plan(PACKAGES, tags, EDGES)
 
     resolved = resolve_dependency_versions(EDGES["placeframe-arfoundation"], plans, {"placeframe-core"})
 
@@ -274,11 +274,11 @@ def test_resolve_dependency_versions_co_publishing_rides_the_next_version():
 
 
 def test_resolve_dependency_versions_unchanged_sibling_rides_the_current_tag():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={"placeframe-core-v": ["1.0.5"]},
         changed={"packages/unity/Core": False, "packages/unity/ARFoundation": True},
     )
-    plans = compute_plan(PACKAGES, ledger, EDGES)
+    plans = compute_plan(PACKAGES, tags, EDGES)
 
     resolved = resolve_dependency_versions(EDGES["placeframe-arfoundation"], plans, {"placeframe-arfoundation"})
 
@@ -286,22 +286,22 @@ def test_resolve_dependency_versions_unchanged_sibling_rides_the_current_tag():
 
 
 def test_resolve_dependency_versions_never_published_sibling_is_loud():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={},
         changed={"packages/unity/ARFoundation": True},
     )
-    plans = compute_plan(PACKAGES, ledger, EDGES)
+    plans = compute_plan(PACKAGES, tags, EDGES)
 
     with pytest.raises(ValueError, match="'placeframe-core' has never published"):
         resolve_dependency_versions(EDGES["placeframe-arfoundation"], plans, {"placeframe-arfoundation"})
 
 
 def test_resolve_dependency_versions_first_release_pair_co_publishes():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={},
         changed={"packages/unity/Core": True, "packages/unity/ARFoundation": True},
     )
-    plans = compute_plan(PACKAGES, ledger, EDGES)
+    plans = compute_plan(PACKAGES, tags, EDGES)
 
     resolved = resolve_dependency_versions(
         EDGES["placeframe-arfoundation"], plans, {"placeframe-core", "placeframe-arfoundation"}
@@ -311,7 +311,7 @@ def test_resolve_dependency_versions_first_release_pair_co_publishes():
 
 
 def test_render_summary_lists_every_package():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={"placeframe-core-v": ["1.0.5"]},
         changed={
             "packages/generated/csharp/api-client": True,
@@ -319,7 +319,7 @@ def test_render_summary_lists_every_package():
             "packages/unity/ARFoundation": False,
         },
     )
-    plans = compute_plan(PACKAGES, ledger, EDGES)
+    plans = compute_plan(PACKAGES, tags, EDGES)
 
     summary = render_summary(plans)
 
@@ -329,7 +329,7 @@ def test_render_summary_lists_every_package():
 
 
 def test_render_dev_summary_lists_per_registry_versions():
-    ledger = FakeLedger(
+    tags = FakeTagSource(
         versions={},
         changed={
             "packages/generated/csharp/api-client": True,
@@ -338,7 +338,7 @@ def test_render_dev_summary_lists_per_registry_versions():
             "packages/python/common": True,
         },
     )
-    plans = compute_plan(PACKAGES, ledger, EDGES)
+    plans = compute_plan(PACKAGES, tags, EDGES)
 
     summary = render_dev_summary(PACKAGES, plans, "4242")
 
@@ -347,9 +347,9 @@ def test_render_dev_summary_lists_per_registry_versions():
     assert "| placeframe-core | False | - |" in summary
 
 
-def test_fake_ledger_satisfies_protocol():
-    ledger: TagLedger = FakeLedger(versions={}, changed={})
-    assert ledger.latest_version("x-v") is None
+def test_fake_tag_source_satisfies_protocol():
+    tags: TagSource = FakeTagSource(versions={}, changed={})
+    assert tags.latest_version("x-v") is None
 
 
 def test_package_plan_dataclass_shape():

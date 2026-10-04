@@ -3,12 +3,12 @@ from pathlib import Path
 
 from bashrun.bash import bash, bash_check, bash_output
 
-# Prerelease-suffixed tags (e.g. 1.0.6-preview) are not stable-ledger versions: the stable flow
+# Prerelease-suffixed tags (e.g. 1.0.6-preview) are not stable versions: the stable flow
 # must never compute a next version from one. Dev-channel versions never enter the tag space.
 STABLE_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 
-class GitLedger:
+class GitTags:
     def latest_version(self, prefix: str) -> str | None:
         for version in list_tag_versions(prefix):
             if STABLE_VERSION_PATTERN.fullmatch(version):

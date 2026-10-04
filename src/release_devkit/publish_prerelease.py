@@ -9,7 +9,7 @@ from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, free_disk_space, install_dotnet, install_node
 
 from .config import DEFAULT_CONFIG_PATH, load_config, select_packages
-from .ledger import GitLedger
+from .tags import GitTags
 from .manifests import resolve_edges
 from .outputs import append_line
 from .plan import compute_plan, render_dev_summary, resolve_dependency_versions
@@ -42,11 +42,11 @@ def main(
 
     publish_config = load_config(config)
     packages = select_packages(publish_config.packages, only or [], exclude or [])
-    ledger = GitLedger()
+    tags = GitTags()
 
     with ci_step("Compute dev publish plan"):
         edges = resolve_edges(publish_config.packages)
-        plans = compute_plan(publish_config.packages, ledger, edges)
+        plans = compute_plan(publish_config.packages, tags, edges)
         publishing = {name for name in packages if plans[name].publish}
         resolved_versions = {
             name: resolve_dependency_versions(edges[name], plans, publishing) for name in packages if name in publishing
