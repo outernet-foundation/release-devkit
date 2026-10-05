@@ -13,9 +13,10 @@ BASE_BRANCH = "dev"
 # never appears in a logged command string or a process argument.
 GIT_CREDENTIAL_HELPER = r"!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f"
 GIT_COMMAND = f"git -c credential.helper='{GIT_CREDENTIAL_HELPER}'"
-GREEN_CHECK_STATES = frozenset({"SUCCESS", "SKIPPED"})
+GREEN_CONCLUSIONS = frozenset({"SUCCESS", "SKIPPED"})
+GATE_CHECK_NAME = "merge-gate"
 LABEL_NAME = "ready-to-merge"
-WAITING_CHECK_STATES = frozenset({"IN_PROGRESS", "QUEUED", "PENDING", "WAITING"})
+WAITING_STATUSES = frozenset({"IN_PROGRESS", "QUEUED", "PENDING", "WAITING"})
 
 
 class Settings(BaseSettings):
@@ -27,10 +28,9 @@ class LabelEntry(BaseModel):
 
 
 class CheckEntry(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
     name: str
-    state: str
+    status: str | None = None
+    conclusion: str | None = None
 
 
 class PullRequestRef(BaseModel):
@@ -74,15 +74,18 @@ def main() -> None:
         raise SystemExit(f"label {LABEL_NAME} absent — refusing to merge")
 
     with ci_step("Verify checks"):
-        blocking = [entry for entry in pull_request.check_rollup if entry.state not in GREEN_CHECK_STATES]
+        battery = [entry for entry in pull_request.check_rollup if entry.name != GATE_CHECK_NAME]
+        blocking = [
+            entry for entry in battery if entry.status != "COMPLETED" or entry.conclusion not in GREEN_CONCLUSIONS
+        ]
         if blocking:
-            if all(entry.state in WAITING_CHECK_STATES for entry in blocking):
+            if all(entry.status in WAITING_STATUSES for entry in blocking):
                 print(f"  checks still pending on PR #{pr_number} — the other wake will land it")
                 return
             raise SystemExit(
                 f"checks not green on PR #{pr_number} head {pull_request.head_oid[:12]} — see the PR's checks"
             )
-        print(f"  {len(pull_request.check_rollup)} checks green on {pull_request.head_oid[:12]}")
+        print(f"  {len(battery)} checks green on {pull_request.head_oid[:12]}")
 
     with ci_step("Fast-forward dev"):
         checked_out = bash_output("git rev-parse HEAD").strip()

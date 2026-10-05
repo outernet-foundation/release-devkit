@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 
 import pytest
@@ -8,7 +9,7 @@ from release_devkit import merge_gate
 from release_devkit.merge_gate import Settings
 
 HEAD_SHA = "a" * 40
-GREEN_ROLLUP = [{"name": "lint-workflows", "state": "SUCCESS"}]
+GREEN_ROLLUP = [{"name": "lint-workflows", "status": "COMPLETED", "conclusion": "SUCCESS"}]
 
 
 class CommandResponses:
@@ -27,7 +28,7 @@ class BashLog:
         self.commands.append(command)
 
 
-def pr_view_payload(labels: list[str], rollup: list[dict[str, str]], state: str = "OPEN") -> str:
+def pr_view_payload(labels: list[str], rollup: Sequence[Mapping[str, str | None]], state: str = "OPEN") -> str:
     return json.dumps({
         "state": state,
         "headRefOid": HEAD_SHA,
@@ -102,7 +103,7 @@ def test_gate_refuses_a_pr_that_is_not_open(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_gate_refuses_terminal_check_failures_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
-    rollup = [{"name": "lint-workflows", "state": "FAILURE"}]
+    rollup = [{"name": "lint-workflows", "status": "COMPLETED", "conclusion": "FAILURE"}]
     payload = pr_view_payload(["ready-to-merge"], rollup)
     exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
     assert exit_request is not None
@@ -115,9 +116,9 @@ def test_gate_refuses_terminal_check_failures_loudly(monkeypatch: pytest.MonkeyP
 
 def test_gate_exits_cleanly_while_checks_are_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     rollup = [
-        {"name": "lint-workflows", "state": "SUCCESS"},
-        {"name": "preflight", "state": "IN_PROGRESS"},
-        {"name": "build", "state": "QUEUED"},
+        {"name": "lint-workflows", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "preflight", "status": "IN_PROGRESS"},
+        {"name": "build", "status": "QUEUED"},
     ]
     payload = pr_view_payload(["ready-to-merge"], rollup)
     exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
@@ -127,6 +128,28 @@ def test_gate_exits_cleanly_while_checks_are_pending(monkeypatch: pytest.MonkeyP
 
 def test_gate_lands_a_labeled_green_pr(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP)
+    exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
+    assert exit_request is None
+    assert any("push origin HEAD:refs/heads/dev" in command for command in bash_log.commands)
+
+
+def test_gate_treats_skipped_checks_as_green(monkeypatch: pytest.MonkeyPatch) -> None:
+    rollup = [
+        {"name": "lint-workflows", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "unity-matrix", "status": "COMPLETED", "conclusion": "SKIPPED"},
+    ]
+    payload = pr_view_payload(["ready-to-merge"], rollup)
+    exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
+    assert exit_request is None
+    assert any("push origin HEAD:refs/heads/dev" in command for command in bash_log.commands)
+
+
+def test_gate_ignores_its_own_check_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    rollup = [
+        {"name": "lint-workflows", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "merge-gate", "status": "COMPLETED", "conclusion": "FAILURE"},
+    ]
+    payload = pr_view_payload(["ready-to-merge"], rollup)
     exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
     assert exit_request is None
     assert any("push origin HEAD:refs/heads/dev" in command for command in bash_log.commands)
