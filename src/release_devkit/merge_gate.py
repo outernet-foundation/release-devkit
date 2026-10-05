@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shlex
+
 import typer
 from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
@@ -45,6 +47,7 @@ class PullRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     state: str
+    title: str
     head_oid: str = Field(alias="headRefOid")
     labels: list[LabelEntry]
     check_rollup: list[CheckEntry] = Field(alias="statusCheckRollup")
@@ -69,7 +72,7 @@ def main() -> None:
         raise SystemExit(f"head {settings.head_sha[:12]} matches {rendered} open PR(s) to {BASE_BRANCH}")
     pr_number = str(matches[0])
     pull_request = PullRequest.model_validate_json(
-        bash_output(f"gh pr view {pr_number} --json state,headRefOid,labels,statusCheckRollup")
+        bash_output(f"gh pr view {pr_number} --json state,title,headRefOid,labels,statusCheckRollup")
     )
     if pull_request.state != "OPEN":
         raise SystemExit(f"PR is {pull_request.state}, not OPEN — refusing to merge")
@@ -100,7 +103,8 @@ def main() -> None:
         bash("git checkout --detach FETCH_HEAD")
         bash('git config user.name "merge-bot"')
         bash('git config user.email "merge-bot@users.noreply.github.com"')
-        bash(f'git merge --no-ff {pull_request.head_oid} -m "Merge PR #{pr_number}"')
+        message = f"Merge PR #{pr_number}: {pull_request.title}"
+        bash(f"git merge --no-ff {pull_request.head_oid} -m {shlex.quote(message)}")
         bash(f"{GIT_COMMAND} push origin HEAD:refs/heads/{BASE_BRANCH}")
         print(f"  {BASE_BRANCH} merged PR #{pr_number}")
 

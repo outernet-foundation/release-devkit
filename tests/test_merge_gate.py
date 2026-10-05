@@ -28,9 +28,12 @@ class BashLog:
         self.commands.append(command)
 
 
-def pr_view_payload(labels: list[str], rollup: Sequence[Mapping[str, str | None]], state: str = "OPEN") -> str:
+def pr_view_payload(
+    labels: list[str], rollup: Sequence[Mapping[str, str | None]], state: str = "OPEN", title: str = "Test PR"
+) -> str:
     return json.dumps({
         "state": state,
+        "title": title,
         "headRefOid": HEAD_SHA,
         "labels": [{"name": name} for name in labels],
         "statusCheckRollup": rollup,
@@ -43,7 +46,7 @@ def gate_responses(payload: str) -> dict[str, str]:
         "gh pr list --head feature-x --base dev --json number,headRefOid": json.dumps([
             {"number": 7, "headRefOid": HEAD_SHA}
         ]),
-        "gh pr view 7 --json state,headRefOid,labels,statusCheckRollup": payload,
+        "gh pr view 7 --json state,title,headRefOid,labels,statusCheckRollup": payload,
         "gh pr view 7 --json headRefName --jq .headRefName": "feature-x\n",
         "git rev-parse HEAD": f"{HEAD_SHA}\n",
     }
@@ -154,6 +157,13 @@ def test_gate_configures_git_identity_before_merge(monkeypatch: pytest.MonkeyPat
     merge_index = next(i for i, cmd in enumerate(commands) if "git merge --no-ff" in cmd)
     assert name_index < merge_index
     assert email_index < merge_index
+
+
+def test_gate_merge_message_includes_pr_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP, title="Add draft release surfaces")
+    exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
+    assert exit_request is None
+    assert any("Merge PR #7: Add draft release surfaces" in command for command in bash_log.commands)
 
 
 def test_gate_treats_skipped_checks_as_green(monkeypatch: pytest.MonkeyPatch) -> None:
