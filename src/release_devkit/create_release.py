@@ -124,7 +124,7 @@ def collect_build_assets(publish_config: PublishConfig, settings: Settings) -> l
 
 def matched_ci_run_number(repository: str, sha: str, ci_workflow: str) -> str:
     with ci_step("Find successful CI run"):
-        parent = bash_output(f'gh api "/repos/{repository}/git/commits/{sha}" --jq ".parents[1].sha"').strip()
+        parent = bash_output(f'gh api "/repos/{repository}/git/commits/{sha}" --jq ".parents[1].sha // .sha"').strip()
         run_number = bash_output(
             f'gh api "/repos/{repository}/actions/workflows/{ci_workflow}/runs'
             f'?head_sha={parent}&status=success" --jq ".workflow_runs[0].run_number // empty"'
