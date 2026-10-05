@@ -98,6 +98,8 @@ def main() -> None:
         if not bash_check("git merge-base --is-ancestor FETCH_HEAD HEAD"):
             raise SystemExit(f"{BASE_BRANCH} has commits not on the PR head — rebase the PR onto {BASE_BRANCH}")
         bash("git checkout --detach FETCH_HEAD")
+        bash('git config user.name "merge-bot"')
+        bash('git config user.email "merge-bot@users.noreply.github.com"')
         bash(f'git merge --no-ff {pull_request.head_oid} -m "Merge PR #{pr_number}"')
         bash(f"{GIT_COMMAND} push origin HEAD:refs/heads/{BASE_BRANCH}")
         print(f"  {BASE_BRANCH} merged PR #{pr_number}")

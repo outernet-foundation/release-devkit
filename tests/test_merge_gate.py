@@ -144,6 +144,18 @@ def test_gate_lands_a_labeled_green_pr(monkeypatch: pytest.MonkeyPatch) -> None:
     assert any("push origin HEAD:refs/heads/dev" in command for command in bash_log.commands)
 
 
+def test_gate_configures_git_identity_before_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP)
+    exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
+    assert exit_request is None
+    commands = bash_log.commands
+    name_index = next(i for i, cmd in enumerate(commands) if "user.name" in cmd)
+    email_index = next(i for i, cmd in enumerate(commands) if "user.email" in cmd)
+    merge_index = next(i for i, cmd in enumerate(commands) if "git merge --no-ff" in cmd)
+    assert name_index < merge_index
+    assert email_index < merge_index
+
+
 def test_gate_treats_skipped_checks_as_green(monkeypatch: pytest.MonkeyPatch) -> None:
     rollup = [
         {"name": "lint-workflows", "status": "COMPLETED", "conclusion": "SUCCESS"},
