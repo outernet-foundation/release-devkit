@@ -210,10 +210,7 @@ def test_get_app_version_job_uses_the_tags_checkout(tmp_path: Path) -> None:
 
 
 def test_aliases_resolve_before_validation(tmp_path: Path) -> None:
-    ensure_release_pr_run = (
-        '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev ensure-release-pr\n'
-        "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n"
-    )
+    gated_lint_run = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
     jobs = (
         "  lint-workflows:\n    steps:\n      - &checkout\n"
         "        uses: actions/checkout@v5\n"
@@ -221,8 +218,8 @@ def test_aliases_resolve_before_validation(tmp_path: Path) -> None:
         "          ref: ${{ github.event.pull_request.head.sha }}\n"
         "          persist-credentials: false\n"
         f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
-        "  ensure-release-pr:\n    steps:\n      - *checkout\n"
-        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{ensure_release_pr_run}"
+        "  second:\n    steps:\n      - *checkout\n"
+        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{gated_lint_run}"
     )
     assert validate_workflow_file(write_workflow(tmp_path, workflow(jobs))) == []
 

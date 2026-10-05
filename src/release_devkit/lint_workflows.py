@@ -63,7 +63,6 @@ VERB_CHECKOUTS: dict[str, str] = {
     "get-app-version": CHECKOUT_WITH_TAGS,
     "release": CHECKOUT_WITH_TAGS_PUSH,
     "publish-prerelease": CHECKOUT_WITH_TAGS,
-    "ensure-release-pr": CHECKOUT,
     "lint-workflows": CHECKOUT,
     "merge-gate": MERGE_BOT,
     "validate-release-plan": CHECKOUT_WITH_TAGS,
@@ -81,21 +80,19 @@ WRAPPER_CLONE = re.compile(
 )
 DEVKIT_INVOCATION = re.compile(
     re.escape(DEVKIT_INVOCATION_PREFIX)
-    + r"(?P<verb>get-app-version|release|publish-prerelease|ensure-release-pr|lint-workflows|merge-gate"
+    + r"(?P<verb>get-app-version|release|publish-prerelease|lint-workflows|merge-gate"
     r"|validate-release-plan)" + r'(?P<args>(?: [^)"]*)?)'
 )
 VERB_ARGS: dict[str, re.Pattern[str]] = {
     "get-app-version": re.compile(r"^ --app \S+$"),
     "release": re.compile(r"^$"),
     "publish-prerelease": re.compile(r"^$"),
-    "ensure-release-pr": re.compile(r"^$"),
     "lint-workflows": re.compile(r"^$"),
     "merge-gate": re.compile(r"^$"),
     "validate-release-plan": re.compile(r"^$"),
 }
 VERB_ENV: dict[str, dict[str, str]] = {
     "release": {"GITHUB_TOKEN": "${{ github.token }}"},
-    "ensure-release-pr": {"GITHUB_TOKEN": "${{ github.token }}"},
     "merge-gate": {
         "GITHUB_TOKEN": "${{ steps.mint.outputs.token }}",
         "HEAD_SHA": MERGE_BOT_REF,

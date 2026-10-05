@@ -30,7 +30,6 @@ build-backend = "hatchling.build"
 [project.scripts]
 get-app-version = "release_devkit.get_app_version:app"
 create-release = "release_devkit.create_release:app"
-ensure-release-pr = "release_devkit.ensure_release_pr:app"
 lint-workflows = "release_devkit.lint_workflows:app"
 merge-gate = "release_devkit.merge_gate:app"
 publish-prerelease = "release_devkit.publish_prerelease:app"
