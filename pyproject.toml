@@ -32,9 +32,10 @@ get-app-version = "release_devkit.get_app_version:app"
 create-release = "release_devkit.create_release:app"
 lint-workflows = "release_devkit.lint_workflows:app"
 merge-gate = "release_devkit.merge_gate:app"
-publish-prerelease = "release_devkit.publish_prerelease:app"
+prerelease = "release_devkit.prerelease:app"
 release = "release_devkit.release:app"
 validate-release-plan = "release_devkit.validate_release_plan:app"
+update-pr-draft-release = "release_devkit.draft_releases:update_pr_app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/release_devkit"]

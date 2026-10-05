@@ -90,35 +90,15 @@ def run_create_release(config: Annotated[Path, typer.Option(help="Publish config
 
 
 def collect_build_assets(publish_config: PublishConfig, settings: Settings) -> list[Path]:
-    apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds is not None}
-    if not apps_with_builds:
-        return []
-
     run_number = matched_ci_run_number(settings.github_repository, settings.github_sha, publish_config.ci_workflow)
-    build_tag = f"run-{run_number}"
-    staging = Path(mkdtemp(prefix="release-builds-"))
+    pulled = pull_build_assets(publish_config, run_number, settings.github_actor, settings.github_token)
+    staging = Path(mkdtemp(prefix="release-assets-"))
     assets: list[Path] = []
-
-    for app_name, builds in apps_with_builds.items():
-        with ci_step(f"Pull build artifacts ({app_name})"):
-            for artifact in builds.artifacts:
-                target = staging / f"{artifact.project}-{artifact.platform}"
-                pull_build(
-                    builds.registry,
-                    artifact.project,
-                    artifact.platform,
-                    build_tag,
-                    target,
-                    registry_username=settings.github_actor,
-                    registry_token=settings.github_token,
-                )
-                source = select_artifact_file(artifact, target)
-                asset_name = artifact.name or source.name
-                asset = staging / asset_name
-                shutil.copy2(source, asset)
-                assets.append(asset)
-                print(f"  Asset: {asset_name}")
-
+    for artifact, source in pulled:
+        asset_name = artifact.name or source.name
+        asset = staging / asset_name
+        shutil.copy2(source, asset)
+        assets.append(asset)
     return assets
 
 
@@ -136,6 +116,37 @@ def matched_ci_run_number(repository: str, sha: str, ci_workflow: str) -> str:
 
         print(f"  CI run number: {run_number}")
         return run_number
+
+
+def pull_build_assets(
+    publish_config: PublishConfig, run_number: str, registry_username: str, registry_token: str
+) -> list[tuple[BuildArtifactConfig, Path]]:
+    apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds is not None}
+    if not apps_with_builds:
+        return []
+
+    build_tag = f"run-{run_number}"
+    staging = Path(mkdtemp(prefix="release-builds-"))
+    assets: list[tuple[BuildArtifactConfig, Path]] = []
+
+    for app_name, builds in apps_with_builds.items():
+        with ci_step(f"Pull build artifacts ({app_name})"):
+            for artifact in builds.artifacts:
+                target = staging / f"{artifact.project}-{artifact.platform}"
+                pull_build(
+                    builds.registry,
+                    artifact.project,
+                    artifact.platform,
+                    build_tag,
+                    target,
+                    registry_username=registry_username,
+                    registry_token=registry_token,
+                )
+                source = select_artifact_file(artifact, target)
+                assets.append((artifact, source))
+                print(f"  Asset: {source.name}")
+
+    return assets
 
 
 def select_artifact_file(artifact: BuildArtifactConfig, target: Path) -> Path:

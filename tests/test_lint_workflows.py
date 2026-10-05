@@ -75,9 +75,7 @@ GET_APP_VERSION_RUN = (
 
 LINT_WORKFLOWS_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
 
-PUBLISH_PRERELEASE_RUN = (
-    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev publish-prerelease\n'
-)
+PRERELEASE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev prerelease\n'
 
 RELEASE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release\n'
 
@@ -115,8 +113,6 @@ NUGET_LOGIN_STEP = (
     "      - uses: NuGet/login@v1\n        id: nuget-login\n        with:\n          user: ${{ secrets.NUGET_USER }}\n"
 )
 
-NUGET_API_KEY_ENV = "        env:\n          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}\n"
-
 RELEASE_NUGET_ENV = (
     "        env:\n"
     "          GITHUB_TOKEN: ${{ github.token }}\n"
@@ -130,24 +126,24 @@ def workflow(jobs: str) -> str:
 
 def test_valid_verb_job_has_no_problems(tmp_path: Path) -> None:
     jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
-        f"{PUBLISH_PRERELEASE_RUN}"
+        f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{PRERELEASE_RUN}{RELEASE_ENV}"
     )
     assert validate_workflow_file(write_workflow(tmp_path, workflow(jobs))) == []
 
 
 def test_nuget_delivery_job_with_mint_step_has_no_problems(tmp_path: Path) -> None:
     jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
-        f"{NUGET_LOGIN_STEP}{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+        f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{NUGET_LOGIN_STEP}{PRERELEASE_RUN}{RELEASE_NUGET_ENV}"
     )
     assert validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True) == []
 
 
 def test_nuget_delivery_job_requires_the_mint_step(tmp_path: Path) -> None:
     jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
-        f"{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+        f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{PRERELEASE_RUN}{RELEASE_NUGET_ENV}"
     )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True)
     assert any("require a canonical NuGet/login@v1 mint step" in problem for problem in problems)
@@ -155,8 +151,8 @@ def test_nuget_delivery_job_requires_the_mint_step(tmp_path: Path) -> None:
 
 def test_nuget_delivery_job_rejects_mint_step_outside_the_window(tmp_path: Path) -> None:
     jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{NUGET_LOGIN_STEP}{SETUP_UV_RESTORE_STEP}"
-        f"{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+        f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{NUGET_LOGIN_STEP}{SETUP_UV_RESTORE_STEP}"
+        f"{WRAPPER_STEP}{PRERELEASE_RUN}{RELEASE_NUGET_ENV}"
     )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True)
     assert any("between the wrapper and the verb" in problem for problem in problems)
@@ -164,8 +160,8 @@ def test_nuget_delivery_job_rejects_mint_step_outside_the_window(tmp_path: Path)
 
 def test_non_nuget_repo_rejects_the_mint_step(tmp_path: Path) -> None:
     jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
-        f"{NUGET_LOGIN_STEP}{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+        f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{NUGET_LOGIN_STEP}{PRERELEASE_RUN}{RELEASE_NUGET_ENV}"
     )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=False)
     assert any("reserved for the delivery jobs" in problem for problem in problems)
@@ -175,18 +171,18 @@ def test_non_nuget_repo_rejects_the_mint_step(tmp_path: Path) -> None:
 def test_nuget_job_rejects_non_canonical_login_inputs(tmp_path: Path) -> None:
     hard_coded_user = NUGET_LOGIN_STEP.replace("${{ secrets.NUGET_USER }}", "some-profile")
     jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
-        f"{hard_coded_user}{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+        f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{hard_coded_user}{PRERELEASE_RUN}{RELEASE_NUGET_ENV}"
     )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True)
     assert any("must be the canonical mint step" in problem for problem in problems)
 
 
 def test_nuget_verb_env_source_must_be_the_minted_key(tmp_path: Path) -> None:
-    stale_secret_source = NUGET_API_KEY_ENV.replace("steps.nuget-login.outputs.NUGET_API_KEY", "secrets.NUGET_API_KEY")
+    stale_secret_source = RELEASE_NUGET_ENV.replace("steps.nuget-login.outputs.NUGET_API_KEY", "secrets.NUGET_API_KEY")
     jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
-        f"{NUGET_LOGIN_STEP}{PUBLISH_PRERELEASE_RUN}{stale_secret_source}"
+        f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{NUGET_LOGIN_STEP}{PRERELEASE_RUN}{stale_secret_source}"
     )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True)
     assert any("requires env NUGET_API_KEY" in problem for problem in problems)
@@ -194,8 +190,8 @@ def test_nuget_verb_env_source_must_be_the_minted_key(tmp_path: Path) -> None:
 
 def test_environment_key_is_rejected(tmp_path: Path) -> None:
     jobs = (
-        f"  publish-prerelease:\n    environment: release\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}"
-        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}{NUGET_API_KEY_ENV}"
+        f"  prerelease:\n    environment: release\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}"
+        f"{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{PRERELEASE_RUN}{RELEASE_NUGET_ENV}"
     )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)), nuget=True)
     assert any("environment: key is forbidden" in problem for problem in problems)
@@ -270,42 +266,33 @@ def test_implicit_persisting_checkout_is_rejected(tmp_path: Path) -> None:
 
 def test_push_signature_reserved_for_real_release(tmp_path: Path) -> None:
     jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_PUSH_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
-        f"{PUBLISH_PRERELEASE_RUN}"
+        f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_PUSH_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{PRERELEASE_RUN}"
     )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("reserved for release jobs" in problem for problem in problems)
 
 
 def test_verb_job_requires_wrapper_before_the_verb(tmp_path: Path) -> None:
-    jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{PUBLISH_PRERELEASE_RUN}"
-        f"{WRAPPER_STEP}"
-    )
+    jobs = f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{PRERELEASE_RUN}{WRAPPER_STEP}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("no ./.github/actions/setup-release-devkit step precedes" in problem for problem in problems)
 
 
 def test_consumer_checkout_must_precede_wrapper(tmp_path: Path) -> None:
-    jobs = (
-        f"  publish-prerelease:\n    steps:{WRAPPER_STEP}{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}"
-        f"{PUBLISH_PRERELEASE_RUN}"
-    )
+    jobs = f"  prerelease:\n    steps:{WRAPPER_STEP}{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{PRERELEASE_RUN}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("precedes the setup-release-devkit step" in problem for problem in problems)
 
 
 def test_verb_job_requires_canonical_setup_uv_before_the_wrapper(tmp_path: Path) -> None:
-    jobs = f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
+    jobs = f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{WRAPPER_STEP}{PRERELEASE_RUN}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("no canonical astral-sh/setup-uv@v7 step" in problem for problem in problems)
 
 
 def test_setup_uv_without_explicit_save_cache_is_not_canonical(tmp_path: Path) -> None:
     loose_uv = "      - uses: astral-sh/setup-uv@v7\n        with:\n          enable-cache: true\n"
-    jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{loose_uv}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
-    )
+    jobs = f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{loose_uv}{WRAPPER_STEP}{PRERELEASE_RUN}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("no canonical astral-sh/setup-uv@v7 step" in problem for problem in problems)
 
@@ -338,10 +325,8 @@ def test_unlocked_invocation_is_rejected(tmp_path: Path) -> None:
 
 
 def test_rejected_verb_flags_are_flagged(tmp_path: Path) -> None:
-    step = (
-        '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev publish-prerelease --run-id 42\n'
-    )
-    jobs = f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
+    step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev prerelease --run-id 42\n'
+    jobs = f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("carries rejected arguments" in problem for problem in problems)
 
@@ -361,16 +346,16 @@ def test_get_app_version_requires_app(tmp_path: Path) -> None:
 
 
 def test_dead_composite_action_uses_are_rejected(tmp_path: Path) -> None:
-    step = "      - uses: ./.release-devkit/.github/actions/publish-prerelease\n"
+    step = "      - uses: ./.release-devkit/.github/actions/prerelease\n"
     jobs = (
-        f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
-        f"{PUBLISH_PRERELEASE_RUN}"
+        f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
+        f"{PRERELEASE_RUN}"
     )
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("dead composite-action model" in problem for problem in problems)
 
     old_wrapper = "      - uses: ./.github/actions/checkout-release-devkit\n"
-    old_jobs = f"  publish-prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{old_wrapper}{PUBLISH_PRERELEASE_RUN}"
+    old_jobs = f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{old_wrapper}{PRERELEASE_RUN}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(old_jobs)))
     assert any("dead composite-action model" in problem for problem in problems)
 
@@ -714,8 +699,8 @@ def test_merge_gate_requires_merge_bot_checkout(tmp_path: Path) -> None:
 
 
 def test_merge_bot_checkout_reserved_for_merge_gate_jobs(tmp_path: Path) -> None:
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{PUBLISH_PRERELEASE_RUN}"
-    jobs = f"jobs:\n  publish-prerelease:\n    steps:\n{steps}"
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{PRERELEASE_RUN}"
+    jobs = f"jobs:\n  prerelease:\n    steps:\n{steps}"
     problems = validate_workflow_file(write_workflow(tmp_path, jobs))
     assert any("merge-bot checkout is reserved" in problem for problem in problems)
 

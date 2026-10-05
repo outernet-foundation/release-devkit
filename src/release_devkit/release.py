@@ -10,6 +10,7 @@ from ci_devkit.setup import configure_git, free_disk_space, install_dotnet, inst
 
 from .config import DEFAULT_CONFIG_PATH, load_config, select_packages
 from .create_release import run_create_release
+from .draft_releases import DEV_DRAFT_TAG, delete_draft_release
 from .outputs import append_line
 from .plan import compute_release_plan, render_plan_summary
 from .registries import PublishRequest, build_registries
@@ -19,6 +20,7 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 
 class Settings(BaseSettings):
+    github_repository: str = ""
     github_workspace: str = ""
     github_step_summary: str | None = None
     nuget_api_key: str = ""
@@ -86,3 +88,4 @@ def main(
             print(f"  Tagged: {tag}")
 
     run_create_release(config)
+    delete_draft_release(DEV_DRAFT_TAG, settings.github_repository)

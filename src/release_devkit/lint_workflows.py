@@ -40,7 +40,7 @@ NUGET_LOGIN_USES = "NuGet/login@v1"
 NUGET_LOGIN_INPUTS = {"user": "${{ secrets.NUGET_USER }}"}
 NUGET_API_KEY_ENV = "NUGET_API_KEY"
 NUGET_API_KEY_SOURCE = "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
-NUGET_DELIVERY_VERBS = ("publish-prerelease", "release")
+NUGET_DELIVERY_VERBS = ("prerelease", "release")
 INTEGRATE_WORKFLOW = Path(".github/workflows/integrate.yml")
 RELEASE_WORKFLOW = Path(".github/workflows/release.yml")
 RELEASE_WORKFLOW_NAME = "Release"
@@ -62,10 +62,11 @@ MERGE_BOT = "merge-bot"
 VERB_CHECKOUTS: dict[str, str] = {
     "get-app-version": CHECKOUT_WITH_TAGS,
     "release": CHECKOUT_WITH_TAGS_PUSH,
-    "publish-prerelease": CHECKOUT_WITH_TAGS,
+    "prerelease": CHECKOUT_WITH_TAGS,
     "lint-workflows": CHECKOUT,
     "merge-gate": MERGE_BOT,
     "validate-release-plan": CHECKOUT_WITH_TAGS,
+    "update-pr-draft-release": CHECKOUT,
 }
 
 SETUP_UV_RESTORE_INPUTS = {"enable-cache": True, "save-cache": "false"}
@@ -79,25 +80,27 @@ WRAPPER_CLONE = re.compile(
     rf'\ngit -C "\$RUNNER_TEMP/release-devkit" checkout "\${WRAPPER_COMMIT_ENV_VAR}"$'
 )
 DEVKIT_INVOCATION = re.compile(
-    re.escape(DEVKIT_INVOCATION_PREFIX)
-    + r"(?P<verb>get-app-version|release|publish-prerelease|lint-workflows|merge-gate"
-    r"|validate-release-plan)" + r'(?P<args>(?: [^)"]*)?)'
+    re.escape(DEVKIT_INVOCATION_PREFIX) + r"(?P<verb>get-app-version|release|prerelease|lint-workflows|merge-gate"
+    r"|validate-release-plan|update-pr-draft-release)" + r'(?P<args>(?: [^)"]*)?)'
 )
 VERB_ARGS: dict[str, re.Pattern[str]] = {
     "get-app-version": re.compile(r"^ --app \S+$"),
     "release": re.compile(r"^$"),
-    "publish-prerelease": re.compile(r"^$"),
+    "prerelease": re.compile(r"^$"),
     "lint-workflows": re.compile(r"^$"),
     "merge-gate": re.compile(r"^$"),
     "validate-release-plan": re.compile(r"^$"),
+    "update-pr-draft-release": re.compile(r"^ --pr-number .+ --run-number .+$"),
 }
 VERB_ENV: dict[str, dict[str, str]] = {
     "release": {"GITHUB_TOKEN": "${{ github.token }}"},
+    "prerelease": {"GITHUB_TOKEN": "${{ github.token }}"},
     "merge-gate": {
         "GITHUB_TOKEN": "${{ steps.mint.outputs.token }}",
         "HEAD_SHA": MERGE_BOT_REF,
     },
     "validate-release-plan": {},
+    "update-pr-draft-release": {"GITHUB_TOKEN": "${{ github.token }}"},
 }
 
 RUN_STEP_LINE = re.compile(r"^(?P<prefix>\s*(?:- )?)run:(?:\s*(?P<value>.*))?$")
@@ -147,9 +150,11 @@ def main(
 
 
 def default_workflows() -> list[Path]:
+    workflows = [INTEGRATE_WORKFLOW]
     if is_publishing():
-        return [INTEGRATE_WORKFLOW, RELEASE_WORKFLOW, MERGE_GATE_WORKFLOW]
-    return [INTEGRATE_WORKFLOW, MERGE_GATE_WORKFLOW]
+        workflows.append(RELEASE_WORKFLOW)
+    workflows.append(MERGE_GATE_WORKFLOW)
+    return workflows
 
 
 def is_publishing() -> bool:

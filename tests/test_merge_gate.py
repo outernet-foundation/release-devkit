@@ -1,5 +1,5 @@
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 
 import pytest
@@ -44,12 +44,17 @@ def gate_responses(payload: str) -> dict[str, str]:
             {"number": 7, "headRefOid": HEAD_SHA}
         ]),
         "gh pr view 7 --json state,headRefOid,labels,statusCheckRollup": payload,
+        "gh pr view 7 --json headRefName --jq .headRefName": "feature-x\n",
         "git rev-parse HEAD": f"{HEAD_SHA}\n",
     }
 
 
 def accept_any_bash_check(command: str) -> bool:
     return True
+
+
+def noop_delete_draft(tag: str, repo: str) -> None:
+    pass
 
 
 def null_ci_step(label: str) -> object:
@@ -61,7 +66,11 @@ def exit_message(exit_request: SystemExit) -> str:
 
 
 def run_gate(
-    monkeypatch: pytest.MonkeyPatch, responses: dict[str, str], environment: dict[str, str] | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    responses: dict[str, str],
+    environment: dict[str, str] | None = None,
+    bash_check_fn: Callable[[str], bool] | None = None,
+    delete_draft_fn: Callable[[str, str], None] | None = None,
 ) -> tuple[SystemExit | None, BashLog]:
     monkeypatch.delenv("HEAD_SHA", raising=False)
     for key, value in (environment or {"HEAD_SHA": HEAD_SHA}).items():
@@ -69,8 +78,9 @@ def run_gate(
     monkeypatch.setattr(merge_gate, "bash_output", CommandResponses(responses))
     bash_log = BashLog()
     monkeypatch.setattr(merge_gate, "bash", bash_log)
-    monkeypatch.setattr(merge_gate, "bash_check", accept_any_bash_check)
+    monkeypatch.setattr(merge_gate, "bash_check", bash_check_fn or accept_any_bash_check)
     monkeypatch.setattr(merge_gate, "ci_step", null_ci_step)
+    monkeypatch.setattr(merge_gate, "delete_draft_release", delete_draft_fn or noop_delete_draft)
     try:
         merge_gate.main()
     except SystemExit as exit_request:
@@ -130,6 +140,7 @@ def test_gate_lands_a_labeled_green_pr(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP)
     exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
     assert exit_request is None
+    assert any("git merge --no-ff" in command for command in bash_log.commands)
     assert any("push origin HEAD:refs/heads/dev" in command for command in bash_log.commands)
 
 
@@ -174,3 +185,55 @@ def test_gate_refuses_ambiguous_pr_matches(monkeypatch: pytest.MonkeyPatch) -> N
     exit_request, _ = run_gate(monkeypatch, responses)
     assert exit_request is not None
     assert "7, 9" in exit_message(exit_request)
+
+
+def reject_ls_remote(command: str) -> bool:
+    return "ls-remote" not in command
+
+
+def test_gate_deletes_merged_branch_after_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP)
+    exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
+    assert exit_request is None
+    assert any("push origin --delete feature-x" in command for command in bash_log.commands)
+
+
+def test_gate_skips_branch_deletion_when_head_is_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = gate_responses(pr_view_payload(["ready-to-merge"], GREEN_ROLLUP))
+    responses["gh pr view 7 --json headRefName --jq .headRefName"] = "dev\n"
+    exit_request, bash_log = run_gate(monkeypatch, responses)
+    assert exit_request is None
+    assert not any("--delete" in command for command in bash_log.commands)
+
+
+def test_gate_skips_branch_deletion_when_head_is_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = gate_responses(pr_view_payload(["ready-to-merge"], GREEN_ROLLUP))
+    responses["gh pr view 7 --json headRefName --jq .headRefName"] = "main\n"
+    exit_request, bash_log = run_gate(monkeypatch, responses)
+    assert exit_request is None
+    assert not any("--delete" in command for command in bash_log.commands)
+
+
+def test_gate_tolerates_already_deleted_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP)
+    exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload), bash_check_fn=reject_ls_remote)
+    assert exit_request is None
+    assert not any("push origin --delete" in command for command in bash_log.commands)
+
+
+def test_gate_deletes_pr_draft_after_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP)
+    deleted: list[tuple[str, str]] = []
+
+    def record_draft_deletion(tag: str, repo: str) -> None:
+        deleted.append((tag, repo))
+
+    exit_request, _ = run_gate(
+        monkeypatch,
+        gate_responses(payload),
+        environment={"HEAD_SHA": HEAD_SHA, "GITHUB_REPOSITORY": "owner/repo"},
+        delete_draft_fn=record_draft_deletion,
+    )
+
+    assert exit_request is None
+    assert deleted == [("pr-7", "owner/repo")]

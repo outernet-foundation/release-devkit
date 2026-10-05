@@ -6,6 +6,8 @@ from ci_devkit.ci_step import ci_step
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from pydantic_settings import BaseSettings
 
+from .draft_releases import delete_draft_release
+
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 BASE_BRANCH = "dev"
@@ -21,6 +23,7 @@ WAITING_STATUSES = frozenset({"IN_PROGRESS", "QUEUED", "PENDING", "WAITING"})
 
 class Settings(BaseSettings):
     head_sha: str
+    github_repository: str = ""
 
 
 class LabelEntry(BaseModel):
@@ -87,12 +90,23 @@ def main() -> None:
             )
         print(f"  {len(battery)} checks green on {pull_request.head_oid[:12]}")
 
-    with ci_step("Fast-forward dev"):
+    with ci_step("Merge to dev"):
         checked_out = bash_output("git rev-parse HEAD").strip()
         if checked_out != pull_request.head_oid:
             raise SystemExit(f"checkout HEAD {checked_out[:12]} is not the PR head {pull_request.head_oid[:12]}")
         bash(f"{GIT_COMMAND} fetch origin refs/heads/{BASE_BRANCH}")
         if not bash_check("git merge-base --is-ancestor FETCH_HEAD HEAD"):
             raise SystemExit(f"{BASE_BRANCH} has commits not on the PR head — rebase the PR onto {BASE_BRANCH}")
+        bash("git checkout --detach FETCH_HEAD")
+        bash(f'git merge --no-ff {pull_request.head_oid} -m "Merge PR #{pr_number}"')
         bash(f"{GIT_COMMAND} push origin HEAD:refs/heads/{BASE_BRANCH}")
-        print(f"  {BASE_BRANCH} fast-forwarded to {pull_request.head_oid[:12]}")
+        print(f"  {BASE_BRANCH} merged PR #{pr_number}")
+
+    with ci_step("Delete merged branch"):
+        head_ref = bash_output(f"gh pr view {pr_number} --json headRefName --jq .headRefName").strip()
+        if head_ref and head_ref not in (BASE_BRANCH, "main"):
+            if bash_check(f"{GIT_COMMAND} ls-remote --heads origin {head_ref}"):
+                bash(f"{GIT_COMMAND} push origin --delete {head_ref}")
+                print(f"  deleted branch {head_ref}")
+
+    delete_draft_release(f"pr-{pr_number}", settings.github_repository)
