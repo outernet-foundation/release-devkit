@@ -62,10 +62,19 @@ class NuGetRegistry:
         with tempfile.TemporaryDirectory() as outdir:
             command += f" -o {outdir}"
             bash(command, cwd=request.path)
-            bash(
-                f"dotnet nuget push {outdir}/*.nupkg --api-key {self.api_key} --source {NUGET_SOURCE} --skip-duplicate",
-                cwd=request.path,
-            )
+            try:
+                bash(
+                    f"dotnet nuget push {outdir}/*.nupkg --api-key {self.api_key}"
+                    f" --source {NUGET_SOURCE} --skip-duplicate",
+                    cwd=request.path,
+                )
+            except CalledProcessError as error:
+                # The push command interpolates the api key; a raised CalledProcessError renders
+                # the command text into CI logs. Re-raise with the exit code and first stderr
+                # line only — never the command.
+                stderr_lines = [line.strip() for line in (error.stderr or "").splitlines() if line.strip()]
+                detail = stderr_lines[0] if stderr_lines else "no stderr output"
+                raise SystemExit(f"dotnet nuget push failed (exit {error.returncode}): {detail}") from None
 
 
 class NpmRegistry:

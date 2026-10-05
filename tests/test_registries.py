@@ -331,3 +331,57 @@ def test_nuget_injection_properties_literal_version_is_loud(tmp_path: Path) -> N
 
     with pytest.raises(ValueError, match=r"carries literal version '1.0.0'"):
         nuget_injection_properties(tmp_path, {"Org.Sibling": "1.0.6"})
+
+
+def test_nuget_push_failure_never_leaks_the_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_nuget_project(tmp_path)
+
+    def failing_push(
+        command: str,
+        *,
+        cwd: Path | None = None,
+        stdin_text: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> str:
+        if "nuget push" in command:
+            raise CalledProcessError(
+                returncode=1, cmd=command, stderr="Response status code does not indicate success: 401\nsecond line\n"
+            )
+        return ""
+
+    monkeypatch.setattr("release_devkit.registries.bash", failing_push)
+
+    with pytest.raises(SystemExit) as excinfo:
+        NuGetRegistry("SECRET-KEY").publish(
+            PublishRequest(path=tmp_path, identity="Org.Consumer", version="1.0.6", dependency_versions={})
+        )
+
+    message = str(excinfo.value)
+    assert "exit 1" in message
+    assert "Response status code does not indicate success: 401" in message
+    assert "SECRET-KEY" not in message
+    assert "--api-key" not in message
+
+
+def test_nuget_push_failure_without_stderr_still_names_the_exit_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_nuget_project(tmp_path)
+
+    def failing_push(
+        command: str,
+        *,
+        cwd: Path | None = None,
+        stdin_text: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> str:
+        if "nuget push" in command:
+            raise CalledProcessError(returncode=2, cmd=command, stderr=None)
+        return ""
+
+    monkeypatch.setattr("release_devkit.registries.bash", failing_push)
+
+    with pytest.raises(SystemExit, match=r"dotnet nuget push failed \(exit 2\): no stderr output"):
+        NuGetRegistry("key").publish(
+            PublishRequest(path=tmp_path, identity="Org.Consumer", version="1.0.6", dependency_versions={})
+        )
