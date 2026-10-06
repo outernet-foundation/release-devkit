@@ -1,31 +1,25 @@
 from __future__ import annotations
 
 import shlex
+from typing import Annotated
 
 import typer
 from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
-from pydantic_settings import BaseSettings
 
-from .draft_releases import delete_draft_release
+from release_devkit.config import Settings
+from release_devkit.verbs.release import delete_draft_release
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 BASE_BRANCH = "dev"
-# The helper reads GITHUB_TOKEN from git's environment at credential time, so the token
-# never appears in a logged command string or a process argument.
 GIT_CREDENTIAL_HELPER = r"!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f"
 GIT_COMMAND = f"git -c credential.helper='{GIT_CREDENTIAL_HELPER}'"
 GREEN_CONCLUSIONS = frozenset({"SUCCESS", "SKIPPED"})
 GATE_CHECK_NAME = "merge-gate"
 LABEL_NAME = "ready-to-merge"
 WAITING_STATUSES = frozenset({"IN_PROGRESS", "QUEUED", "PENDING", "WAITING"})
-
-
-class Settings(BaseSettings):
-    head_sha: str
-    github_repository: str = ""
 
 
 class LabelEntry(BaseModel):
@@ -57,19 +51,24 @@ PULL_REQUEST_REFS = TypeAdapter(list[PullRequestRef])
 
 
 @app.command()
-def main() -> None:
+def main(
+    head_sha: Annotated[str, typer.Option(help="Head SHA to resolve to a PR and merge")],
+) -> None:
     settings = Settings.model_validate({})
-    branches = bash_output(f"git branch -r --contains {settings.head_sha}").split()
+    repository = settings.github_repository
+    if not repository:
+        raise SystemExit("GITHUB_REPOSITORY is not set — this verb reads the GitHub runner environment")
+    branches = bash_output(f"git branch -r --contains {head_sha}").split()
     numbers: list[int] = []
     for branch in branches:
         name = branch.removeprefix("origin/")
         output = bash_output(f"gh pr list --head {name} --base {BASE_BRANCH} --json number,headRefOid")
         references = PULL_REQUEST_REFS.validate_json(output)
-        numbers.extend(reference.number for reference in references if reference.head_oid == settings.head_sha)
+        numbers.extend(reference.number for reference in references if reference.head_oid == head_sha)
     matches = sorted(set(numbers))
     if len(matches) != 1:
         rendered = ", ".join(str(number) for number in matches) or "none"
-        raise SystemExit(f"head {settings.head_sha[:12]} matches {rendered} open PR(s) to {BASE_BRANCH}")
+        raise SystemExit(f"head {head_sha[:12]} matches {rendered} open PR(s) to {BASE_BRANCH}")
     pr_number = str(matches[0])
     pull_request = PullRequest.model_validate_json(
         bash_output(f"gh pr view {pr_number} --json state,title,headRefOid,labels,statusCheckRollup")
@@ -115,4 +114,4 @@ def main() -> None:
                 bash(f"{GIT_COMMAND} push origin --delete {head_ref}")
                 print(f"  deleted branch {head_ref}")
 
-    delete_draft_release(f"pr-{pr_number}", settings.github_repository)
+    delete_draft_release(f"pr-{pr_number}", repository)

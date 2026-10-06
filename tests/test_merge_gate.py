@@ -3,10 +3,8 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 
 import pytest
-from pydantic import ValidationError
 
-from release_devkit import merge_gate
-from release_devkit.merge_gate import Settings
+from release_devkit.verbs import merge_gate
 
 HEAD_SHA = "a" * 40
 GREEN_ROLLUP = [{"name": "lint-workflows", "status": "COMPLETED", "conclusion": "SUCCESS"}]
@@ -71,13 +69,12 @@ def exit_message(exit_request: SystemExit) -> str:
 def run_gate(
     monkeypatch: pytest.MonkeyPatch,
     responses: dict[str, str],
-    environment: dict[str, str] | None = None,
     bash_check_fn: Callable[[str], bool] | None = None,
     delete_draft_fn: Callable[[str, str], None] | None = None,
 ) -> tuple[SystemExit | None, BashLog]:
-    monkeypatch.delenv("HEAD_SHA", raising=False)
-    for key, value in (environment or {"HEAD_SHA": HEAD_SHA}).items():
-        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_ACTOR", "bot")
+    monkeypatch.setenv("GITHUB_WORKSPACE", "/workspace")
     monkeypatch.setattr(merge_gate, "bash_output", CommandResponses(responses))
     bash_log = BashLog()
     monkeypatch.setattr(merge_gate, "bash", bash_log)
@@ -85,19 +82,10 @@ def run_gate(
     monkeypatch.setattr(merge_gate, "ci_step", null_ci_step)
     monkeypatch.setattr(merge_gate, "delete_draft_release", delete_draft_fn or noop_delete_draft)
     try:
-        merge_gate.main()
+        merge_gate.main(head_sha=HEAD_SHA)
     except SystemExit as exit_request:
         return exit_request, bash_log
     return None, bash_log
-
-
-def test_settings_requires_head_sha_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("HEAD_SHA", raising=False)
-    with pytest.raises(ValidationError):
-        Settings.model_validate({})
-    assert "pr_number" not in Settings.model_fields
-    monkeypatch.setenv("HEAD_SHA", HEAD_SHA)
-    assert Settings.model_validate({}).head_sha == HEAD_SHA
 
 
 def test_gate_refuses_without_the_ready_to_merge_label(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -213,6 +201,27 @@ def reject_ls_remote(command: str) -> bool:
     return "ls-remote" not in command
 
 
+def reject_merge_base(command: str) -> bool:
+    return "merge-base" not in command
+
+
+def test_gate_refuses_when_checkout_is_not_the_pr_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = gate_responses(pr_view_payload(["ready-to-merge"], GREEN_ROLLUP))
+    responses["git rev-parse HEAD"] = "b" * 40 + "\n"
+    exit_request, bash_log = run_gate(monkeypatch, responses)
+    assert exit_request is not None
+    assert "is not the PR head" in exit_message(exit_request)
+    assert not any("push" in command for command in bash_log.commands)
+
+
+def test_gate_refuses_a_pr_not_rebased_onto_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = gate_responses(pr_view_payload(["ready-to-merge"], GREEN_ROLLUP))
+    exit_request, bash_log = run_gate(monkeypatch, responses, bash_check_fn=reject_merge_base)
+    assert exit_request is not None
+    assert "rebase the PR onto dev" in exit_message(exit_request)
+    assert not any("push origin HEAD:refs/heads/dev" in command for command in bash_log.commands)
+
+
 def test_gate_deletes_merged_branch_after_merge(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP)
     exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
@@ -253,7 +262,6 @@ def test_gate_deletes_pr_draft_after_merge(monkeypatch: pytest.MonkeyPatch) -> N
     exit_request, _ = run_gate(
         monkeypatch,
         gate_responses(payload),
-        environment={"HEAD_SHA": HEAD_SHA, "GITHUB_REPOSITORY": "owner/repo"},
         delete_draft_fn=record_draft_deletion,
     )
 

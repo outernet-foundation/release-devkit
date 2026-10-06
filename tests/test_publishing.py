@@ -4,17 +4,10 @@ from subprocess import CalledProcessError
 
 import pytest
 
-from release_devkit.registries import NpmRegistry, NuGetRegistry, PublishRequest
-from release_devkit.registries import (
-    DEV_VERSION_FORMATS,
-    KNOWN_REGISTRIES,
+from release_devkit.publishing import NpmRegistry, NuGetRegistry, ResolvedDependency
+from release_devkit.publishing import (
     ephemeral_manifest_patch,
     ephemeral_pyproject_patch,
-    nuget_injection_properties,
-    patch_project_dependencies,
-    patch_project_version,
-    pep440_dev_version,
-    semver_dev_version,
 )
 
 PYPROJECT = (
@@ -104,19 +97,6 @@ def test_patch_restores_on_error(tmp_path: Path):
     assert manifest_path.read_text(encoding="utf-8") == original
 
 
-def test_patch_project_version_replaces_the_project_table_version() -> None:
-    patched = patch_project_version(PYPROJECT, "0.1.3")
-    assert 'version = "0.1.3"\n' in patched
-    assert 'version = "0.0.0.dev0"' not in patched
-    assert 'version = "not-this-one"' in patched
-
-
-def test_patch_project_version_raises_without_a_project_version() -> None:
-    without_version = '[project]\nname = "example"\n\n[build-system]\nrequires = ["hatchling"]\n'
-    with pytest.raises(ValueError, match="no \\[project\\] version"):
-        patch_project_version(without_version, "0.1.3")
-
-
 def test_ephemeral_pyproject_patch_restores_the_original(tmp_path: Path) -> None:
     manifest_path = tmp_path / "pyproject.toml"
     manifest_path.write_text(PYPROJECT, encoding="utf-8")
@@ -151,34 +131,17 @@ def test_ephemeral_pyproject_patch_rewrites_sentinel_specifiers(tmp_path: Path) 
     assert manifest_path.read_text(encoding="utf-8") == PYPROJECT_WITH_SENTINELS
 
 
-def test_patch_project_dependencies_leaves_absent_entries_alone() -> None:
-    patched = patch_project_dependencies(PYPROJECT_WITH_SENTINELS, {"elsewhere": "9.9.9"})
-
-    assert patched == PYPROJECT_WITH_SENTINELS
-
-
-def test_dev_version_spellings_per_registry() -> None:
-    assert semver_dev_version("0.1.8", "123456") == "0.1.8-dev.123456"
-    assert pep440_dev_version("0.1.8", "123456") == "0.1.8.dev123456"
-
-
-def test_dev_version_formats_cover_every_known_registry() -> None:
-    assert set(DEV_VERSION_FORMATS) == KNOWN_REGISTRIES
-
-
 def test_npm_publish_rides_the_dev_dist_tag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     manifest_path = write_manifest(tmp_path)
     recorder = CommandRecorder()
-    monkeypatch.setattr("release_devkit.registries.bash_output", recorder)
+    monkeypatch.setattr("release_devkit.publishing.bash_output", recorder)
 
     NpmRegistry().publish(
-        PublishRequest(
-            path=tmp_path,
-            identity="org.outernet.placeframe",
-            version="0.2.1-dev.42",
-            dependency_versions={},
-            dist_tag="dev",
-        )
+        path=tmp_path,
+        base_version="0.2.1",
+        resolved_dependencies={},
+        dev=True,
+        short_sha="42",
     )
 
     assert recorder.commands == ["npm publish --access public --provenance --loglevel verbose --tag dev"]
@@ -188,11 +151,9 @@ def test_npm_publish_rides_the_dev_dist_tag(tmp_path: Path, monkeypatch: pytest.
 def test_npm_publish_without_dist_tag_leaves_latest_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write_manifest(tmp_path)
     recorder = CommandRecorder()
-    monkeypatch.setattr("release_devkit.registries.bash_output", recorder)
+    monkeypatch.setattr("release_devkit.publishing.bash_output", recorder)
 
-    NpmRegistry().publish(
-        PublishRequest(path=tmp_path, identity="org.outernet.placeframe", version="0.2.1", dependency_versions={})
-    )
+    NpmRegistry().publish(tmp_path, "0.2.1", {}, False, "")
 
     assert recorder.commands == ["npm publish --access public --provenance --loglevel verbose"]
 
@@ -217,38 +178,32 @@ def test_npm_publish_swallows_version_conflict_from_current_npm(
 ) -> None:
     write_manifest(tmp_path)
     monkeypatch.setattr(
-        "release_devkit.registries.bash_output",
+        "release_devkit.publishing.bash_output",
         ConflictingCommand("npm error You cannot publish over the previously published versions: 0.2.1.\n"),
     )
 
-    NpmRegistry().publish(
-        PublishRequest(path=tmp_path, identity="org.outernet.placeframe", version="0.2.1", dependency_versions={})
-    )
+    NpmRegistry().publish(tmp_path, "0.2.1", {}, False, "")
 
 
 def test_npm_publish_swallows_version_conflict_from_legacy_npm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write_manifest(tmp_path)
     monkeypatch.setattr(
-        "release_devkit.registries.bash_output",
+        "release_devkit.publishing.bash_output",
         ConflictingCommand("npm ERR! code EPUBLISHCONFLICT\nnpm ERR! cannot publish over existing version\n"),
     )
 
-    NpmRegistry().publish(
-        PublishRequest(path=tmp_path, identity="org.outernet.placeframe", version="0.2.1", dependency_versions={})
-    )
+    NpmRegistry().publish(tmp_path, "0.2.1", {}, False, "")
 
 
 def test_npm_publish_rides_through_on_unrelated_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write_manifest(tmp_path)
     monkeypatch.setattr(
-        "release_devkit.registries.bash_output",
+        "release_devkit.publishing.bash_output",
         ConflictingCommand("npm error code ENEEDAUTH\nnpm error need auth to publish\n"),
     )
 
     with pytest.raises(CalledProcessError):
-        NpmRegistry().publish(
-            PublishRequest(path=tmp_path, identity="org.outernet.placeframe", version="0.2.1", dependency_versions={})
-        )
+        NpmRegistry().publish(tmp_path, "0.2.1", {}, False, "")
 
 
 NUGET_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
@@ -273,15 +228,14 @@ def test_nuget_publish_injects_property_flags_beside_the_version(
 ) -> None:
     write_nuget_project(tmp_path)
     recorder = CommandRecorder()
-    monkeypatch.setattr("release_devkit.registries.bash", recorder)
+    monkeypatch.setattr("release_devkit.publishing.bash", recorder)
 
     NuGetRegistry("key").publish(
-        PublishRequest(
-            path=tmp_path,
-            identity="Org.Consumer",
-            version="1.0.6",
-            dependency_versions={"Org.Sibling": "1.0.6"},
-        )
+        path=tmp_path,
+        base_version="1.0.6",
+        resolved_dependencies={"Org.Sibling": ResolvedDependency(version="1.0.6", co_publishing=True)},
+        dev=False,
+        short_sha="",
     )
 
     assert recorder.commands[0].startswith("dotnet pack -c Release -p:Version=1.0.6 -p:SiblingVersion=1.0.6 -o ")
@@ -292,11 +246,9 @@ def test_nuget_publish_without_dependencies_omits_property_flags(
 ) -> None:
     write_nuget_project(tmp_path)
     recorder = CommandRecorder()
-    monkeypatch.setattr("release_devkit.registries.bash", recorder)
+    monkeypatch.setattr("release_devkit.publishing.bash", recorder)
 
-    NuGetRegistry("key").publish(
-        PublishRequest(path=tmp_path, identity="Org.Consumer", version="1.0.6", dependency_versions={})
-    )
+    NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, "")
 
     assert recorder.commands[0].startswith("dotnet pack -c Release -p:Version=1.0.6 -o ")
 
@@ -306,11 +258,9 @@ def test_nuget_publish_writes_the_nupkg_outside_the_package_root(
 ) -> None:
     write_nuget_project(tmp_path)
     recorder = CommandRecorder()
-    monkeypatch.setattr("release_devkit.registries.bash", recorder)
+    monkeypatch.setattr("release_devkit.publishing.bash", recorder)
 
-    NuGetRegistry("key").publish(
-        PublishRequest(path=tmp_path, identity="Org.Consumer", version="1.0.6", dependency_versions={})
-    )
+    NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, "")
 
     pack_command, push_command = recorder.commands
     outdir = pack_command.rsplit(" -o ", 1)[1]
@@ -318,19 +268,31 @@ def test_nuget_publish_writes_the_nupkg_outside_the_package_root(
     assert outdir in push_command
 
 
-def test_nuget_injection_properties_without_matching_reference_is_loud(tmp_path: Path) -> None:
+def test_nuget_publish_without_matching_reference_is_loud(tmp_path: Path) -> None:
     write_nuget_project(tmp_path)
 
     with pytest.raises(ValueError, match=r"no PackageReference found for \['Org.Missing'\]"):
-        nuget_injection_properties(tmp_path, {"Org.Missing": "1.0.0"})
+        NuGetRegistry("key").publish(
+            path=tmp_path,
+            base_version="1.0.6",
+            resolved_dependencies={"Org.Missing": ResolvedDependency(version="1.0.0", co_publishing=True)},
+            dev=False,
+            short_sha="",
+        )
 
 
-def test_nuget_injection_properties_literal_version_is_loud(tmp_path: Path) -> None:
+def test_nuget_publish_with_literal_version_is_loud(tmp_path: Path) -> None:
     csproj = NUGET_CSPROJ.replace('Version="$(SiblingVersion)"', 'Version="1.0.0"')
     (tmp_path / "Consumer.csproj").write_text(csproj, encoding="utf-8")
 
     with pytest.raises(ValueError, match=r"carries literal version '1.0.0'"):
-        nuget_injection_properties(tmp_path, {"Org.Sibling": "1.0.6"})
+        NuGetRegistry("key").publish(
+            path=tmp_path,
+            base_version="1.0.6",
+            resolved_dependencies={"Org.Sibling": ResolvedDependency(version="1.0.6", co_publishing=True)},
+            dev=False,
+            short_sha="",
+        )
 
 
 def test_nuget_push_failure_never_leaks_the_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -349,12 +311,10 @@ def test_nuget_push_failure_never_leaks_the_api_key(tmp_path: Path, monkeypatch:
             )
         return ""
 
-    monkeypatch.setattr("release_devkit.registries.bash", failing_push)
+    monkeypatch.setattr("release_devkit.publishing.bash", failing_push)
 
     with pytest.raises(SystemExit) as excinfo:
-        NuGetRegistry("SECRET-KEY").publish(
-            PublishRequest(path=tmp_path, identity="Org.Consumer", version="1.0.6", dependency_versions={})
-        )
+        NuGetRegistry("SECRET-KEY").publish(tmp_path, "1.0.6", {}, False, "")
 
     message = str(excinfo.value)
     assert "exit 1" in message
@@ -379,9 +339,7 @@ def test_nuget_push_failure_without_stderr_still_names_the_exit_code(
             raise CalledProcessError(returncode=2, cmd=command, stderr=None)
         return ""
 
-    monkeypatch.setattr("release_devkit.registries.bash", failing_push)
+    monkeypatch.setattr("release_devkit.publishing.bash", failing_push)
 
     with pytest.raises(SystemExit, match=r"dotnet nuget push failed \(exit 2\): no stderr output"):
-        NuGetRegistry("key").publish(
-            PublishRequest(path=tmp_path, identity="Org.Consumer", version="1.0.6", dependency_versions={})
-        )
+        NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, "")
