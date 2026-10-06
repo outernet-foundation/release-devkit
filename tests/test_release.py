@@ -65,7 +65,7 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(release, "ci_step", null_ci_step)
     monkeypatch.setattr(release, "append_line", noop)
     monkeypatch.setattr(release, "setup_publishing_environment", noop)
-    monkeypatch.setattr(release, "run_create_release", noop)
+    monkeypatch.setattr(release, "cut_github_release", noop)
     delete_recorder = CallRecorder()
     monkeypatch.setattr(release, "delete_draft_release", delete_recorder)
 
