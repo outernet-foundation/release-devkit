@@ -91,7 +91,6 @@ def noop(*args: object, **kwargs: object) -> None:
 def patch_common(monkeypatch: pytest.MonkeyPatch) -> CallRecorder:
     monkeypatch.setenv("GITHUB_TOKEN", "token")
     monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
-    monkeypatch.setattr(prerelease, "setup_publishing_environment", noop)
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())

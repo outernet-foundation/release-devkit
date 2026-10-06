@@ -19,7 +19,7 @@ from release_devkit.drafts import (
     append_draft_section,
     publish_draft_assets,
 )
-from release_devkit.plan import compute_release_plan, setup_publishing_environment
+from release_devkit.plan import compute_release_plan
 from release_devkit.publishing import DevStrategy, publish_packages
 from release_devkit.registries import registry_url
 from release_devkit.rendering import AssetLink, DraftSection, PackageRow, RegistryLink, render_draft_section
@@ -62,14 +62,12 @@ def main(
             )
         }
 
-        has_package_changes = release_plan.publishing
         has_app_changes = bool(changed_apps)
 
-        builds_registry = publish_config.builds_registry
-        if builds_registry is not None:
+        if publish_config.builds_registry is not None:
             run_number, html_url = matched_ci_run_number(repository, sha, publish_config.ci_workflow)
             integrate_run = (run_number, html_url)
-            manifest = pull_digest_manifest(builds_registry, run_number, actor, settings.github_token)
+            manifest = pull_digest_manifest(publish_config.builds_registry, run_number, actor, settings.github_token)
             if manifest is not None:
                 existing_digests: set[str] = set()
                 if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {repository}"):
@@ -82,14 +80,13 @@ def main(
                 }
 
         has_image_changes = bool(new_image_manifest)
-        if not has_package_changes and not has_app_changes and not has_image_changes:
+        if not release_plan.publishing and not has_app_changes and not has_image_changes:
             print("Nothing to publish")
             return
 
     published: list[tuple[str, str, str]] = []
-    if has_package_changes:
-        setup_publishing_environment(release_plan, packages, workspace)
-        published = publish_packages(packages, release_plan, settings.nuget_api_key, DevStrategy(run_id))
+    if release_plan.publishing:
+        published = publish_packages(packages, release_plan, settings.nuget_api_key, DevStrategy(run_id), workspace)
 
         if published:
             recap = "\n".join([

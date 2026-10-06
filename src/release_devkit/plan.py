@@ -2,10 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ci_devkit.ci_step import ci_step
-from ci_devkit.setup import configure_git, install_dotnet, install_node
-
-from release_devkit.config import PackageConfig, PublishConfig, write_step_summary
+from release_devkit.config import PublishConfig, write_step_summary
 from release_devkit.manifests import DependencyEdge, resolve_edges
 from release_devkit.tags import parse_major_minor, parse_version
 
@@ -127,18 +124,6 @@ def compute_release_plan(publish_config: PublishConfig, tags: TagSource) -> Rele
         app_last_versions=app_last_versions,
         app_versions=app_versions,
     )
-
-
-def setup_publishing_environment(release_plan: ReleasePlan, packages: dict[str, PackageConfig], workspace: str) -> None:
-    with ci_step("Setup"):
-        configure_git(workspace)
-        registries_to_publish = {
-            registry_name for name in release_plan.publishing for registry_name in packages[name].registries
-        }
-        if "nuget" in registries_to_publish:
-            install_dotnet("8.0")
-        if "npm" in registries_to_publish:
-            install_node("24", "https://registry.npmjs.org")
 
 
 def resolve_dependency_versions(

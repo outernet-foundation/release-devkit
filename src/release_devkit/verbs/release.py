@@ -12,7 +12,7 @@ from ci_devkit.ci_step import ci_step
 
 from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config
 from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release
-from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, compute_and_print_plan, setup_publishing_environment
+from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, compute_and_print_plan
 from release_devkit.publishing import StableStrategy, publish_packages
 from release_devkit.registries import registry_url
 from release_devkit.rendering import PackageRow, RegistryLink, render_release_body
@@ -47,10 +47,8 @@ def main(
         print("Nothing to publish")
         return
 
-    setup_publishing_environment(release_plan, packages, workspace)
-
     if packages:
-        publish_packages(packages, release_plan, settings.nuget_api_key, StableStrategy())
+        publish_packages(packages, release_plan, settings.nuget_api_key, StableStrategy(), workspace)
 
     with ci_step("Create version tags"):
         for name in packages:

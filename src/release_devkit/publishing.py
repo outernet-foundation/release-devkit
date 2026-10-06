@@ -1,6 +1,7 @@
 from typing import Protocol
 
 from ci_devkit.ci_step import ci_step
+from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from release_devkit.config import PackageConfig
 from release_devkit.plan import PackagePlan, ReleasePlan, ResolvedDependency
@@ -52,7 +53,18 @@ def publish_packages(
     release_plan: ReleasePlan,
     nuget_api_key: str,
     strategy: VersionStrategy,
+    workspace: str,
 ) -> list[tuple[str, str, str]]:
+    registries_to_publish = {
+        registry_name for name in release_plan.publishing for registry_name in packages[name].registries
+    }
+    with ci_step("Setup"):
+        configure_git(workspace)
+        if "nuget" in registries_to_publish:
+            install_dotnet("8.0")
+        if "npm" in registries_to_publish:
+            install_node("24", "https://registry.npmjs.org")
+
     registries = build_registries(nuget_api_key)
     published: list[tuple[str, str, str]] = []
     for name, package in packages.items():
