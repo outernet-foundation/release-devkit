@@ -37,6 +37,7 @@ def main(
     actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
     workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
     run_id: Annotated[int, typer.Option(help="CI run id baked into every dev version")],
+    run_number: Annotated[int, typer.Option(help="CI run number for the builds shelf")],
     step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
@@ -45,8 +46,7 @@ def main(
     packages = publish_config.packages
     tags = GitTags()
 
-    run_number = ""
-    integrate_run: tuple[str, str] | None = None
+    _, html_url = matched_ci_run_number(repository, sha, publish_config.ci_workflow)
     new_image_manifest: dict[str, DigestEntry] = {}
 
     with ci_step("Compute dev publish plan"):
@@ -64,20 +64,15 @@ def main(
 
         has_app_changes = bool(changed_apps)
 
-        if publish_config.builds_registry is not None:
-            run_number, html_url = matched_ci_run_number(repository, sha, publish_config.ci_workflow)
-            integrate_run = (run_number, html_url)
-            manifest = pull_digest_manifest(publish_config.builds_registry, run_number, actor, settings.github_token)
-            if manifest is not None:
-                existing_digests: set[str] = set()
-                if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {repository}"):
-                    draft_body = bash_output(
-                        f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json body --jq .body"
-                    )
-                    existing_digests = set(re.findall(r"sha256:[a-f0-9]{64}", draft_body))
-                new_image_manifest = {
-                    target: entry for target, entry in manifest.items() if entry.digest not in existing_digests
-                }
+        manifest = pull_digest_manifest(publish_config.builds_registry, str(run_number), actor, settings.github_token)
+        if manifest is not None:
+            existing_digests: set[str] = set()
+            if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {repository}"):
+                draft_body = bash_output(f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json body --jq .body")
+                existing_digests = set(re.findall(r"sha256:[a-f0-9]{64}", draft_body))
+            new_image_manifest = {
+                target: entry for target, entry in manifest.items() if entry.digest not in existing_digests
+            }
 
         has_image_changes = bool(new_image_manifest)
         if not release_plan.publishing and not has_app_changes and not has_image_changes:
@@ -102,7 +97,7 @@ def main(
         draft_config = publish_config.model_copy(update={"apps": changed_apps})
         staged_assets = publish_draft_assets(
             draft_config,
-            run_number,
+            str(run_number),
             actor,
             settings.github_token,
             DEV_DRAFT_TAG,
@@ -114,13 +109,7 @@ def main(
     merge_match = _MERGE_PR_PATTERN.search(merge_message)
     pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
 
-    heading_fragments: list[str] = []
-    if integrate_run is not None:
-        section_run_number, run_url = integrate_run
-        heading_fragments.append(f"[Integrate run #{section_run_number}]({run_url})")
-    else:
-        run_url = f"https://github.com/{repository}/actions/runs/{run_id}"
-        heading_fragments.append(f"[Run #{run_id}]({run_url})")
+    heading_fragments: list[str] = [f"[Integrate run #{run_number}]({html_url})"]
     if pr_info is not None:
         pr_number, pr_title = pr_info
         pr_url = f"https://github.com/{repository}/pull/{pr_number}"

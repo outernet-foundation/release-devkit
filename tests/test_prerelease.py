@@ -125,6 +125,7 @@ def run_prerelease(
         actor="bot",
         workspace="/workspace",
         run_id=42,
+        run_number=42,
         step_summary="",
     )
 
@@ -231,6 +232,7 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
         actor="bot",
         workspace="/workspace",
         run_id=42,
+        run_number=42,
         step_summary="",
     )
 

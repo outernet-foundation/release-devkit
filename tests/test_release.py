@@ -62,7 +62,6 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(release, "GitTags", FixedReturn(FakeTags()))
     monkeypatch.setattr(release, "ci_step", null_ci_step)
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
-    monkeypatch.setattr(release, "matched_ci_run_number", FixedReturn(("42", "url")))
     monkeypatch.setattr(release, "pull_build_assets", FixedReturn([]))
     monkeypatch.setattr(release, "pull_digest_manifest", FixedReturn(None))
     monkeypatch.setattr(release, "bash", noop)
@@ -74,6 +73,7 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
         sha="abc123def456",
         actor="bot",
         workspace="/workspace",
+        run_number=42,
         step_summary="",
     )
 

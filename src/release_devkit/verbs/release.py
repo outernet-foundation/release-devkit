@@ -18,7 +18,6 @@ from release_devkit.registries import registry_url
 from release_devkit.rendering import PackageRow, RegistryLink, render_release_body
 from release_devkit.tags import GitTags
 from release_devkit.builds import (
-    matched_ci_run_number,
     pull_build_assets,
     pull_digest_manifest,
 )
@@ -32,6 +31,7 @@ def main(
     sha: Annotated[str, typer.Option(help="Commit SHA being released")],
     actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
     workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
+    run_number: Annotated[int, typer.Option(help="CI run number for the builds shelf")],
     step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
@@ -71,8 +71,7 @@ def main(
     count = int(existing) if existing else 0
     release_tag = f"{year_month}.{count + 1}"
 
-    run_number, _ = matched_ci_run_number(repository, sha, publish_config.ci_workflow)
-    pulled = pull_build_assets(publish_config, run_number, actor, settings.github_token)
+    pulled = pull_build_assets(publish_config, str(run_number), actor, settings.github_token)
     staging = Path(mkdtemp(prefix="release-assets-"))
     assets: list[Path] = []
     for artifact, source in pulled:
@@ -81,7 +80,7 @@ def main(
         shutil.copy2(source, asset)
         assets.append(asset)
 
-    manifest = pull_digest_manifest(publish_config.builds_registry, run_number, actor, settings.github_token)
+    manifest = pull_digest_manifest(publish_config.builds_registry, str(run_number), actor, settings.github_token)
 
     with ci_step("Create GitHub Release"):
         rows: list[PackageRow] = []
