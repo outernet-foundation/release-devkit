@@ -13,6 +13,7 @@
 - [x] Extract `builds.py` from `verbs/create_release.py` — shared utilities (`DigestEntry`, `MatchedRun`, `matched_ci_run_number`, `builds_registry_of`, `pull_build_assets`, `pull_digest_manifest`, `render_images_table`) moved to `builds.py`; `verbs/create_release.py` is now a ~80-line pure verb; `verbs/prerelease.py` and `verbs/update_pr_draft.py` import from `builds` instead of `create_release`
 - [x] Inline single-call helpers — `pick_tree_tag` and `ghcr_package_url` inlined into `render_images_table` (builds.py); `select_artifact_file` inlined into `pull_build_assets` (builds.py); `app_has_changes`, `parse_merge_pr`, `existing_dev_builds_digests` inlined into `main` (verbs/prerelease.py); `render_dev_summary` inlined into `main` (verbs/prerelease.py, removed from plan.py). 13 dedicated tests deleted; integration tests cover the inlined logic.
 - [x] Extract `drafts.py` from `verbs/draft_releases.py` — same grab-bag smell as the original `create_release.py`. The file was a verb (`update-pr-draft-release`) that was also a shared library for 3 other verbs. `prerelease.py` imported 6 things, `release.py` imported 2, `merge_gate.py` imported 1. Extracted the 9 shared functions + `DEV_DRAFT_TAG` + `_ANCHOR_PATTERN` into top-level `drafts.py`: `stage_draft_assets`, `ensure_draft_release`, `upload_draft_assets`, `delete_draft_release`, `append_draft_section`, `replace_or_prepend_section`, `_parse_sections`, `_join_sections`, `emit_draft_backlink`. The verb file renamed `verbs/draft_releases.py` → `verbs/update_pr_draft.py`, keeps `update_pr_app`, `Settings`, `PR_DRAFT_TAG_PREFIX`, `update_pr_draft`, `build_draft_section`, `emit_draft_summary`. Verb is ~100 lines; `drafts.py` is ~95 lines.
+- [x] Fold `create-release` verb into `release` — the verb was dead code: no workflow or consumer ever called it as a standalone CLI; `release.py` was already importing `run_create_release` as a subroutine. Folded `run_create_release` + `collect_build_assets` into `verbs/release.py` as `cut_github_release` + `collect_build_assets`; deleted `verbs/create_release.py`; removed the `create-release` entry point from `pyproject.toml`; renamed `test_create_release.py` → `test_builds.py` (the file only tested `builds.py` functions). Merged `create_release.py`'s `Settings` fields (`github_sha`, `github_actor`, `github_token`) into `release.py`'s `Settings`.
 - [ ] Fold `outputs.py` into a shared module — `builds.py` now exists as the natural home
 - [ ] Shared `Settings` base class — judgement call on the right factoring
 - [ ] `conftest.py` for test helpers — test-only, lower stakes
@@ -73,16 +74,16 @@ One function (`append_line`), 4 lines of logic, 4 callers across 4 modules. This
 
 **Fix applied:** Extracted `setup_publishing_environment(release_plan, packages, workspace)` into `plan.py`. Both verbs call it.
 
-### 5. Seven `Settings` classes with overlapping fields [SKIPPED — judgement call on factoring]
+### 5. Six `Settings` classes with overlapping fields [SKIPPED — judgement call on factoring]
 
 Every verb file in `verbs/` defines its own `Settings(BaseSettings)`:
 
 | Field | Files that declare it |
 |---|---|
-| `github_repository` | release, prerelease, create_release, update_pr_draft, merge_gate (5) |
-| `github_sha` | prerelease, create_release, update_pr_draft (3) |
-| `github_actor` | prerelease, create_release, update_pr_draft (3) |
-| `github_token` | prerelease, create_release, update_pr_draft (3) |
+| `github_repository` | release, prerelease, update_pr_draft, merge_gate (4) |
+| `github_sha` | release, prerelease, update_pr_draft (3) |
+| `github_actor` | release, prerelease, update_pr_draft (3) |
+| `github_token` | release, prerelease, update_pr_draft (3) |
 | `github_step_summary` | release, prerelease, update_pr_draft, validate_release_plan (4) |
 | `github_workspace` | release, prerelease (2) |
 | `nuget_api_key` | release, prerelease (2) |
@@ -148,7 +149,7 @@ Both context managers share the identical read/try/write/yield/finally-restore s
 
 | Helper | Files |
 |---|---|
-| `FixedReturn` | test_create_release, test_draft_releases, test_prerelease, test_release (4) |
+| `FixedReturn` | test_builds, test_draft_releases, test_prerelease, test_release (4) |
 | `CommandRecorder` | test_get_app_version, test_registries, test_tags (3) |
 | `CallRecorder` | test_prerelease, test_release (2) |
 | `BashLog` | test_draft_releases, test_merge_gate (2) |
@@ -196,6 +197,7 @@ The `with ci_step("Compute dev publish plan"):` block wraps plan computation, su
 | Change | Status | Lines saved |
 |---|---|---|
 | Extract `builds.py` from `verbs/create_release.py` | **done** | ~0 net, but 252→~80 for create_release |
+| Fold `create-release` verb into `release` | **done** | -1 verb, -1 file, -1 entry point |
 | Extract `drafts.py` from `verbs/draft_releases.py` | **done** | ~0 net, but 189→~100 for verb, ~95 in `drafts.py` |
 | Fold `outputs.py` into a shared module | skipped | ~5 |
 | Inline `render_summary` into `render_plan_summary` | **done** | ~8 |
