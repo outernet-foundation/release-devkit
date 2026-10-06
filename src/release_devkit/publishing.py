@@ -33,7 +33,7 @@ class StableStrategy:
 
 
 class DevStrategy:
-    def __init__(self, run_id: int) -> None:
+    def __init__(self, run_id: str) -> None:
         self._run_id = run_id
 
     def package_version(self, registry_name: str, plan: PackagePlan) -> str:

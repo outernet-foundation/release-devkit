@@ -32,7 +32,6 @@ def main(
     sha: Annotated[str, typer.Option(help="Commit SHA being released")],
     actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
     workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
-    run_id: Annotated[int, typer.Option(help="CI run id for this release run")],
     step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:

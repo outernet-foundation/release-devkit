@@ -74,7 +74,6 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
         sha="abc123def456",
         actor="bot",
         workspace="/workspace",
-        run_id=42,
         step_summary="",
     )
 

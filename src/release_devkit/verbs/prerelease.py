@@ -36,7 +36,6 @@ def main(
     sha: Annotated[str, typer.Option(help="Commit SHA being released")],
     actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
     workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
-    run_id: Annotated[int, typer.Option(help="CI run id baked into every dev version")],
     step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
@@ -80,7 +79,7 @@ def main(
 
     published: list[tuple[str, str, str]] = []
     if release_plan.publishing:
-        published = publish_packages(packages, release_plan, settings.nuget_api_key, DevStrategy(run_id), workspace)
+        published = publish_packages(packages, release_plan, settings.nuget_api_key, DevStrategy(matched_run_id), workspace)
 
         if published:
             recap = "\n".join([
@@ -145,7 +144,7 @@ def main(
             images=new_image_manifest or None,
         )
     )
-    anchor = f"run-{run_id}"
+    anchor = f"run-{matched_run_id}"
     append_draft_section(DEV_DRAFT_TAG, repository, anchor, section)
 
     draft_url = bash_output(f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json url --jq .url").strip()

@@ -80,14 +80,14 @@ PRERELEASE_RUN = (
     '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
     " prerelease --repository ${{ github.repository }} --sha ${{ github.sha }}"
     " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
-    " --run-id ${{ github.run_id }} --step-summary $GITHUB_STEP_SUMMARY\n"
+    " --step-summary $GITHUB_STEP_SUMMARY\n"
 )
 
 RELEASE_RUN = (
     '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
     " release --repository ${{ github.repository }} --sha ${{ github.sha }}"
     " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
-    " --run-id ${{ github.run_id }} --step-summary $GITHUB_STEP_SUMMARY\n"
+    " --step-summary $GITHUB_STEP_SUMMARY\n"
 )
 
 VALIDATE_RELEASE_PLAN_RUN = (

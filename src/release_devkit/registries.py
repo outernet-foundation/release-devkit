@@ -176,15 +176,15 @@ def registry_url(registry_name: str, identity: str, version: str) -> str | None:
     return template.format(identity, version)
 
 
-def semver_dev_version(base_version: str, run_id: int) -> str:
+def semver_dev_version(base_version: str, run_id: str) -> str:
     return f"{base_version}-dev.{run_id}"
 
 
-def pep440_dev_version(base_version: str, run_id: int) -> str:
+def pep440_dev_version(base_version: str, run_id: str) -> str:
     return f"{base_version}.dev{run_id}"
 
 
-DEV_VERSION_FORMATS: dict[str, Callable[[str, int], str]] = {
+DEV_VERSION_FORMATS: dict[str, Callable[[str, str], str]] = {
     "nuget": semver_dev_version,
     "npm": semver_dev_version,
     "pypi": pep440_dev_version,

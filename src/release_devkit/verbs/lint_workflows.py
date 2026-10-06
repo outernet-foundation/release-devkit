@@ -85,8 +85,8 @@ DEVKIT_INVOCATION = re.compile(
 )
 VERB_ARGS: dict[str, re.Pattern[str]] = {
     "get-app-version": re.compile(r"^ --app \S+ --run-id .+$"),
-    "release": re.compile(r"^ --repository .+ --sha .+ --actor .+ --workspace .+ --run-id .+ --step-summary .+$"),
-    "prerelease": re.compile(r"^ --repository .+ --sha .+ --actor .+ --workspace .+ --run-id .+ --step-summary .+$"),
+    "release": re.compile(r"^ --repository .+ --sha .+ --actor .+ --workspace .+ --step-summary .+$"),
+    "prerelease": re.compile(r"^ --repository .+ --sha .+ --actor .+ --workspace .+ --step-summary .+$"),
     "lint-workflows": re.compile(r"^$"),
     "merge-gate": re.compile(r"^ --head-sha .+ --repository .+$"),
     "validate-release-plan": re.compile(r"^ --step-summary .+$"),
