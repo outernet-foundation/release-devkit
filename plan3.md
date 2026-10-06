@@ -10,8 +10,8 @@ Locked plan. Every release surface — stable releases, the `dev-builds` dev dra
 
 ## Consumer workflows
 
-- **Image repos** (capture-tool, later): build jobs wire `--builds-registry` + `--run-number` on the `uv run build --mode ci` invocation. Today capture-tool passes none → nothing is pushed.
-- **placeframe** (now): prerelease job gains `contents: write` (currently `contents: read` — latent; today's verb never creates a draft because no apps, but the new append logic will need it).
+- **Image repos** (capture-tool, step 3): build jobs wire `--builds-registry` + `--run-number` on the `uv run build --mode ci` invocation. Today capture-tool passes none → nothing is pushed.
+- **placeframe** (done, step 1): prerelease permissions changed to `contents: write` + `packages: read` + `actions: read`; release-devkit pin bumped to `791f033`. Branch `more-ci-fixes`.
 
 ## release-devkit
 
@@ -56,19 +56,19 @@ Grow a **permissions-block validator** — assert the documented per-verb `permi
 
 ## Implementation order
 
-1. **placeframe first**: `contents: write` on prerelease + the package-only dev-draft append path (no apps, no images). End-to-end test of the append machinery, idempotent sections, summary backlink.
-2. **docker-devkit**: digest-manifest recording + push (the one-time shared change).
-3. **capture-tool**: wire build-zed flags + full image-digest rendering on all three surfaces (the fullest test).
-4. **lint**: permissions-block validator (can land any time; placeframe's compliance surfaces it).
+1. **placeframe** (done): `contents: write` on prerelease + the package-only dev-draft append path. release-devkit commits `3128a22` (code) + `791f033` (prose) on `dev`, pushed. placeframe branch `more-ci-fixes`, commit `3782432b`, pushed. Landed: `append_draft_section` + `replace_or_prepend_section` + `emit_draft_backlink` (`draft_releases.py`); always-on prerelease tail with `parse_merge_pr` + `build_prerelease_section` (`prerelease.py`); shared `registry_url` (`registries.py`, `create_release.py` refactored to use it). 228 tests pass, ruff + basedpyright clean.
+2. **docker-devkit**: digest-manifest recording + push (the one-time shared change). Distill bake's `--metadata-file` (currently read only for a sanity check at `build_docker.py:222`, then discarded) into `target → {ref, digest, tags[]}` JSON, push to `{builds_registry}/images-digests/all:run-{N}` via existing `push_build`. Drop `--lock-project` (convention replaces it: always `images-digests/all`). Keep `--builds-registry` + `--run-number` driving the digest push instead of the lock push. Stop pushing `workloads/images.lock` to the shelf.
+3. **capture-tool**: wire `--builds-registry` + `--run-number` on `uv run build --mode ci` + full image-digest rendering on all three surfaces (the fullest test). Requires: best-effort digest-manifest pull (reuse `apps[].builds.registry` + conventional `images-digests/all`; `bash_check` for shelf existence before `pull_build`); "Built images" table in `create-release` (body-only: `target | [tree-tag](ghcr-package-url) | sha256:…`); image-digest rows in `prerelease` sections (content-based delta: digest not already in the pile); image-digest rows in `update-pr-draft-release` sections. Extend `matched_ci_run_number` jq to also return `html_url` (deferred from step 1 — step 1 used the current-run URL instead of the integrate-run URL for the section heading). PR-link derivation via `parse_merge_pr` already landed.
+4. **lint**: permissions-block validator (can land any time; placeframe's compliance surfaces it). Assert the documented per-verb `permissions:` contract for `prerelease` (`contents: write` + `packages: read` + `actions: read` + `id-token: write`), `release`, `update-pr-draft-release`.
 
 ## Spec details (non-blocking, for impl reference)
 
 - Digest manifest JSON schema: `target → {ref, digest, tags[]}`
-- Matched-integrate-run `html_url`: add to the existing jq in `matched_ci_run_number` (currently extracts only `run_number`)
-- PR-link derivation: parse "Merge PR #N: title" from the merge message (fall back to `gh api /commits/{sha}/pulls` if needed)
-- Whether to run the matched-run lookup when no assets (package-only case like placeframe): run it for the integrate-run link in the section, or skip — cheap either way
+- Matched-integrate-run `html_url`: add to the existing jq in `matched_ci_run_number` (currently extracts only `run_number`) — deferred to step 3 (step 1 used the current-run URL for the section heading instead)
+- PR-link derivation (done, step 1): `parse_merge_pr` in `prerelease.py` parses "Merge PR #N: title" from `git log -1 --format=%B {sha}`
+- Matched-run lookup for no assets (decided, step 1): skip — use the current release run URL (`https://github.com/{repo}/actions/runs/{run_id}`) for the section heading instead of the integrate-run URL
 - Best-effort digest-manifest pull: `bash_check` for shelf existence before `pull_build` (repos without images naturally skip)
-- `dry_run` already guards the whole path (`prerelease.py:76`) — confirm new append logic sits after it
+- `dry_run` guard (confirmed, step 1): the new append logic sits after the `dry_run` early return at `prerelease.py:81`
 - Multi-variant repos (cuda/rocm matrix → separate runs): known limitation, defer until one exists
 - ghcr package-page URL shape (verified): `https://github.com/orgs/{owner}/packages/container/{repo}%2F{image}`
 
