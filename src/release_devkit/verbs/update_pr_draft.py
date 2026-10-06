@@ -32,11 +32,12 @@ def update_pr_draft(
 ) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
+    resolved_run_id = str(run_id)
+    manifest = pull_digest_manifest(publish_config.builds_registry, resolved_run_id, actor, settings.github_token)
     if not any(app.builds for app in publish_config.apps.values()):
         return
 
     tag = f"{PR_DRAFT_TAG_PREFIX}{pr_number}"
-    resolved_run_id = str(run_id)
     staged = publish_draft_assets(
         publish_config,
         resolved_run_id,
@@ -46,7 +47,6 @@ def update_pr_draft(
         repository,
         sha,
     )
-    manifest = pull_digest_manifest(publish_config.builds_registry, resolved_run_id, actor, settings.github_token)
     run_url = f"https://github.com/{repository}/actions/runs/{run_id}"
 
     pr_url = f"https://github.com/{repository}/pull/{pr_number}"

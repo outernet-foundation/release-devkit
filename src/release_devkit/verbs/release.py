@@ -37,6 +37,8 @@ def main(
 ) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
+    matched_run_id, _ = matched_ci_run(repository, sha, publish_config.ci_workflow)
+    manifest = pull_digest_manifest(publish_config.builds_registry, matched_run_id, actor, settings.github_token)
     packages = publish_config.packages
     tags = GitTags()
 
@@ -71,8 +73,6 @@ def main(
     count = int(existing) if existing else 0
     release_tag = f"{year_month}.{count + 1}"
 
-    matched_run_id, _ = matched_ci_run(repository, sha, publish_config.ci_workflow)
-
     pulled = pull_build_assets(publish_config, matched_run_id, actor, settings.github_token)
     staging = Path(mkdtemp(prefix="release-assets-"))
     assets: list[Path] = []
@@ -81,8 +81,6 @@ def main(
         asset = staging / asset_name
         shutil.copy2(source, asset)
         assets.append(asset)
-
-    manifest = pull_digest_manifest(publish_config.builds_registry, matched_run_id, actor, settings.github_token)
 
     with ci_step("Create GitHub Release"):
         rows: list[PackageRow] = []

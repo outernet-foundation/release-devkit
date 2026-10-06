@@ -41,11 +41,22 @@ def main(
 ) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
+    matched_run_id, html_url = matched_ci_run(repository, sha, publish_config.ci_workflow)
+
+    new_image_manifest: dict[str, DigestEntry] = {}
+    manifest = pull_digest_manifest(publish_config.builds_registry, matched_run_id, actor, settings.github_token)
+    if manifest is not None:
+        existing_digests: set[str] = set()
+        if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {repository}"):
+            draft_body = bash_output(f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json body --jq .body")
+            existing_digests = set(re.findall(r"sha256:[a-f0-9]{64}", draft_body))
+        new_image_manifest = {
+            target: entry for target, entry in manifest.items() if entry.digest not in existing_digests
+        }
+    has_image_changes = bool(new_image_manifest)
+
     packages = publish_config.packages
     tags = GitTags()
-
-    matched_run_id, html_url = matched_ci_run(repository, sha, publish_config.ci_workflow)
-    new_image_manifest: dict[str, DigestEntry] = {}
 
     with ci_step("Compute dev publish plan"):
         release_plan = compute_release_plan(publish_config, tags)
@@ -62,17 +73,6 @@ def main(
 
         has_app_changes = bool(changed_apps)
 
-        manifest = pull_digest_manifest(publish_config.builds_registry, matched_run_id, actor, settings.github_token)
-        if manifest is not None:
-            existing_digests: set[str] = set()
-            if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {repository}"):
-                draft_body = bash_output(f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json body --jq .body")
-                existing_digests = set(re.findall(r"sha256:[a-f0-9]{64}", draft_body))
-            new_image_manifest = {
-                target: entry for target, entry in manifest.items() if entry.digest not in existing_digests
-            }
-
-        has_image_changes = bool(new_image_manifest)
         if not release_plan.publishing and not has_app_changes and not has_image_changes:
             print("Nothing to publish")
             return
