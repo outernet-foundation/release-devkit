@@ -1,30 +1,26 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
+import json
 from pathlib import Path
-from tempfile import mkdtemp
 
 import pytest
 
-from release_devkit import draft_releases
-from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PublishConfig
-from release_devkit.create_release import DigestEntry, pull_build_assets
-from release_devkit.draft_releases import (
-    append_draft_section,
-    build_draft_section,
+from release_devkit import plan as plan_module
+from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig
+from release_devkit.plan import ReleasePlan
+from release_devkit.verbs import release as release_module
+from release_devkit.verbs.release import (
+    DIGEST_FILE_NAME,
+    DigestEntry,
+    ReleaseChannel,
     delete_draft_release,
-    emit_draft_backlink,
-    emit_draft_summary,
-    ensure_draft_release,
-    replace_or_prepend_section,
-    stage_draft_assets,
-    update_pr_draft,
-    upload_draft_assets,
 )
 
-
-def null_ci_step(label: str) -> object:
-    return nullcontext()
+DRAFT_URL = "https://github.com/owner/repo/releases/untagged-abc"
+DRAFT_VIEW_JSON = json.dumps({"body": "", "url": DRAFT_URL})
+DRAFT_REPOSITORY = "owner/repo"
+CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
+SHORT_SHA = CERTIFIED_SHA[:12]
 
 
 class BashLog:
@@ -43,150 +39,116 @@ class FixedReturn:
         return self.value
 
 
-def make_build_config() -> PublishConfig:
+class FakeTags:
+    def __init__(self, versions: dict[str, str | None], changed: set[str]) -> None:
+        self._versions = versions
+        self._changed = changed
+
+    def latest_version(self, prefix: str) -> str | None:
+        return self._versions.get(prefix.removesuffix("-v"))
+
+    def has_changes_since(self, tag: str | None, path: Path) -> bool:
+        if tag is None:
+            return True
+        return tag.rsplit("-v", 1)[0] in self._changed
+
+
+class FakePullArtifact:
+    def __init__(self, layers: dict[tuple[str, str], dict[str, str]]) -> None:
+        self.layers = layers
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(
+        self,
+        builds_registry: str,
+        project: str,
+        platform: str,
+        tag: str,
+        target: Path,
+        **kwargs: object,
+    ) -> bool:
+        self.calls.append((builds_registry, project, platform, tag, target))
+        files = self.layers.get((project, platform))
+        if files is None:
+            return False
+        target.mkdir(parents=True, exist_ok=True)
+        for file_name, content in files.items():
+            (target / file_name).write_text(content, encoding="utf-8")
+        return True
+
+
+def digest_layer(manifest: dict[str, DigestEntry]) -> dict[tuple[str, str], dict[str, str]]:
+    data = {name: entry.model_dump() for name, entry in manifest.items()}
+    return {("images-digests", "all"): {DIGEST_FILE_NAME: json.dumps(data)}}
+
+
+def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
+    monkeypatch.setattr(plan_module, "get_latest_version", tags.latest_version)
+    monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
+    monkeypatch.setattr(release_module, "get_latest_version", tags.latest_version)
+
+
+def make_build_config(built_images: bool = False) -> PublishConfig:
     return PublishConfig(
-        ci_workflow="integrate.yml",
         apps={
             "myapp": AppConfig(
                 path=Path("apps/myapp"),
                 major_minor="1.0",
-                builds=BuildsConfig(
-                    registry="ghcr.io/owner/repo/builds",
-                    artifacts=[
-                        BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
-                    ],
-                ),
+                builds=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile", file="MyApp-AndroidMobile.apk")],
             )
         },
+        built_images=built_images,
     )
 
 
-def make_empty_config() -> PublishConfig:
-    return PublishConfig(
-        ci_workflow="integrate.yml",
-        apps={"myapp": AppConfig(path=Path("apps/myapp"), major_minor="1.0")},
-    )
-
-
-def make_source_file(name: str = "app.apk") -> Path:
-    directory = Path(mkdtemp(prefix="test-source-"))
-    source = directory / name
-    source.write_text("build content", encoding="utf-8")
-    return source
-
-
-def patch_verb_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key, value in {
-        "GITHUB_REPOSITORY": "owner/repo",
-        "GITHUB_SHA": "abc123def456",
-        "GITHUB_ACTOR": "bot",
-        "GITHUB_TOKEN": "token",
-        "GITHUB_RUN_ID": "99",
-        "GITHUB_STEP_SUMMARY": "",
-    }.items():
-        monkeypatch.setenv(key, value)
+def patch_context(
+    monkeypatch: pytest.MonkeyPatch,
+    publish_config: PublishConfig,
+    github_ref: str = "refs/pull/107/merge",
+) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", DRAFT_REPOSITORY)
+    monkeypatch.setenv("GITHUB_ACTOR", "bot")
+    monkeypatch.setenv("GITHUB_WORKSPACE", "/workspace")
+    monkeypatch.setenv("GITHUB_REF", github_ref)
+    monkeypatch.setattr(release_module, "load_config", FixedReturn(publish_config))
+    monkeypatch.setattr(release_module, "configure_git", FixedReturn(None))
+    monkeypatch.setattr(release_module, "compute_release_plan", FixedReturn(ReleasePlan.empty()))
 
 
 def patch_bash(monkeypatch: pytest.MonkeyPatch, check_returns: object = False) -> BashLog:
-    monkeypatch.setattr(draft_releases, "ci_step", null_ci_step)
-    monkeypatch.setattr(draft_releases, "bash_check", FixedReturn(check_returns))
+    monkeypatch.setattr(release_module, "bash_check", FixedReturn(check_returns))
     bash_log = BashLog()
-    monkeypatch.setattr(draft_releases, "bash", bash_log)
+    monkeypatch.setattr(release_module, "bash", bash_log)
     return bash_log
 
 
-def test_pull_build_assets_returns_empty_when_no_builds() -> None:
-    result = pull_build_assets(make_empty_config(), "42", "", "")
-    assert result == []
+def patch_pr_bash_output(monkeypatch: pytest.MonkeyPatch, body: str = "") -> None:
+    def dispatching_bash_output(command: str) -> str:
+        if command == "git rev-parse HEAD":
+            return CERTIFIED_SHA
+        return json.dumps({"body": body})
+
+    monkeypatch.setattr(release_module, "bash_output", dispatching_bash_output)
 
 
-def test_stage_draft_assets_uses_configured_name_stem() -> None:
-    source = make_source_file("original.apk")
-    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
-
-    staged = stage_draft_assets([(artifact, source)], "42")
-
-    assert len(staged) == 1
-    name, path = staged[0]
-    assert name == "MyApp-AndroidMobile-run-42.apk"
-    assert path.is_file()
+def patch_pull_artifact(
+    monkeypatch: pytest.MonkeyPatch, layers: dict[tuple[str, str], dict[str, str]]
+) -> FakePullArtifact:
+    pull_artifact = FakePullArtifact(layers)
+    monkeypatch.setattr(release_module, "pull_artifact", pull_artifact)
+    return pull_artifact
 
 
-def test_stage_draft_assets_uses_source_stem_when_name_unset() -> None:
-    source = make_source_file("app.apk")
-    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile")
+def capturing_bash(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    written: list[str] = []
 
-    staged = stage_draft_assets([(artifact, source)], "42")
+    def capturing(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
 
-    assert len(staged) == 1
-    assert staged[0][0] == "app-run-42.apk"
-
-
-def test_ensure_draft_release_creates_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    bash_log = patch_bash(monkeypatch, check_returns=False)
-
-    ensure_draft_release("pr-7", "owner/repo", "abc123")
-
-    assert any("gh release create pr-7" in command for command in bash_log.commands)
-    assert any("--draft" in command for command in bash_log.commands)
-    assert any("--target abc123" in command for command in bash_log.commands)
-
-
-def test_ensure_draft_release_skips_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    bash_log = patch_bash(monkeypatch, check_returns=True)
-
-    ensure_draft_release("pr-7", "owner/repo", "abc123")
-
-    assert not bash_log.commands
-
-
-def test_upload_draft_assets_uses_clobber(monkeypatch: pytest.MonkeyPatch) -> None:
-    bash_log = patch_bash(monkeypatch)
-    source = make_source_file("asset.apk")
-
-    upload_draft_assets("pr-7", "owner/repo", [("asset-run-42.apk", source)])
-
-    assert any("gh release upload pr-7" in command and "--clobber" in command for command in bash_log.commands)
-
-
-def test_emit_draft_summary_writes_download_links(tmp_path: Path) -> None:
-    summary_path = tmp_path / "summary.md"
-    source = make_source_file("asset.apk")
-
-    emit_draft_summary(str(summary_path), "pr-7", "owner/repo", [("MyApp-run-42.apk", source)])
-
-    content = summary_path.read_text(encoding="utf-8")
-    assert "https://github.com/owner/repo/releases/download/pr-7/MyApp-run-42.apk" in content
-    assert "[MyApp-run-42.apk]" in content
-
-
-def test_build_draft_section_renders_heading_images_and_assets() -> None:
-    source = make_source_file("MyApp.apk")
-    manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
-
-    section = build_draft_section(
-        "owner/repo",
-        "pr-7",
-        "42",
-        "https://github.com/owner/repo/actions/runs/99",
-        7,
-        [("MyApp-run-42.apk", source)],
-        manifest,
-    )
-
-    assert "### [Run #42](https://github.com/owner/repo/actions/runs/99)" in section
-    assert "[PR #7](https://github.com/owner/repo/pull/7)" in section
-    assert "#### Built images" in section
-    assert "zed-capture" in section
-    assert "https://github.com/owner/repo/releases/download/pr-7/MyApp-run-42.apk" in section
-
-
-def test_build_draft_section_omits_images_when_empty() -> None:
-    section = build_draft_section(
-        "owner/repo", "pr-7", "42", "https://github.com/owner/repo/actions/runs/99", 7, [], {}
-    )
-
-    assert "Built images" not in section
+    monkeypatch.setattr(release_module, "bash", capturing)
+    return written
 
 
 def test_delete_draft_release_deletes_with_cleanup_tag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -209,102 +171,187 @@ def test_delete_draft_release_noop_when_absent(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
-    patch_verb_environment(monkeypatch)
-    source = make_source_file("MyApp.apk")
-    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
-    monkeypatch.setattr(draft_releases, "load_config", FixedReturn(make_build_config()))
-    monkeypatch.setattr(draft_releases, "pull_build_assets", FixedReturn([(artifact, source)]))
-    monkeypatch.setattr(draft_releases, "pull_digest_manifest", FixedReturn(None))
-    monkeypatch.setattr(draft_releases, "bash_output", FixedReturn(""))
+    patch_context(monkeypatch, make_build_config())
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
+    patch_pull_artifact(monkeypatch, {("MyApp", "AndroidMobile"): {"MyApp.apk": "build content"}})
+    patch_pr_bash_output(monkeypatch)
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
-    update_pr_draft(pr_number=7, run_number=42)
+    release_module.main(channel=ReleaseChannel.PR)
 
-    assert any("pr-7" in command for command in bash_log.commands)
-    assert any("gh release upload pr-7" in command and "--clobber" in command for command in bash_log.commands)
-    assert any("MyApp-AndroidMobile-run-42.apk" in command for command in bash_log.commands)
-    assert any("gh release edit pr-7" in command and "--notes-file" in command for command in bash_log.commands)
+    assert any("pr-107" in command for command in bash_log.commands)
+    assert any("gh release upload pr-107" in command and "--clobber" in command for command in bash_log.commands)
+    assert any(f"MyApp-AndroidMobile-{SHORT_SHA}.apk" in command for command in bash_log.commands)
+    assert any("gh release edit pr-107" in command and "--notes-file" in command for command in bash_log.commands)
 
 
 def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
-    patch_verb_environment(monkeypatch)
-    source = make_source_file("MyApp.apk")
-    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
-    monkeypatch.setattr(draft_releases, "load_config", FixedReturn(make_build_config()))
-    monkeypatch.setattr(draft_releases, "pull_build_assets", FixedReturn([(artifact, source)]))
-    monkeypatch.setattr(draft_releases, "pull_digest_manifest", FixedReturn(manifest))
-    monkeypatch.setattr(draft_releases, "ci_step", null_ci_step)
-    monkeypatch.setattr(draft_releases, "bash_check", FixedReturn(False))
-    monkeypatch.setattr(draft_releases, "bash_output", FixedReturn(""))
+    patch_context(monkeypatch, make_build_config(built_images=True))
+    patch_pull_artifact(
+        monkeypatch, {("MyApp", "AndroidMobile"): {"MyApp.apk": "build content"}, **digest_layer(manifest)}
+    )
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+    written = capturing_bash(monkeypatch)
 
-    written: list[str] = []
-
-    def capturing_bash(command: str) -> None:
-        if "--notes-file" in command:
-            path = command.split("--notes-file", 1)[1].strip().split()[0]
-            written.append(Path(path).read_text(encoding="utf-8"))
-
-    monkeypatch.setattr(draft_releases, "bash", capturing_bash)
-
-    update_pr_draft(pr_number=7, run_number=42)
+    release_module.main(channel=ReleaseChannel.PR)
 
     assert written
     assert "zed-capture" in written[0]
     assert "sha256:abc" in written[0]
-    assert "https://github.com/owner/repo/actions/runs/99" in written[0]
+    assert "[tree-1](https://github.com/orgs/owner/packages/container/repo%2Fzed-capture)" in written[0]
+    assert f"https://github.com/owner/repo/commit/{CERTIFIED_SHA}" in written[0]
+    assert f"sha-{SHORT_SHA}" in written[0]
 
 
-def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -> None:
-    patch_verb_environment(monkeypatch)
-    monkeypatch.setattr(draft_releases, "load_config", FixedReturn(make_empty_config()))
+def test_update_pr_draft_omits_images_when_not_declared(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_context(monkeypatch, make_build_config())
+    patch_pull_artifact(monkeypatch, {("MyApp", "AndroidMobile"): {"MyApp.apk": "build content"}})
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+    written = capturing_bash(monkeypatch)
+
+    release_module.main(channel=ReleaseChannel.PR)
+
+    assert written
+    assert "Built images" not in written[0]
+
+
+def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.MonkeyPatch) -> None:
+    manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
+    config = PublishConfig(apps={}, built_images=True)
+    patch_context(monkeypatch, config)
+    patch_pull_artifact(monkeypatch, digest_layer(manifest))
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+    written = capturing_bash(monkeypatch)
+
+    release_module.main(channel=ReleaseChannel.PR)
+
+    assert written
+    assert "zed-capture" in written[0]
+    assert "sha256:abc" in written[0]
+
+
+def test_update_pr_draft_fails_loudly_on_treeless_manifest_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_manifest = {
+        "zed-capture": {"ref": "ghcr.io/owner/repo/zed-capture", "digest": "sha256:abc", "tags": ["latest"]}
+    }
+    patch_context(monkeypatch, PublishConfig(built_images=True))
+    patch_pull_artifact(monkeypatch, {("images-digests", "all"): {DIGEST_FILE_NAME: json.dumps(raw_manifest)}})
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+
+    with pytest.raises(ValueError, match="tree-"):
+        release_module.main(channel=ReleaseChannel.PR)
+
+
+def test_update_pr_draft_fails_loudly_on_foreign_registry_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_manifest = {
+        "zed-capture": {"ref": "registry.example.com/owner/zed-capture", "digest": "sha256:abc", "tags": ["tree-1"]}
+    }
+    patch_context(monkeypatch, PublishConfig(built_images=True))
+    patch_pull_artifact(monkeypatch, {("images-digests", "all"): {DIGEST_FILE_NAME: json.dumps(raw_manifest)}})
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+
+    with pytest.raises(ValueError, match=r"ghcr\.io"):
+        release_module.main(channel=ReleaseChannel.PR)
+
+
+def test_update_pr_draft_no_apps_uploads_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_context(monkeypatch, PublishConfig())
+    patch_pr_bash_output(monkeypatch)
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
-    update_pr_draft(pr_number=7, run_number=42)
+    release_module.main(channel=ReleaseChannel.PR)
+
+    assert not any("gh release upload" in command for command in bash_log.commands)
+    assert any("gh release edit pr-107" in command for command in bash_log.commands)
+
+
+def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_context(monkeypatch, make_build_config(), github_ref="refs/heads/dev")
+    patch_pr_bash_output(monkeypatch)
+    bash_log = patch_bash(monkeypatch, check_returns=False)
+
+    with pytest.raises(IndexError):
+        release_module.main(channel=ReleaseChannel.PR)
 
     assert not bash_log.commands
 
 
-def test_replace_or_prepend_section_prepends_to_empty_body() -> None:
-    result = replace_or_prepend_section("", "run-42", "### Heading")
+def test_update_pr_draft_writes_notes_file_without_recreating(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_context(monkeypatch, PublishConfig())
+    patch_pr_bash_output(monkeypatch)
+    bash_log = patch_bash(monkeypatch, check_returns=True)
 
-    assert result == '<a id="run-42"></a>\n### Heading\n'
+    release_module.main(channel=ReleaseChannel.PR)
 
-
-def test_replace_or_prepend_section_prepends_newest_first() -> None:
-    body = '<a id="run-42"></a>\n### Old'
-
-    result = replace_or_prepend_section(body, "run-43", "### New")
-
-    assert result.startswith('<a id="run-43"></a>\n### New')
-    assert '<a id="run-42"></a>\n### Old' in result
+    assert any("gh release edit pr-107" in command and "--notes-file" in command for command in bash_log.commands)
+    assert not any("gh release create" in command for command in bash_log.commands)
 
 
-def test_replace_or_prepend_section_replaces_existing_anchor() -> None:
-    body = '<a id="run-42"></a>\n### Old\n\n| pkg |'
-
-    result = replace_or_prepend_section(body, "run-42", "### Updated")
-
-    assert "### Old" not in result
-    assert '<a id="run-42"></a>\n### Updated' in result
-
-
-def test_append_draft_section_writes_notes_file(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_pr_draft_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_context(monkeypatch, PublishConfig())
+    patch_pr_bash_output(monkeypatch)
     bash_log = patch_bash(monkeypatch, check_returns=False)
-    monkeypatch.setattr(draft_releases, "bash_output", FixedReturn(""))
 
-    append_draft_section("dev-builds", "owner/repo", "abc123", "run-42", "### Heading")
+    release_module.main(channel=ReleaseChannel.PR)
 
-    assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
-
-
-def test_emit_draft_backlink_writes_anchor_link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    summary_path = tmp_path / "summary.md"
-    monkeypatch.setattr(
-        draft_releases, "bash_output", FixedReturn("https://github.com/owner/repo/releases/tag/untagged-abc")
+    assert any(
+        "gh release create pr-107" in command and "--draft" in command and f"--target {CERTIFIED_SHA}" in command
+        for command in bash_log.commands
     )
+    assert any("gh release edit pr-107" in command and "--notes-file" in command for command in bash_log.commands)
 
-    emit_draft_backlink(str(summary_path), "dev-builds", "owner/repo", "run-42")
 
-    content = summary_path.read_text(encoding="utf-8")
-    assert "https://github.com/owner/repo/releases/tag/untagged-abc#run-42" in content
+def test_update_pr_draft_replaces_same_anchor_and_preserves_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = f'<a id="sha-old"></a>\n### Old\n\n<a id="sha-{SHORT_SHA}"></a>\n### New v1'
+    patch_context(monkeypatch, PublishConfig())
+    patch_pr_bash_output(monkeypatch, body)
+    patch_bash(monkeypatch, check_returns=True)
+    written = capturing_bash(monkeypatch)
+
+    release_module.main(channel=ReleaseChannel.PR)
+
+    assert written
+    assert "### Old" in written[0]
+    assert f"### [{SHORT_SHA}]" in written[0]
+    assert "### New v1" not in written[0]
+
+
+def test_update_pr_draft_lists_one_row_per_staged_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = PublishConfig(
+        apps={
+            "myapp": AppConfig(
+                path=Path("apps/myapp"),
+                major_minor="1.0",
+                builds=[
+                    BuildArtifactConfig(project="MyApp", platform="AndroidMobile", file="MyApp-AndroidMobile.apk"),
+                    BuildArtifactConfig(project="MyApp", platform="IOS", file="MyApp-IOS.apk"),
+                ],
+            )
+        },
+    )
+    patch_context(monkeypatch, config)
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
+    patch_pull_artifact(
+        monkeypatch,
+        {
+            ("MyApp", "AndroidMobile"): {"MyApp-AndroidMobile.apk": "build content"},
+            ("MyApp", "IOS"): {"MyApp-IOS.apk": "build content"},
+        },
+    )
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+    written = capturing_bash(monkeypatch)
+
+    release_module.main(channel=ReleaseChannel.PR)
+
+    assert written
+    assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk](" in written[0]
+    assert f"| myapp | 1.0.0 | [MyApp-IOS-{SHORT_SHA}.apk](" in written[0]

@@ -5,11 +5,27 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import PackageConfig
-from .csproj import load_project_roots, read_package_references
-from .registries import NpmManifest, PyprojectProjectTable, SENTINEL_VERSION
+from pydantic import BaseModel, ConfigDict, Field
+
+from release_devkit.config import PackageConfig
+from release_devkit.csproj import load_project_roots, read_package_references
 
 DEPENDENCY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*")
+# Same-unit dependency sentinel: authored in manifests, injected with the event version at publish.
+SENTINEL_VERSION = "0.0.0+local"
+
+
+class NpmManifest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    version: str = ""
+    dependencies: dict[str, str] = Field(default_factory=dict)
+
+
+class PyprojectProjectTable(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    dependencies: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -28,50 +44,43 @@ class ManifestDependency:
 
 
 def resolve_edges(packages: dict[str, PackageConfig]) -> dict[str, list[DependencyEdge]]:
-    identity_index = build_identity_index(packages)
-    return {name: read_package_edges(name, package, identity_index) for name, package in packages.items()}
-
-
-def build_identity_index(packages: dict[str, PackageConfig]) -> dict[tuple[str, str], str]:
-    index: dict[tuple[str, str], str] = {}
+    identity_index: dict[tuple[str, str], str] = {}
     for name, package in packages.items():
-        for registry_name, identity in package.registries.items():
-            key = (registry_name, identity)
-            owner = index.get(key)
-            if owner is not None and owner != name:
-                raise ValueError(f"packages '{owner}' and '{name}' share {registry_name} identity '{identity}'")
-            index[key] = name
-    return index
+        key = (package.registry, package.identity)
+        owner = identity_index.get(key)
+        if owner is not None and owner != name:
+            raise ValueError(f"packages '{owner}' and '{name}' share {package.registry} identity '{package.identity}'")
+        identity_index[key] = name
+    return {name: read_package_edges(name, package, identity_index) for name, package in packages.items()}
 
 
 def read_package_edges(
     name: str, package: PackageConfig, identity_index: dict[tuple[str, str], str]
 ) -> list[DependencyEdge]:
     edges: list[DependencyEdge] = []
-    for registry_name in package.registries:
-        for dependency in MANIFEST_READERS[registry_name](package.path):
-            dependency_package = identity_index.get((registry_name, dependency.identity))
-            if dependency_package is None:
-                if dependency.version == SENTINEL_VERSION:
-                    raise ValueError(
-                        f"package '{name}': dependency '{dependency.identity}' carries the sentinel "
-                        f"'{SENTINEL_VERSION}' but no config package owns that {registry_name} identity"
-                    )
-                continue
-            if dependency.version != SENTINEL_VERSION:
+    for dependency in MANIFEST_READERS[package.registry](package.path):
+        dependency_package = identity_index.get((package.registry, dependency.identity))
+        if dependency_package is None:
+            if dependency.version == SENTINEL_VERSION:
                 raise ValueError(
-                    f"package '{name}': dependency '{dependency.identity}' resolves to config package "
-                    f"'{dependency_package}' and must be authored as the sentinel '{SENTINEL_VERSION}', "
-                    f"found '{dependency.version}'"
+                    f"package '{name}': dependency '{dependency.identity}' carries the sentinel "
+                    f"'{SENTINEL_VERSION}' but no config package owns that {package.registry} identity"
                 )
-            edges.append(
-                DependencyEdge(
-                    dependency_package=dependency_package,
-                    registry=registry_name,
-                    identity=dependency.identity,
-                    property_name=dependency.property_name,
-                )
+            continue
+        if dependency.version != SENTINEL_VERSION:
+            raise ValueError(
+                f"package '{name}': dependency '{dependency.identity}' resolves to config package "
+                f"'{dependency_package}' and must be authored as the sentinel '{SENTINEL_VERSION}', "
+                f"found '{dependency.version}'"
             )
+        edges.append(
+            DependencyEdge(
+                dependency_package=dependency_package,
+                registry=package.registry,
+                identity=dependency.identity,
+                property_name=dependency.property_name,
+            )
+        )
     return edges
 
 

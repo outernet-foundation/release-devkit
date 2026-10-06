@@ -5,13 +5,16 @@ description = "Publication machinery: per-package tag ledger, path-diff change d
 requires-python = ">=3.13"
 dependencies = [
     "bashrun>=0.1.0",
-    "ci-devkit==0.1.15.dev36756330648",
+    "ci-devkit>=0.2.1.dev37711169350",
     "pydantic>=2.11.7",
     "pydantic-settings>=2.9.1",
     "pyyaml>=6.0.3",
     "strictyaml>=1.7.3",
     "typer>=0.17.4",
 ]
+
+[tool.uv]
+prerelease = "if-necessary-or-explicit"
 
 [dependency-groups]
 dev = [
@@ -28,14 +31,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-get-app-version = "release_devkit.get_app_version:app"
-create-release = "release_devkit.create_release:app"
-lint-workflows = "release_devkit.lint_workflows:app"
-merge-gate = "release_devkit.merge_gate:app"
-prerelease = "release_devkit.prerelease:app"
-release = "release_devkit.release:app"
-validate-release-plan = "release_devkit.validate_release_plan:app"
-update-pr-draft-release = "release_devkit.draft_releases:update_pr_app"
+get-app-version = "release_devkit.verbs.get_app_version:app"
+lint-workflows = "release_devkit.verbs.lint_workflows:app"
+merge-gate = "release_devkit.verbs.merge_gate:app"
+release = "release_devkit.verbs.release:app"
+validate-release-plan = "release_devkit.verbs.validate_release_plan:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/release_devkit"]
