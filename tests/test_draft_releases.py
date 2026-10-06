@@ -8,7 +8,7 @@ import pytest
 
 from release_devkit import drafts
 from release_devkit.verbs import update_pr_draft as update_pr_draft_module
-from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PublishConfig
+from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig
 from release_devkit.builds import DigestEntry, pull_build_assets
 from release_devkit.drafts import (
     append_draft_section,
@@ -44,14 +44,10 @@ def make_build_config() -> PublishConfig:
             "myapp": AppConfig(
                 path=Path("apps/myapp"),
                 major_minor="1.0",
-                builds=BuildsConfig(
-                    registry="ghcr.io/owner/repo/builds",
-                    artifacts=[
-                        BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
-                    ],
-                ),
+                builds=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")],
             )
         },
+        builds_registry="ghcr.io/owner/repo/builds",
     )
 
 

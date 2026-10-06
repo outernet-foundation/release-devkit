@@ -47,30 +47,27 @@ def matched_ci_run_number(repository: str, sha: str, ci_workflow: str) -> tuple[
         return run_number, html_url
 
 
-def builds_registry_of(publish_config: PublishConfig) -> str | None:
-    for app in publish_config.apps.values():
-        if app.builds is not None:
-            return app.builds.registry
-    return None
-
-
 def pull_build_assets(
     publish_config: PublishConfig, run_number: str, registry_username: str, registry_token: str
 ) -> list[tuple[BuildArtifactConfig, Path]]:
-    apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds is not None}
+    apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds}
     if not apps_with_builds:
         return []
+
+    registry = publish_config.builds_registry
+    if registry is None:
+        raise ValueError("builds_registry is required when any app declares builds")
 
     build_tag = f"run-{run_number}"
     staging = Path(mkdtemp(prefix="release-builds-"))
     assets: list[tuple[BuildArtifactConfig, Path]] = []
 
-    for app_name, builds in apps_with_builds.items():
+    for app_name, artifacts in apps_with_builds.items():
         with ci_step(f"Pull build artifacts ({app_name})"):
-            for artifact in builds.artifacts:
+            for artifact in artifacts:
                 target = staging / f"{artifact.project}-{artifact.platform}"
                 pull_build(
-                    builds.registry,
+                    registry,
                     artifact.project,
                     artifact.platform,
                     build_tag,

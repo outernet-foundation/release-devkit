@@ -7,7 +7,7 @@ import pytest
 
 from release_devkit.verbs import prerelease
 from release_devkit import drafts
-from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PackageConfig, PublishConfig
+from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig
 from release_devkit.builds import DigestEntry
 from release_devkit.plan import PackagePlan, ReleasePlan
 
@@ -49,14 +49,11 @@ class CallRecorder:
         return self._return_value
 
 
-def make_builds() -> BuildsConfig:
-    return BuildsConfig(
-        registry="ghcr.io/owner/repo/builds",
-        artifacts=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile")],
-    )
+def make_builds() -> list[BuildArtifactConfig]:
+    return [BuildArtifactConfig(project="MyApp", platform="AndroidMobile")]
 
 
-def make_app(name: str = "myapp", builds: BuildsConfig | None = None) -> AppConfig:
+def make_app(name: str = "myapp", builds: list[BuildArtifactConfig] | None = None) -> AppConfig:
     return AppConfig(path=Path(f"apps/{name}"), major_minor="1.0", builds=builds or make_builds())
 
 
@@ -64,7 +61,12 @@ def make_config(
     packages: dict[str, PackageConfig] | None = None,
     apps: dict[str, AppConfig] | None = None,
 ) -> PublishConfig:
-    return PublishConfig(ci_workflow="integrate.yml", packages=packages or {}, apps=apps or {})
+    return PublishConfig(
+        ci_workflow="integrate.yml",
+        packages=packages or {},
+        apps=apps or {},
+        builds_registry="ghcr.io/owner/repo/builds" if apps else None,
+    )
 
 
 def make_plan(publishing: set[str]) -> ReleasePlan:

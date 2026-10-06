@@ -7,7 +7,6 @@ import typer
 
 from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
 from release_devkit.builds import (
-    builds_registry_of,
     pull_digest_manifest,
 )
 from release_devkit.drafts import (
@@ -48,9 +47,7 @@ def update_pr_draft(
         repository,
         sha,
     )
-    manifest = pull_digest_manifest(
-        builds_registry_of(publish_config), resolved_run_number, actor, settings.github_token
-    )
+    manifest = pull_digest_manifest(publish_config.builds_registry, resolved_run_number, actor, settings.github_token)
     run_url = f"https://github.com/{repository}/actions/runs/{run_id}"
 
     pr_url = f"https://github.com/{repository}/pull/{pr_number}"

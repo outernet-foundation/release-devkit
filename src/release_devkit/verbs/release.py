@@ -18,7 +18,6 @@ from release_devkit.registries import registry_url
 from release_devkit.rendering import PackageRow, RegistryLink, render_release_body
 from release_devkit.tags import GitTags
 from release_devkit.builds import (
-    builds_registry_of,
     matched_ci_run_number,
     pull_build_assets,
     pull_digest_manifest,
@@ -84,7 +83,7 @@ def main(
         shutil.copy2(source, asset)
         assets.append(asset)
 
-    manifest = pull_digest_manifest(builds_registry_of(publish_config), run_number, actor, settings.github_token)
+    manifest = pull_digest_manifest(publish_config.builds_registry, run_number, actor, settings.github_token)
 
     with ci_step("Create GitHub Release"):
         rows: list[PackageRow] = []

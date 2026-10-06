@@ -31,19 +31,12 @@ class BuildArtifactConfig(BaseModel):
     name: str | None = None
 
 
-class BuildsConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    registry: str
-    artifacts: list[BuildArtifactConfig] = Field(min_length=1)
-
-
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     path: Path
     major_minor: str = Field(pattern=r"^\d+\.\d+$")
-    builds: BuildsConfig | None = None
+    builds: list[BuildArtifactConfig] | None = Field(default=None, min_length=1)
 
 
 class PublishConfig(BaseModel):
@@ -51,6 +44,7 @@ class PublishConfig(BaseModel):
 
     packages: dict[str, PackageConfig] = Field(default_factory=dict)
     apps: dict[str, AppConfig] = Field(default_factory=dict)
+    builds_registry: str | None = None
     ci_workflow: str
 
     @model_validator(mode="after")
@@ -59,6 +53,8 @@ class PublishConfig(BaseModel):
             unknown_registries = set(package.registries) - KNOWN_REGISTRIES
             if unknown_registries:
                 raise ValueError(f"package '{name}' declares unknown registries: {sorted(unknown_registries)}")
+        if self.builds_registry is None and any(app.builds for app in self.apps.values()):
+            raise ValueError("builds_registry is required when any app declares builds")
         return self
 
 

@@ -5,10 +5,8 @@ import pytest
 import typer
 
 from release_devkit import builds
-from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PublishConfig
 from release_devkit.builds import (
     DigestEntry,
-    builds_registry_of,
     matched_ci_run_number,
     pull_digest_manifest,
 )
@@ -69,30 +67,6 @@ def test_matched_ci_run_number_exits_when_no_run(monkeypatch: pytest.MonkeyPatch
     with pytest.raises(typer.Exit) as exit_info:
         matched_ci_run_number("owner/repo", "abc1234", "integrate.yml")
     assert exit_info.value.exit_code == 1
-
-
-def test_builds_registry_of_returns_first_builds_registry() -> None:
-    config = PublishConfig(
-        ci_workflow="integrate.yml",
-        apps={
-            "a": AppConfig(
-                path=Path("apps/a"),
-                major_minor="1.0",
-                builds=BuildsConfig(
-                    registry="ghcr.io/owner/repo/builds",
-                    artifacts=[BuildArtifactConfig(project="A", platform="p")],
-                ),
-            )
-        },
-    )
-
-    assert builds_registry_of(config) == "ghcr.io/owner/repo/builds"
-
-
-def test_builds_registry_of_returns_none_when_no_builds() -> None:
-    config = PublishConfig(ci_workflow="integrate.yml", apps={"a": AppConfig(path=Path("apps/a"), major_minor="1.0")})
-
-    assert builds_registry_of(config) is None
 
 
 def test_pull_digest_manifest_returns_none_when_no_registry() -> None:

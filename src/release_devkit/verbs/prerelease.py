@@ -11,7 +11,6 @@ from ci_devkit.ci_step import ci_step
 from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
 from release_devkit.builds import (
     DigestEntry,
-    builds_registry_of,
     matched_ci_run_number,
     pull_digest_manifest,
 )
@@ -66,7 +65,7 @@ def main(
         has_package_changes = release_plan.publishing
         has_app_changes = bool(changed_apps)
 
-        builds_registry = builds_registry_of(publish_config)
+        builds_registry = publish_config.builds_registry
         if builds_registry is not None:
             run_number, html_url = matched_ci_run_number(repository, sha, publish_config.ci_workflow)
             integrate_run = (run_number, html_url)
