@@ -10,16 +10,13 @@ from ..config import DEFAULT_CONFIG_PATH, load_config
 from ..builds import (
     DigestEntry,
     builds_registry_of,
-    pull_build_assets,
     pull_digest_manifest,
     render_images_table,
 )
 from ..outputs import append_line
 from ..drafts import (
     append_draft_section,
-    ensure_draft_release,
-    stage_draft_assets,
-    upload_draft_assets,
+    publish_draft_assets,
 )
 
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -49,13 +46,18 @@ def update_pr_draft(
 
     tag = f"{PR_DRAFT_TAG_PREFIX}{pr_number}"
     resolved_run_number = str(run_number)
-    pulled = pull_build_assets(publish_config, resolved_run_number, settings.github_actor, settings.github_token)
-    staged = stage_draft_assets(pulled, resolved_run_number)
+    staged = publish_draft_assets(
+        publish_config,
+        resolved_run_number,
+        settings.github_actor,
+        settings.github_token,
+        tag,
+        settings.github_repository,
+        settings.github_sha,
+    )
     manifest = pull_digest_manifest(
         builds_registry_of(publish_config), resolved_run_number, settings.github_actor, settings.github_token
     )
-    ensure_draft_release(tag, settings.github_repository, settings.github_sha)
-    upload_draft_assets(tag, settings.github_repository, staged)
     run_url = f"https://github.com/{settings.github_repository}/actions/runs/{settings.github_run_id}"
     section = build_draft_section(
         settings.github_repository, tag, resolved_run_number, run_url, pr_number, staged, manifest or {}

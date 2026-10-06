@@ -8,11 +8,28 @@ from tempfile import NamedTemporaryFile, mkdtemp
 from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 
-from .config import BuildArtifactConfig
+from .builds import pull_build_assets
+from .config import BuildArtifactConfig, PublishConfig
 from .outputs import append_line
 
 DEV_DRAFT_TAG = "dev-builds"
 _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
+
+
+def publish_draft_assets(
+    config: PublishConfig,
+    run_number: str,
+    registry_username: str,
+    registry_token: str,
+    tag: str,
+    repository: str,
+    sha: str,
+) -> list[tuple[str, Path]]:
+    pulled = pull_build_assets(config, run_number, registry_username, registry_token)
+    staged = stage_draft_assets(pulled, run_number)
+    ensure_draft_release(tag, repository, sha)
+    upload_draft_assets(tag, repository, staged)
+    return staged
 
 
 def stage_draft_assets(assets: list[tuple[BuildArtifactConfig, Path]], run_number: str) -> list[tuple[str, Path]]:

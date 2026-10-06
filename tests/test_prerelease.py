@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from release_devkit.verbs import prerelease
+from release_devkit import drafts
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PackageConfig, PublishConfig
 from release_devkit.builds import DigestEntry
 from release_devkit.plan import PackagePlan, ReleasePlan
@@ -121,11 +122,12 @@ def run_prerelease(
     )
     monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(None))
     pull_assets = CallRecorder([])
-    monkeypatch.setattr(prerelease, "pull_build_assets", pull_assets)
-    monkeypatch.setattr(prerelease, "stage_draft_assets", CallRecorder([]))
+    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
+    monkeypatch.setattr(drafts, "stage_draft_assets", CallRecorder([]))
     ensure_draft = CallRecorder()
-    monkeypatch.setattr(prerelease, "ensure_draft_release", ensure_draft)
-    monkeypatch.setattr(prerelease, "upload_draft_assets", CallRecorder())
+    monkeypatch.setattr(drafts, "ensure_draft_release", ensure_draft)
+    monkeypatch.setattr(drafts, "upload_draft_assets", CallRecorder())
+    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Not a merge commit\n"))
     append_section = CallRecorder()
     monkeypatch.setattr(prerelease, "append_draft_section", append_section)
@@ -276,10 +278,11 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
 
     monkeypatch.setattr(prerelease, "bash_output", mock_bash_output)
     pull_assets = CallRecorder([])
-    monkeypatch.setattr(prerelease, "pull_build_assets", pull_assets)
-    monkeypatch.setattr(prerelease, "stage_draft_assets", CallRecorder([]))
-    monkeypatch.setattr(prerelease, "ensure_draft_release", CallRecorder())
-    monkeypatch.setattr(prerelease, "upload_draft_assets", CallRecorder())
+    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
+    monkeypatch.setattr(drafts, "stage_draft_assets", CallRecorder([]))
+    monkeypatch.setattr(drafts, "ensure_draft_release", CallRecorder())
+    monkeypatch.setattr(drafts, "upload_draft_assets", CallRecorder())
+    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     sections: list[str] = []
 
     def capture_section(tag: str, repository: str, anchor: str, section: str) -> None:

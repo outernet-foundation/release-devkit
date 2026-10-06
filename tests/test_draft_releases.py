@@ -216,7 +216,7 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     source = make_source_file("MyApp.apk")
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_build_config()))
-    monkeypatch.setattr(update_pr_draft_module, "pull_build_assets", FixedReturn([(artifact, source)]))
+    monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
     monkeypatch.setattr(update_pr_draft_module, "pull_digest_manifest", FixedReturn(None))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
     bash_log = patch_bash(monkeypatch, check_returns=False)
@@ -235,7 +235,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
     monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_build_config()))
-    monkeypatch.setattr(update_pr_draft_module, "pull_build_assets", FixedReturn([(artifact, source)]))
+    monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
     monkeypatch.setattr(update_pr_draft_module, "pull_digest_manifest", FixedReturn(manifest))
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))

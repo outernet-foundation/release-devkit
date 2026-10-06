@@ -14,7 +14,6 @@ from ..builds import (
     DigestEntry,
     builds_registry_of,
     matched_ci_run_number,
-    pull_build_assets,
     pull_digest_manifest,
     render_images_table,
 )
@@ -22,9 +21,7 @@ from ..drafts import (
     DEV_DRAFT_TAG,
     append_draft_section,
     emit_draft_backlink,
-    ensure_draft_release,
-    stage_draft_assets,
-    upload_draft_assets,
+    publish_draft_assets,
 )
 from ..outputs import append_line
 from ..plan import compute_release_plan, setup_publishing_environment
@@ -172,10 +169,15 @@ def main(
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
         draft_config = publish_config.model_copy(update={"apps": changed_apps})
-        pulled = pull_build_assets(draft_config, run_number, settings.github_actor, settings.github_token)
-        staged_assets = stage_draft_assets(pulled, run_number)
-        ensure_draft_release(DEV_DRAFT_TAG, settings.github_repository, settings.github_sha)
-        upload_draft_assets(DEV_DRAFT_TAG, settings.github_repository, staged_assets)
+        staged_assets = publish_draft_assets(
+            draft_config,
+            run_number,
+            settings.github_actor,
+            settings.github_token,
+            DEV_DRAFT_TAG,
+            settings.github_repository,
+            settings.github_sha,
+        )
 
     merge_message = bash_output(f"git log -1 --format=%B {settings.github_sha}").strip()
     merge_match = _MERGE_PR_PATTERN.search(merge_message)

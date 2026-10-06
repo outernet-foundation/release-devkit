@@ -6,8 +6,9 @@ from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from .config import PackageConfig, PublishConfig
-from .tags import parse_major_minor, parse_version
 from .manifests import DependencyEdge, resolve_edges
+from .outputs import append_line
+from .tags import parse_major_minor, parse_version
 
 UNCHANGED_FALLBACK_VERSION = "0.0.0"
 
@@ -44,6 +45,14 @@ class ReleasePlan:
 
     def anything_releases(self) -> bool:
         return bool(self.publishing) or bool(self.app_versions)
+
+
+def compute_and_print_plan(config: PublishConfig, tags: TagSource, step_summary: str | None) -> ReleasePlan:
+    release_plan = compute_release_plan(config, tags)
+    summary = render_plan_summary(release_plan)
+    print(summary)
+    append_line(step_summary, summary)
+    return release_plan
 
 
 def compute_release_plan(publish_config: PublishConfig, tags: TagSource) -> ReleasePlan:

@@ -8,8 +8,7 @@ from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
 
 from ..config import DEFAULT_CONFIG_PATH, load_config
-from ..outputs import append_line
-from ..plan import compute_release_plan, render_plan_summary
+from ..plan import compute_and_print_plan
 from ..tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -27,7 +26,4 @@ def main(
     publish_config = load_config(config)
 
     with ci_step("Validate publish plan"):
-        release_plan = compute_release_plan(publish_config, GitTags())
-        summary = render_plan_summary(release_plan)
-        print(summary)
-        append_line(settings.github_step_summary, summary)
+        compute_and_print_plan(publish_config, GitTags(), settings.github_step_summary)
