@@ -8,9 +8,10 @@ import pytest
 
 from release_devkit import draft_releases
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PublishConfig
-from release_devkit.create_release import pull_build_assets
+from release_devkit.create_release import DigestEntry, pull_build_assets
 from release_devkit.draft_releases import (
     append_draft_section,
+    build_draft_section,
     delete_draft_release,
     emit_draft_backlink,
     emit_draft_summary,
@@ -80,6 +81,7 @@ def patch_verb_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "GITHUB_SHA": "abc123def456",
         "GITHUB_ACTOR": "bot",
         "GITHUB_TOKEN": "token",
+        "GITHUB_RUN_ID": "99",
         "GITHUB_STEP_SUMMARY": "",
     }.items():
         monkeypatch.setenv(key, value)
@@ -158,6 +160,35 @@ def test_emit_draft_summary_writes_download_links(tmp_path: Path) -> None:
     assert "[MyApp-run-42.apk]" in content
 
 
+def test_build_draft_section_renders_heading_images_and_assets() -> None:
+    source = make_source_file("MyApp.apk")
+    manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
+
+    section = build_draft_section(
+        "owner/repo",
+        "pr-7",
+        "42",
+        "https://github.com/owner/repo/actions/runs/99",
+        7,
+        [("MyApp-run-42.apk", source)],
+        manifest,
+    )
+
+    assert "### [Run #42](https://github.com/owner/repo/actions/runs/99)" in section
+    assert "[PR #7](https://github.com/owner/repo/pull/7)" in section
+    assert "#### Built images" in section
+    assert "zed-capture" in section
+    assert "https://github.com/owner/repo/releases/download/pr-7/MyApp-run-42.apk" in section
+
+
+def test_build_draft_section_omits_images_when_empty() -> None:
+    section = build_draft_section(
+        "owner/repo", "pr-7", "42", "https://github.com/owner/repo/actions/runs/99", 7, [], {}
+    )
+
+    assert "Built images" not in section
+
+
 def test_delete_draft_release_deletes_with_cleanup_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=True)
 
@@ -183,6 +214,8 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(draft_releases, "load_config", FixedReturn(make_build_config()))
     monkeypatch.setattr(draft_releases, "pull_build_assets", FixedReturn([(artifact, source)]))
+    monkeypatch.setattr(draft_releases, "pull_digest_manifest", FixedReturn(None))
+    monkeypatch.setattr(draft_releases, "bash_output", FixedReturn(""))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
     update_pr_draft(pr_number=7, run_number=42)
@@ -190,6 +223,36 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     assert any("pr-7" in command for command in bash_log.commands)
     assert any("gh release upload pr-7" in command and "--clobber" in command for command in bash_log.commands)
     assert any("MyApp-AndroidMobile-run-42.apk" in command for command in bash_log.commands)
+    assert any("gh release edit pr-7" in command and "--notes-file" in command for command in bash_log.commands)
+
+
+def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_verb_environment(monkeypatch)
+    source = make_source_file("MyApp.apk")
+    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
+    manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
+    monkeypatch.setattr(draft_releases, "load_config", FixedReturn(make_build_config()))
+    monkeypatch.setattr(draft_releases, "pull_build_assets", FixedReturn([(artifact, source)]))
+    monkeypatch.setattr(draft_releases, "pull_digest_manifest", FixedReturn(manifest))
+    monkeypatch.setattr(draft_releases, "ci_step", null_ci_step)
+    monkeypatch.setattr(draft_releases, "bash_check", FixedReturn(False))
+    monkeypatch.setattr(draft_releases, "bash_output", FixedReturn(""))
+
+    written: list[str] = []
+
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(draft_releases, "bash", capturing_bash)
+
+    update_pr_draft(pr_number=7, run_number=42)
+
+    assert written
+    assert "zed-capture" in written[0]
+    assert "sha256:abc" in written[0]
+    assert "https://github.com/owner/repo/actions/runs/99" in written[0]
 
 
 def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -> None:

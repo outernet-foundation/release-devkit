@@ -7,8 +7,14 @@ import pytest
 
 from release_devkit import prerelease
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PackageConfig, PublishConfig
+from release_devkit.create_release import DigestEntry
 from release_devkit.plan import PackagePlan, ReleasePlan
-from release_devkit.prerelease import app_has_changes, build_prerelease_section, parse_merge_pr
+from release_devkit.prerelease import (
+    app_has_changes,
+    build_prerelease_section,
+    existing_dev_builds_digests,
+    parse_merge_pr,
+)
 
 
 class FakeTags:
@@ -116,7 +122,10 @@ def run_prerelease(
     monkeypatch.setattr(prerelease, "install_node", noop)
     build_registries = CallRecorder({})
     monkeypatch.setattr(prerelease, "build_registries", build_registries)
-    monkeypatch.setattr(prerelease, "matched_ci_run_number", FixedReturn("42"))
+    monkeypatch.setattr(
+        prerelease, "matched_ci_run_number", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
+    )
+    monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(None))
     pull_assets = CallRecorder([])
     monkeypatch.setattr(prerelease, "pull_build_assets", pull_assets)
     monkeypatch.setattr(prerelease, "stage_draft_assets", CallRecorder([]))
@@ -220,10 +229,18 @@ def test_build_prerelease_section_renders_packages_assets_and_pr_link() -> None:
     published = [("pypi", "placeframe-common", "0.1.0.dev42")]
     staged_assets = [("MyApp-run-42.apk", Path("/tmp/MyApp-run-42.apk"))]
 
-    section = build_prerelease_section(published, staged_assets, "owner/repo", "42", (15, "Add feature"))
+    section = build_prerelease_section(
+        published,
+        staged_assets,
+        "owner/repo",
+        "42",
+        ("40", "https://github.com/owner/repo/actions/runs/40"),
+        (15, "Add feature"),
+        {},
+    )
 
-    assert "### [Run #42]" in section
-    assert "https://github.com/owner/repo/actions/runs/42" in section
+    assert "### [Integrate run #40]" in section
+    assert "https://github.com/owner/repo/actions/runs/40" in section
     assert "[PR #15: Add feature]" in section
     assert "https://github.com/owner/repo/pull/15" in section
     assert "| placeframe-common | 0.1.0.dev42 |" in section
@@ -233,10 +250,84 @@ def test_build_prerelease_section_renders_packages_assets_and_pr_link() -> None:
 
 
 def test_build_prerelease_section_omits_pr_link_when_none() -> None:
-    section = build_prerelease_section([], [], "owner/repo", "42", None)
+    section = build_prerelease_section([], [], "owner/repo", "42", None, None, {})
 
     assert "### [Run #42]" in section
+    assert "https://github.com/owner/repo/actions/runs/42" in section
     assert "PR #" not in section
+
+
+def test_build_prerelease_section_renders_images_table() -> None:
+    manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
+
+    section = build_prerelease_section(
+        [], [], "owner/repo", "42", ("40", "https://github.com/owner/repo/actions/runs/40"), None, manifest
+    )
+
+    assert "#### Built images" in section
+    assert "zed-capture" in section
+    assert "tree-1" in section
+    assert "`sha256:abc`" in section
+
+
+def test_existing_dev_builds_digests_extracts_digests(monkeypatch: pytest.MonkeyPatch) -> None:
+    digest_a = "sha256:" + "a" * 64
+    digest_b = "sha256:" + "b" * 64
+    body = f"### Run #1\n\n| x | `{digest_a}` |\n\n`{digest_b}`"
+    monkeypatch.setattr(prerelease, "bash_check", FixedReturn(True))
+    monkeypatch.setattr(prerelease, "bash_output", FixedReturn(body))
+
+    assert existing_dev_builds_digests("owner/repo") == {digest_a, digest_b}
+
+
+def test_existing_dev_builds_digests_returns_empty_when_no_draft(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(prerelease, "bash_check", FixedReturn(False))
+
+    assert existing_dev_builds_digests("owner/repo") == set()
+
+
+def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = make_config(apps={"myapp": make_app()})
+    tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
+
+    digest_existing = "sha256:" + "a" * 64
+    digest_new = "sha256:" + "b" * 64
+    manifest = {
+        "zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest=digest_new, tags=["tree-1"]),
+        "other-capture": DigestEntry(ref="ghcr.io/owner/repo/other-capture", digest=digest_existing, tags=["tree-2"]),
+    }
+
+    patch_environment(monkeypatch)
+    monkeypatch.setattr(prerelease, "load_config", FixedReturn(config))
+    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
+    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
+    monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
+    monkeypatch.setattr(prerelease, "append_line", noop)
+    monkeypatch.setattr(
+        prerelease, "matched_ci_run_number", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
+    )
+    monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(manifest))
+    monkeypatch.setattr(prerelease, "existing_dev_builds_digests", FixedReturn({digest_existing}))
+    pull_assets = CallRecorder([])
+    monkeypatch.setattr(prerelease, "pull_build_assets", pull_assets)
+    monkeypatch.setattr(prerelease, "stage_draft_assets", CallRecorder([]))
+    monkeypatch.setattr(prerelease, "ensure_draft_release", CallRecorder())
+    monkeypatch.setattr(prerelease, "upload_draft_assets", CallRecorder())
+    monkeypatch.setattr(prerelease, "parse_merge_pr", FixedReturn(None))
+    sections: list[str] = []
+
+    def capture_section(tag: str, repository: str, sha: str, anchor: str, section: str) -> None:
+        sections.append(section)
+
+    monkeypatch.setattr(prerelease, "append_draft_section", capture_section)
+    monkeypatch.setattr(prerelease, "emit_draft_backlink", CallRecorder())
+
+    prerelease.main()
+
+    assert pull_assets.calls == []
+    assert len(sections) == 1
+    assert digest_new in sections[0]
+    assert digest_existing not in sections[0]
 
 
 def test_parse_merge_pr_extracts_pr_number_and_title(monkeypatch: pytest.MonkeyPatch) -> None:

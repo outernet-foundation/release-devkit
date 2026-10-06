@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,8 +9,9 @@ from typing import Annotated
 
 import typer
 from bashrun.bash import bash, bash_output
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
-from ci_devkit.builds import pull_build
+from ci_devkit.builds import build_exists, pull_build
 from ci_devkit.ci_step import ci_step
 
 from .config import BuildArtifactConfig, PublishConfig, load_config
@@ -19,12 +21,27 @@ from .plan import UNCHANGED_FALLBACK_VERSION
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
+DIGEST_PROJECT = "images-digests"
+DIGEST_PLATFORM = "all"
+DIGEST_FILE_NAME = "images-digests.json"
+
 
 class Settings(BaseSettings):
     github_repository: str
     github_sha: str
     github_actor: str = ""
     github_token: str = ""
+
+
+class DigestEntry(BaseModel):
+    ref: str
+    digest: str
+    tags: list[str]
+
+
+class MatchedRun(BaseModel):
+    run_number: int | None = None
+    html_url: str | None = None
 
 
 @app.command()
@@ -40,7 +57,10 @@ def run_create_release(config: Annotated[Path, typer.Option(help="Publish config
     count = int(existing) if existing else 0
     tag = f"{year_month}.{count + 1}"
 
-    assets = collect_build_assets(publish_config, settings)
+    assets, run_number = collect_build_assets(publish_config, settings)
+    manifest = pull_digest_manifest(
+        builds_registry_of(publish_config), run_number, settings.github_actor, settings.github_token
+    )
 
     with ci_step("Create GitHub Release"):
         tags = GitTags()
@@ -63,6 +83,11 @@ def run_create_release(config: Annotated[Path, typer.Option(help="Publish config
             if version:
                 lines.append(f"| {app_name} | {version} | — |")
 
+        if manifest:
+            lines.append("")
+            lines.append("## Built images")
+            lines.extend(render_images_table(manifest))
+
         lines.append("")
         notes = "\n".join(lines)
         print(notes)
@@ -81,8 +106,8 @@ def run_create_release(config: Annotated[Path, typer.Option(help="Publish config
         print(f"  Release created: {tag}")
 
 
-def collect_build_assets(publish_config: PublishConfig, settings: Settings) -> list[Path]:
-    run_number = matched_ci_run_number(settings.github_repository, settings.github_sha, publish_config.ci_workflow)
+def collect_build_assets(publish_config: PublishConfig, settings: Settings) -> tuple[list[Path], str]:
+    run_number, _ = matched_ci_run_number(settings.github_repository, settings.github_sha, publish_config.ci_workflow)
     pulled = pull_build_assets(publish_config, run_number, settings.github_actor, settings.github_token)
     staging = Path(mkdtemp(prefix="release-assets-"))
     assets: list[Path] = []
@@ -91,23 +116,26 @@ def collect_build_assets(publish_config: PublishConfig, settings: Settings) -> l
         asset = staging / asset_name
         shutil.copy2(source, asset)
         assets.append(asset)
-    return assets
+    return assets, run_number
 
 
-def matched_ci_run_number(repository: str, sha: str, ci_workflow: str) -> str:
+def matched_ci_run_number(repository: str, sha: str, ci_workflow: str) -> tuple[str, str]:
     with ci_step("Find successful CI run"):
         parent = bash_output(f'gh api "/repos/{repository}/git/commits/{sha}" --jq ".parents[1].sha // .sha"').strip()
-        run_number = bash_output(
+        result = bash_output(
             f'gh api "/repos/{repository}/actions/workflows/{ci_workflow}/runs'
-            f'?head_sha={parent}&status=success" --jq ".workflow_runs[0].run_number // empty"'
+            f'?head_sha={parent}&status=success" '
+            f'--jq "{{run_number: .workflow_runs[0].run_number, html_url: .workflow_runs[0].html_url}}"'
         ).strip()
-
-        if not run_number:
+        parsed = MatchedRun.model_validate(json.loads(result)) if result else None
+        run_number = str(parsed.run_number) if parsed and parsed.run_number is not None else ""
+        html_url = parsed.html_url if parsed and parsed.html_url else ""
+        if not run_number or not html_url:
             print(f"::error::No successful CI run found for SHA {parent}. Cannot release untested code.")
             raise typer.Exit(code=1)
 
         print(f"  CI run number: {run_number}")
-        return run_number
+        return run_number, html_url
 
 
 def pull_build_assets(
@@ -154,3 +182,71 @@ def select_artifact_file(artifact: BuildArtifactConfig, target: Path) -> Path:
         f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
         f"({', '.join(path.name for path in files)}); declare which one with 'file'"
     )
+
+
+def builds_registry_of(publish_config: PublishConfig) -> str | None:
+    for app in publish_config.apps.values():
+        if app.builds is not None:
+            return app.builds.registry
+    return None
+
+
+def pull_digest_manifest(
+    builds_registry: str | None,
+    run_number: str,
+    registry_username: str,
+    registry_token: str,
+) -> dict[str, DigestEntry] | None:
+    if builds_registry is None:
+        return None
+    tag = f"run-{run_number}"
+    if not build_exists(
+        builds_registry,
+        DIGEST_PROJECT,
+        DIGEST_PLATFORM,
+        tag,
+        registry_username=registry_username,
+        registry_token=registry_token,
+    ):
+        return None
+    staging = Path(mkdtemp(prefix="digest-manifest-"))
+    pull_build(
+        builds_registry,
+        DIGEST_PROJECT,
+        DIGEST_PLATFORM,
+        tag,
+        staging,
+        registry_username=registry_username,
+        registry_token=registry_token,
+    )
+    data = json.loads((staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
+    return {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
+
+
+def render_images_table(manifest: dict[str, DigestEntry]) -> list[str]:
+    lines = ["| Image | Tag | Digest |", "|---|---|---|"]
+    for target, entry in manifest.items():
+        tree_tag = pick_tree_tag(entry.tags)
+        url = ghcr_package_url(entry.ref)
+        tag_cell = f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—")
+        lines.append(f"| {target} | {tag_cell} | `{entry.digest}` |")
+    return lines
+
+
+def pick_tree_tag(tags: list[str]) -> str:
+    for tag in tags:
+        if tag.startswith("tree-"):
+            return tag
+    return tags[0] if tags else ""
+
+
+def ghcr_package_url(ref: str) -> str | None:
+    if not ref.startswith("ghcr.io/"):
+        return None
+    remainder = ref[len("ghcr.io/") :]
+    parts = remainder.split("/", 1)
+    if len(parts) < 2:
+        return None
+    owner = parts[0]
+    image_path = parts[1].replace("/", "%2F")
+    return f"https://github.com/orgs/{owner}/packages/container/{image_path}"
