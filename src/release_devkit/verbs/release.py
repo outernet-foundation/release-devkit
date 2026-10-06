@@ -9,12 +9,12 @@ from typing import Annotated
 import typer
 from bashrun.bash import bash, bash_output
 from ci_devkit.ci_step import ci_step
-from pydantic_settings import BaseSettings
 
-from ..config import DEFAULT_CONFIG_PATH, load_config
+from ..config import DEFAULT_CONFIG_PATH, Settings, load_config
 from ..drafts import DEV_DRAFT_TAG, delete_draft_release
 from ..plan import UNCHANGED_FALLBACK_VERSION, compute_and_print_plan, setup_publishing_environment
-from ..registries import PublishRequest, build_registries, registry_url
+from ..publishing import StableStrategy, publish_packages
+from ..registries import registry_url
 from ..tags import GitTags
 from ..builds import (
     builds_registry_of,
@@ -25,16 +25,6 @@ from ..builds import (
 )
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
-
-
-class Settings(BaseSettings):
-    github_repository: str = ""
-    github_sha: str = ""
-    github_actor: str = ""
-    github_token: str = ""
-    github_workspace: str = ""
-    github_step_summary: str | None = None
-    nuget_api_key: str = ""
 
 
 @app.command()
@@ -56,24 +46,7 @@ def main(
     setup_publishing_environment(release_plan, packages, settings.github_workspace)
 
     if packages:
-        registries = build_registries(settings.nuget_api_key)
-        for name, package in packages.items():
-            plan = release_plan.plans[name]
-            if not plan.publish:
-                continue
-            dependency_versions = {
-                identity: resolved.version for identity, resolved in release_plan.resolved_versions[name].items()
-            }
-            for registry_name, identity in package.registries.items():
-                with ci_step(f"Publish {registry_name} ({name})"):
-                    registries[registry_name].publish(
-                        PublishRequest(
-                            path=package.path,
-                            identity=identity,
-                            version=plan.version,
-                            dependency_versions=dependency_versions,
-                        )
-                    )
+        publish_packages(packages, release_plan, settings.nuget_api_key, StableStrategy())
 
     with ci_step("Create version tags"):
         for name in packages:

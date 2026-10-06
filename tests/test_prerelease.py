@@ -111,8 +111,8 @@ def run_prerelease(
     monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
     monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
     monkeypatch.setattr(prerelease, "setup_publishing_environment", noop)
-    build_registries = CallRecorder({})
-    monkeypatch.setattr(prerelease, "build_registries", build_registries)
+    publish_packages = CallRecorder([])
+    monkeypatch.setattr(prerelease, "publish_packages", publish_packages)
     monkeypatch.setattr(
         prerelease, "matched_ci_run_number", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
     )
@@ -128,16 +128,16 @@ def run_prerelease(
 
     prerelease.main()
 
-    return build_registries, pull_assets, append_section
+    return publish_packages, pull_assets, append_section
 
 
 def test_nothing_changed_returns_without_publishing_or_drafting(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
-    build_registries, pull_assets, append_section = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    publish_packages, pull_assets, append_section = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
-    assert build_registries.calls == []
+    assert publish_packages.calls == []
     assert pull_assets.calls == []
     assert append_section.calls == []
 
@@ -149,9 +149,9 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
     )
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
-    build_registries, pull_assets, append_section = run_prerelease(monkeypatch, config, make_plan({"pkg"}), tags)
+    publish_packages, pull_assets, append_section = run_prerelease(monkeypatch, config, make_plan({"pkg"}), tags)
 
-    assert build_registries.calls != []
+    assert publish_packages.calls != []
     assert pull_assets.calls == []
     assert append_section.calls != []
 
@@ -160,9 +160,9 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"})
 
-    build_registries, pull_assets, append_section = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    publish_packages, pull_assets, append_section = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
-    assert build_registries.calls == []
+    assert publish_packages.calls == []
     assert pull_assets.calls != []
     assert append_section.calls != []
 

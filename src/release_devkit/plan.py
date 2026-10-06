@@ -5,7 +5,7 @@ from typing import Protocol
 from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
-from .config import PackageConfig, PublishConfig
+from .config import PackageConfig, PublishConfig, write_step_summary
 from .manifests import DependencyEdge, resolve_edges
 from .tags import parse_major_minor, parse_version
 
@@ -65,9 +65,7 @@ def compute_and_print_plan(config: PublishConfig, tags: TagSource, step_summary:
     summary = "\n".join(lines)
 
     print(summary)
-    if step_summary:
-        with Path(step_summary).open("a", encoding="utf-8") as file:
-            file.write(summary + "\n")
+    write_step_summary(step_summary, summary)
     return release_plan
 
 

@@ -6,10 +6,9 @@ from typing import Annotated
 
 import typer
 from bashrun.bash import bash_check, bash_output
-from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
 
-from ..config import DEFAULT_CONFIG_PATH, AppConfig, load_config
+from ..config import DEFAULT_CONFIG_PATH, AppConfig, Settings, load_config, write_step_summary
 from ..builds import (
     DigestEntry,
     builds_registry_of,
@@ -23,23 +22,13 @@ from ..drafts import (
     publish_draft_assets,
 )
 from ..plan import compute_release_plan, setup_publishing_environment
-from ..registries import DEV_VERSION_FORMATS, NPM_DEV_DIST_TAG, PublishRequest, build_registries, registry_url
+from ..publishing import DevStrategy, publish_packages
+from ..registries import DEV_VERSION_FORMATS, registry_url
 from ..tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 _MERGE_PR_PATTERN = re.compile(r"Merge PR #(\d+): (.+)")
-
-
-class Settings(BaseSettings):
-    github_repository: str = ""
-    github_sha: str = ""
-    github_actor: str = ""
-    github_token: str = ""
-    github_workspace: str = ""
-    github_step_summary: str | None = None
-    github_run_id: str = ""
-    nuget_api_key: str = ""
 
 
 @app.command()
@@ -84,9 +73,7 @@ def main(
         summary = "\n".join(summary_lines)
 
         print(summary)
-        if settings.github_step_summary:
-            with Path(settings.github_step_summary).open("a", encoding="utf-8") as file:
-                file.write(summary + "\n")
+        write_step_summary(settings.github_step_summary, summary)
 
         changed_apps: dict[str, AppConfig] = {}
         for name, app in publish_config.apps.items():
@@ -130,32 +117,7 @@ def main(
     published: list[tuple[str, str, str]] = []
     if has_package_changes:
         setup_publishing_environment(release_plan, packages, settings.github_workspace)
-
-        registries = build_registries(settings.nuget_api_key)
-        for name, package in packages.items():
-            plan = release_plan.plans[name]
-            if not plan.publish:
-                continue
-            for registry_name, identity in package.registries.items():
-                dev_version = DEV_VERSION_FORMATS[registry_name](plan.version, resolved_run_id)
-                with ci_step(f"Publish {registry_name} ({name}) {dev_version}"):
-                    registries[registry_name].publish(
-                        PublishRequest(
-                            path=package.path,
-                            identity=identity,
-                            version=dev_version,
-                            dependency_versions={
-                                dependency_identity: (
-                                    DEV_VERSION_FORMATS[registry_name](resolved.version, resolved_run_id)
-                                    if resolved.co_publishing
-                                    else resolved.version
-                                )
-                                for dependency_identity, resolved in release_plan.resolved_versions[name].items()
-                            },
-                            dist_tag=NPM_DEV_DIST_TAG if registry_name == "npm" else None,
-                        )
-                    )
-                published.append((registry_name, identity, dev_version))
+        published = publish_packages(packages, release_plan, settings.nuget_api_key, DevStrategy(resolved_run_id))
 
         if published:
             recap = "\n".join([
@@ -164,9 +126,7 @@ def main(
             ])
             print(recap)
             print("Consume these by exact version pin - there is no discovery tooling by design")
-            if settings.github_step_summary:
-                with Path(settings.github_step_summary).open("a", encoding="utf-8") as file:
-                    file.write(recap + "\n")
+            write_step_summary(settings.github_step_summary, recap)
 
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
@@ -226,6 +186,4 @@ def main(
     ).strip()
     backlink_text = f"### Draft release `{DEV_DRAFT_TAG}` updated\n- [Section `{anchor}`]({draft_url}#{anchor})"
     print(backlink_text)
-    if settings.github_step_summary:
-        with Path(settings.github_step_summary).open("a", encoding="utf-8") as file:
-            file.write(backlink_text + "\n")
+    write_step_summary(settings.github_step_summary, backlink_text)

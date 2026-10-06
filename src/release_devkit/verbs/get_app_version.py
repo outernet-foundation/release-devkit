@@ -4,17 +4,12 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from pydantic_settings import BaseSettings
 
-from ..config import DEFAULT_CONFIG_PATH, load_config
+from ..config import DEFAULT_CONFIG_PATH, Settings, load_config
 from ..tags import GitTags
 from ..plan import next_version
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
-
-
-class Settings(BaseSettings):
-    github_run_number: str = ""
 
 
 @app.command()

@@ -4,18 +4,13 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
 
-from ..config import DEFAULT_CONFIG_PATH, load_config
+from ..config import DEFAULT_CONFIG_PATH, Settings, load_config
 from ..plan import compute_and_print_plan
 from ..tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
-
-
-class Settings(BaseSettings):
-    github_step_summary: str | None = None
 
 
 @app.command()

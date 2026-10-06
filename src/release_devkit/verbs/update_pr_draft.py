@@ -4,9 +4,8 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from pydantic_settings import BaseSettings
 
-from ..config import DEFAULT_CONFIG_PATH, load_config
+from ..config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
 from ..builds import (
     builds_registry_of,
     pull_digest_manifest,
@@ -20,15 +19,6 @@ from ..drafts import (
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 PR_DRAFT_TAG_PREFIX = "pr-"
-
-
-class Settings(BaseSettings):
-    github_repository: str
-    github_sha: str = ""
-    github_actor: str = ""
-    github_token: str = ""
-    github_run_id: str = ""
-    github_step_summary: str | None = None
 
 
 @update_pr_app.command()
@@ -79,6 +69,4 @@ def update_pr_draft(
         summary_lines.append(f"- [{name}]({url})")
     summary = "\n".join(summary_lines)
     print(summary)
-    if settings.github_step_summary:
-        with Path(settings.github_step_summary).open("a", encoding="utf-8") as file:
-            file.write(summary + "\n")
+    write_step_summary(settings.github_step_summary, summary)
