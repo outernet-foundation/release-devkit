@@ -9,12 +9,12 @@ from ..config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summ
 from ..builds import (
     builds_registry_of,
     pull_digest_manifest,
-    render_images_table,
 )
 from ..drafts import (
     append_draft_section,
     publish_draft_assets,
 )
+from ..rendering import AssetLink, DraftSection, render_asset_links, render_draft_section
 
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -49,24 +49,27 @@ def update_pr_draft(
     run_url = f"https://github.com/{settings.github_repository}/actions/runs/{settings.github_run_id}"
 
     pr_url = f"https://github.com/{settings.github_repository}/pull/{pr_number}"
-    section_lines = [f"### [Run #{resolved_run_number}]({run_url}) \u2014 [PR #{pr_number}]({pr_url})"]
-    if manifest:
-        section_lines.append("")
-        section_lines.append("#### Built images")
-        section_lines.extend(render_images_table(manifest))
-    if staged:
-        section_lines.append("")
-        for name, _ in staged:
-            url = f"https://github.com/{settings.github_repository}/releases/download/{tag}/{name}"
-            section_lines.append(f"- [{name}]({url})")
-    section = "\n".join(section_lines)
+
+    assets = [
+        AssetLink(name, f"https://github.com/{settings.github_repository}/releases/download/{tag}/{name}")
+        for name, _ in staged
+    ]
+
+    section = render_draft_section(
+        DraftSection(
+            heading_fragments=[
+                f"[Run #{resolved_run_number}]({run_url})",
+                f"[PR #{pr_number}]({pr_url})",
+            ],
+            assets=assets or None,
+            images=manifest,
+        )
+    )
 
     append_draft_section(tag, settings.github_repository, f"run-{resolved_run_number}", section)
 
     summary_lines = [f"### Draft release `{tag}`", ""]
-    for name, _ in staged:
-        url = f"https://github.com/{settings.github_repository}/releases/download/{tag}/{name}"
-        summary_lines.append(f"- [{name}]({url})")
+    summary_lines.extend(render_asset_links(assets))
     summary = "\n".join(summary_lines)
     print(summary)
     write_step_summary(settings.github_step_summary, summary)

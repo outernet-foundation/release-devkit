@@ -11,8 +11,8 @@ from release_devkit.builds import (
     builds_registry_of,
     matched_ci_run_number,
     pull_digest_manifest,
-    render_images_table,
 )
+from release_devkit.rendering import render_images_table
 
 
 class SequentialOutputs:

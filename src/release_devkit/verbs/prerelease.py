@@ -14,7 +14,6 @@ from ..builds import (
     builds_registry_of,
     matched_ci_run_number,
     pull_digest_manifest,
-    render_images_table,
 )
 from ..drafts import (
     DEV_DRAFT_TAG,
@@ -24,6 +23,7 @@ from ..drafts import (
 from ..plan import compute_release_plan, setup_publishing_environment
 from ..publishing import DevStrategy, publish_packages
 from ..registries import DEV_VERSION_FORMATS, registry_url
+from ..rendering import AssetLink, DraftSection, PackageRow, RegistryLink, render_draft_section
 from ..tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -145,39 +145,49 @@ def main(
     merge_match = _MERGE_PR_PATTERN.search(merge_message)
     pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
 
+    heading_fragments: list[str] = []
     if integrate_run is not None:
         section_run_number, run_url = integrate_run
-        heading_parts = [f"[Integrate run #{section_run_number}]({run_url})"]
+        heading_fragments.append(f"[Integrate run #{section_run_number}]({run_url})")
     else:
         run_url = f"https://github.com/{settings.github_repository}/actions/runs/{resolved_run_id}"
-        heading_parts = [f"[Run #{resolved_run_id}]({run_url})"]
+        heading_fragments.append(f"[Run #{resolved_run_id}]({run_url})")
     if pr_info is not None:
         pr_number, pr_title = pr_info
         pr_url = f"https://github.com/{settings.github_repository}/pull/{pr_number}"
-        heading_parts.append(f"[PR #{pr_number}: {pr_title}]({pr_url})")
-    section_lines = [f"### {' \u2014 '.join(heading_parts)}"]
+        heading_fragments.append(f"[PR #{pr_number}: {pr_title}]({pr_url})")
 
+    package_rows: list[PackageRow] | None = None
     if published:
-        section_lines.extend(["", "| Package | Version | Registry |", "|---|---|---|"])
-        for registry_name, identity, version in published:
-            url = registry_url(registry_name, identity, version)
-            if url is not None:
-                section_lines.append(f"| {identity} | {version} | [{registry_name}]({url}) |")
-            else:
-                section_lines.append(f"| {identity} | {version} | {registry_name} |")
+        published_map = {(rn, ident): v for rn, ident, v in published}
+        package_rows = []
+        for name, package in publish_config.packages.items():
+            plan = release_plan.plans[name]
+            if not plan.publish:
+                continue
+            registries = [
+                RegistryLink(
+                    registry_name,
+                    published_map[(registry_name, identity)],
+                    registry_url(registry_name, identity, published_map[(registry_name, identity)]),
+                )
+                for registry_name, identity in package.registries.items()
+            ]
+            package_rows.append(PackageRow(name, plan.version, registries))
 
-    if staged_assets:
-        section_lines.append("")
-        for name, _ in staged_assets:
-            url = f"https://github.com/{settings.github_repository}/releases/download/{DEV_DRAFT_TAG}/{name}"
-            section_lines.append(f"- [{name}]({url})")
+    assets = [
+        AssetLink(name, f"https://github.com/{settings.github_repository}/releases/download/{DEV_DRAFT_TAG}/{name}")
+        for name, _ in staged_assets
+    ] or None
 
-    if new_image_manifest:
-        section_lines.append("")
-        section_lines.append("#### Built images")
-        section_lines.extend(render_images_table(new_image_manifest))
-
-    section = "\n".join(section_lines)
+    section = render_draft_section(
+        DraftSection(
+            heading_fragments=heading_fragments,
+            packages=package_rows,
+            assets=assets,
+            images=new_image_manifest or None,
+        )
+    )
     anchor = f"run-{resolved_run_id}"
     append_draft_section(DEV_DRAFT_TAG, settings.github_repository, anchor, section)
 

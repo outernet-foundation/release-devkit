@@ -126,21 +126,3 @@ def pull_digest_manifest(
     )
     data = json.loads((staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
     return {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
-
-
-def render_images_table(manifest: dict[str, DigestEntry]) -> list[str]:
-    lines = ["| Image | Tag | Digest |", "|---|---|---|"]
-    for target, entry in manifest.items():
-        tree_tag = next(
-            (tag for tag in entry.tags if tag.startswith("tree-")),
-            entry.tags[0] if entry.tags else "",
-        )
-        url = None
-        if entry.ref.startswith("ghcr.io/"):
-            remainder = entry.ref[len("ghcr.io/") :]
-            parts = remainder.split("/", 1)
-            if len(parts) >= 2:
-                url = f"https://github.com/orgs/{parts[0]}/packages/container/{parts[1].replace('/', '%2F')}"
-        tag_cell = f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "\u2014")
-        lines.append(f"| {target} | {tag_cell} | `{entry.digest}` |")
-    return lines

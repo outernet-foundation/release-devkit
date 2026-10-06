@@ -15,13 +15,13 @@ from ..drafts import DEV_DRAFT_TAG, delete_draft_release
 from ..plan import UNCHANGED_FALLBACK_VERSION, compute_and_print_plan, setup_publishing_environment
 from ..publishing import StableStrategy, publish_packages
 from ..registries import registry_url
+from ..rendering import PackageRow, RegistryLink, render_release_body
 from ..tags import GitTags
 from ..builds import (
     builds_registry_of,
     matched_ci_run_number,
     pull_build_assets,
     pull_digest_manifest,
-    render_images_table,
 )
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -84,32 +84,25 @@ def main(
     )
 
     with ci_step("Create GitHub Release"):
-        lines: list[str] = []
-
-        lines.extend(["## Packages", "", "| Package | Version | Registry |", "|---|---|---|"])
+        rows: list[PackageRow] = []
         for name, package in publish_config.packages.items():
             version = tags.latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
-            links: list[str] = []
-            for registry_name, identity in package.registries.items():
-                url = registry_url(registry_name, identity, version)
-                if url is not None and version != UNCHANGED_FALLBACK_VERSION:
-                    links.append(f"[{registry_name}]({url})")
-                else:
-                    links.append(registry_name)
-            lines.append(f"| {name} | {version} | {', '.join(links)} |")
+            registries = [
+                RegistryLink(
+                    registry_name,
+                    version,
+                    registry_url(registry_name, identity, version) if version != UNCHANGED_FALLBACK_VERSION else None,
+                )
+                for registry_name, identity in package.registries.items()
+            ]
+            rows.append(PackageRow(name, version, registries))
 
         for app_name in publish_config.apps:
             version = tags.latest_version(f"{app_name}-v")
             if version:
-                lines.append(f"| {app_name} | {version} | \u2014 |")
+                rows.append(PackageRow(app_name, version))
 
-        if manifest:
-            lines.append("")
-            lines.append("## Built images")
-            lines.extend(render_images_table(manifest))
-
-        lines.append("")
-        notes = "\n".join(lines)
+        notes = render_release_body(rows, manifest)
         print(notes)
 
         asset_args = " ".join(f'"{asset}"' for asset in assets)
