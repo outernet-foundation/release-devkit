@@ -6,20 +6,23 @@ from tempfile import mkdtemp
 
 import pytest
 
-from release_devkit.verbs import draft_releases
+from release_devkit import drafts
+from release_devkit.verbs import update_pr_draft as update_pr_draft_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PublishConfig
 from release_devkit.builds import DigestEntry, pull_build_assets
-from release_devkit.verbs.draft_releases import (
+from release_devkit.drafts import (
     append_draft_section,
-    build_draft_section,
     delete_draft_release,
     emit_draft_backlink,
-    emit_draft_summary,
     ensure_draft_release,
     replace_or_prepend_section,
     stage_draft_assets,
-    update_pr_draft,
     upload_draft_assets,
+)
+from release_devkit.verbs.update_pr_draft import (
+    build_draft_section,
+    emit_draft_summary,
+    update_pr_draft,
 )
 
 
@@ -88,10 +91,10 @@ def patch_verb_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def patch_bash(monkeypatch: pytest.MonkeyPatch, check_returns: object = False) -> BashLog:
-    monkeypatch.setattr(draft_releases, "ci_step", null_ci_step)
-    monkeypatch.setattr(draft_releases, "bash_check", FixedReturn(check_returns))
+    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
+    monkeypatch.setattr(drafts, "bash_check", FixedReturn(check_returns))
     bash_log = BashLog()
-    monkeypatch.setattr(draft_releases, "bash", bash_log)
+    monkeypatch.setattr(drafts, "bash", bash_log)
     return bash_log
 
 
@@ -212,10 +215,10 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     patch_verb_environment(monkeypatch)
     source = make_source_file("MyApp.apk")
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
-    monkeypatch.setattr(draft_releases, "load_config", FixedReturn(make_build_config()))
-    monkeypatch.setattr(draft_releases, "pull_build_assets", FixedReturn([(artifact, source)]))
-    monkeypatch.setattr(draft_releases, "pull_digest_manifest", FixedReturn(None))
-    monkeypatch.setattr(draft_releases, "bash_output", FixedReturn(""))
+    monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_build_config()))
+    monkeypatch.setattr(update_pr_draft_module, "pull_build_assets", FixedReturn([(artifact, source)]))
+    monkeypatch.setattr(update_pr_draft_module, "pull_digest_manifest", FixedReturn(None))
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
     update_pr_draft(pr_number=7, run_number=42)
@@ -231,12 +234,12 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     source = make_source_file("MyApp.apk")
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
-    monkeypatch.setattr(draft_releases, "load_config", FixedReturn(make_build_config()))
-    monkeypatch.setattr(draft_releases, "pull_build_assets", FixedReturn([(artifact, source)]))
-    monkeypatch.setattr(draft_releases, "pull_digest_manifest", FixedReturn(manifest))
-    monkeypatch.setattr(draft_releases, "ci_step", null_ci_step)
-    monkeypatch.setattr(draft_releases, "bash_check", FixedReturn(False))
-    monkeypatch.setattr(draft_releases, "bash_output", FixedReturn(""))
+    monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_build_config()))
+    monkeypatch.setattr(update_pr_draft_module, "pull_build_assets", FixedReturn([(artifact, source)]))
+    monkeypatch.setattr(update_pr_draft_module, "pull_digest_manifest", FixedReturn(manifest))
+    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
+    monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
 
     written: list[str] = []
 
@@ -245,7 +248,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
             path = command.split("--notes-file", 1)[1].strip().split()[0]
             written.append(Path(path).read_text(encoding="utf-8"))
 
-    monkeypatch.setattr(draft_releases, "bash", capturing_bash)
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
 
     update_pr_draft(pr_number=7, run_number=42)
 
@@ -257,7 +260,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
 
 def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_verb_environment(monkeypatch)
-    monkeypatch.setattr(draft_releases, "load_config", FixedReturn(make_empty_config()))
+    monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_empty_config()))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
     update_pr_draft(pr_number=7, run_number=42)
@@ -291,7 +294,7 @@ def test_replace_or_prepend_section_replaces_existing_anchor() -> None:
 
 def test_append_draft_section_writes_notes_file(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=False)
-    monkeypatch.setattr(draft_releases, "bash_output", FixedReturn(""))
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
 
     append_draft_section("dev-builds", "owner/repo", "run-42", "### Heading")
 
@@ -300,9 +303,7 @@ def test_append_draft_section_writes_notes_file(monkeypatch: pytest.MonkeyPatch)
 
 def test_emit_draft_backlink_writes_anchor_link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     summary_path = tmp_path / "summary.md"
-    monkeypatch.setattr(
-        draft_releases, "bash_output", FixedReturn("https://github.com/owner/repo/releases/tag/untagged-abc")
-    )
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn("https://github.com/owner/repo/releases/tag/untagged-abc"))
 
     emit_draft_backlink(str(summary_path), "dev-builds", "owner/repo", "run-42")
 

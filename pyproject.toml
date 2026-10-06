@@ -35,7 +35,7 @@ merge-gate = "release_devkit.verbs.merge_gate:app"
 prerelease = "release_devkit.verbs.prerelease:app"
 release = "release_devkit.verbs.release:app"
 validate-release-plan = "release_devkit.verbs.validate_release_plan:app"
-update-pr-draft-release = "release_devkit.verbs.draft_releases:update_pr_app"
+update-pr-draft-release = "release_devkit.verbs.update_pr_draft:update_pr_app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/release_devkit"]

@@ -9,7 +9,7 @@ from ci_devkit.ci_step import ci_step
 
 from ..config import DEFAULT_CONFIG_PATH, load_config
 from .create_release import run_create_release
-from .draft_releases import DEV_DRAFT_TAG, delete_draft_release
+from ..drafts import DEV_DRAFT_TAG, delete_draft_release
 from ..outputs import append_line
 from ..plan import compute_release_plan, render_plan_summary, setup_publishing_environment
 from ..registries import PublishRequest, build_registries

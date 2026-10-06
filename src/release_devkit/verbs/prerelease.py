@@ -18,7 +18,7 @@ from ..builds import (
     pull_digest_manifest,
     render_images_table,
 )
-from .draft_releases import (
+from ..drafts import (
     DEV_DRAFT_TAG,
     append_draft_section,
     emit_draft_backlink,
