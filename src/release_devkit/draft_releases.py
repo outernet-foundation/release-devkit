@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
-from tempfile import mkdtemp
+from tempfile import NamedTemporaryFile, mkdtemp
 from typing import Annotated
 
 import typer
-from bashrun.bash import bash, bash_check
+from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 from pydantic_settings import BaseSettings
 
@@ -18,6 +19,7 @@ update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=
 
 PR_DRAFT_TAG_PREFIX = "pr-"
 DEV_DRAFT_TAG = "dev-builds"
+_ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
 
 
 class Settings(BaseSettings):
@@ -99,3 +101,52 @@ def delete_draft_release(tag: str, repository: str) -> None:
             return
         bash(f"gh release delete {tag} --cleanup-tag --yes --repo {repository}")
         print(f"  Draft release {tag} deleted")
+
+
+def append_draft_section(tag: str, repository: str, sha: str, anchor: str, section: str) -> None:
+    ensure_draft_release(tag, repository, sha)
+    body = bash_output(f"gh release view {tag} --repo {repository} --json body --jq .body")
+    updated = replace_or_prepend_section(body, anchor, section.strip())
+    with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
+        file.write(updated)
+        notes_path = file.name
+    bash(f"gh release edit {tag} --repo {repository} --notes-file {notes_path}")
+    Path(notes_path).unlink()
+    print(f"  Section {anchor} written to draft {tag}")
+
+
+def replace_or_prepend_section(body: str, anchor: str, section: str) -> str:
+    sections = _parse_sections(body)
+    new_entry = (anchor, section)
+    for index, (existing_anchor, _) in enumerate(sections):
+        if existing_anchor == anchor:
+            sections[index] = new_entry
+            break
+    else:
+        sections.insert(0, new_entry)
+    return _join_sections(sections)
+
+
+def _parse_sections(body: str) -> list[tuple[str, str]]:
+    parts = _ANCHOR_PATTERN.split(body)
+    sections: list[tuple[str, str]] = []
+    for index in range(1, len(parts), 2):
+        anchor_id = parts[index]
+        content = parts[index + 1].strip() if index + 1 < len(parts) else ""
+        sections.append((anchor_id, content))
+    return sections
+
+
+def _join_sections(sections: list[tuple[str, str]]) -> str:
+    if not sections:
+        return ""
+    blocks = [f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]
+    return "\n\n".join(blocks) + "\n"
+
+
+def emit_draft_backlink(summary_path: str | None, tag: str, repository: str, anchor: str) -> None:
+    url = bash_output(f"gh release view {tag} --repo {repository} --json url --jq .url").strip()
+    link = f"{url}#{anchor}"
+    text = f"### Draft release `{tag}` updated\n- [Section `{anchor}`]({link})"
+    print(text)
+    append_line(summary_path, text)

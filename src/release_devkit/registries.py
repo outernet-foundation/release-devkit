@@ -152,6 +152,19 @@ def patch_project_dependencies(original: str, dependency_versions: dict[str, str
 
 KNOWN_REGISTRIES = frozenset({"nuget", "npm", "pypi"})
 
+REGISTRY_URL_BUILDERS: dict[str, Callable[[str, str], str]] = {
+    "nuget": lambda identity, version: f"https://www.nuget.org/packages/{identity}/{version}",
+    "npm": lambda identity, version: f"https://www.npmjs.com/package/{identity}/v/{version}",
+    "pypi": lambda identity, version: f"https://pypi.org/project/{identity}/{version}",
+}
+
+
+def registry_url(registry_name: str, identity: str, version: str) -> str | None:
+    builder = REGISTRY_URL_BUILDERS.get(registry_name)
+    if builder is None:
+        return None
+    return builder(identity, version)
+
 
 def semver_dev_version(base_version: str, run_id: str) -> str:
     return f"{base_version}-dev.{run_id}"

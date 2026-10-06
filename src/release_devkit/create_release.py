@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
@@ -14,6 +13,7 @@ from ci_devkit.builds import pull_build
 from ci_devkit.ci_step import ci_step
 
 from .config import BuildArtifactConfig, PublishConfig, load_config
+from .registries import registry_url
 from .tags import GitTags
 from .plan import UNCHANGED_FALLBACK_VERSION
 
@@ -43,12 +43,6 @@ def run_create_release(config: Annotated[Path, typer.Option(help="Publish config
     assets = collect_build_assets(publish_config, settings)
 
     with ci_step("Create GitHub Release"):
-        registry_urls: dict[str, Callable[[str, str], str]] = {
-            "nuget": lambda identity, version: f"https://www.nuget.org/packages/{identity}/{version}",
-            "npm": lambda identity, version: f"https://www.npmjs.com/package/{identity}/v/{version}",
-            "pypi": lambda identity, version: f"https://pypi.org/project/{identity}/{version}",
-        }
-
         tags = GitTags()
         lines: list[str] = []
 
@@ -57,11 +51,9 @@ def run_create_release(config: Annotated[Path, typer.Option(help="Publish config
             version = tags.latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
             links: list[str] = []
             for registry_name, identity in package.registries.items():
-                url_builder = registry_urls.get(registry_name)
-                if url_builder is None:
-                    links.append(registry_name)
-                elif version != UNCHANGED_FALLBACK_VERSION:
-                    links.append(f"[{registry_name}]({url_builder(identity, version)})")
+                url = registry_url(registry_name, identity, version)
+                if url is not None and version != UNCHANGED_FALLBACK_VERSION:
+                    links.append(f"[{registry_name}]({url})")
                 else:
                     links.append(registry_name)
             lines.append(f"| {name} | {version} | {', '.join(links)} |")

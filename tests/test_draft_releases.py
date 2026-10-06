@@ -10,9 +10,12 @@ from release_devkit import draft_releases
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PublishConfig
 from release_devkit.create_release import pull_build_assets
 from release_devkit.draft_releases import (
+    append_draft_section,
     delete_draft_release,
+    emit_draft_backlink,
     emit_draft_summary,
     ensure_draft_release,
+    replace_or_prepend_section,
     stage_draft_assets,
     update_pr_draft,
     upload_draft_assets,
@@ -197,3 +200,48 @@ def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -
     update_pr_draft(pr_number=7, run_number=42)
 
     assert not bash_log.commands
+
+
+def test_replace_or_prepend_section_prepends_to_empty_body() -> None:
+    result = replace_or_prepend_section("", "run-42", "### Heading")
+
+    assert result == '<a id="run-42"></a>\n### Heading\n'
+
+
+def test_replace_or_prepend_section_prepends_newest_first() -> None:
+    body = '<a id="run-42"></a>\n### Old'
+
+    result = replace_or_prepend_section(body, "run-43", "### New")
+
+    assert result.startswith('<a id="run-43"></a>\n### New')
+    assert '<a id="run-42"></a>\n### Old' in result
+
+
+def test_replace_or_prepend_section_replaces_existing_anchor() -> None:
+    body = '<a id="run-42"></a>\n### Old\n\n| pkg |'
+
+    result = replace_or_prepend_section(body, "run-42", "### Updated")
+
+    assert "### Old" not in result
+    assert '<a id="run-42"></a>\n### Updated' in result
+
+
+def test_append_draft_section_writes_notes_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    bash_log = patch_bash(monkeypatch, check_returns=False)
+    monkeypatch.setattr(draft_releases, "bash_output", FixedReturn(""))
+
+    append_draft_section("dev-builds", "owner/repo", "abc123", "run-42", "### Heading")
+
+    assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
+
+
+def test_emit_draft_backlink_writes_anchor_link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    summary_path = tmp_path / "summary.md"
+    monkeypatch.setattr(
+        draft_releases, "bash_output", FixedReturn("https://github.com/owner/repo/releases/tag/untagged-abc")
+    )
+
+    emit_draft_backlink(str(summary_path), "dev-builds", "owner/repo", "run-42")
+
+    content = summary_path.read_text(encoding="utf-8")
+    assert "https://github.com/owner/repo/releases/tag/untagged-abc#run-42" in content

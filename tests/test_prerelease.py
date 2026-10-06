@@ -8,7 +8,7 @@ import pytest
 from release_devkit import prerelease
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PackageConfig, PublishConfig
 from release_devkit.plan import PackagePlan, ReleasePlan
-from release_devkit.prerelease import app_has_changes
+from release_devkit.prerelease import app_has_changes, build_prerelease_section, parse_merge_pr
 
 
 class FakeTags:
@@ -103,7 +103,7 @@ def run_prerelease(
     config: PublishConfig,
     release_plan: ReleasePlan,
     tags: FakeTags,
-) -> tuple[CallRecorder, CallRecorder, CallRecorder]:
+) -> tuple[CallRecorder, CallRecorder, CallRecorder, CallRecorder]:
     patch_environment(monkeypatch)
     monkeypatch.setattr(prerelease, "load_config", FixedReturn(config))
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(release_plan))
@@ -123,11 +123,14 @@ def run_prerelease(
     ensure_draft = CallRecorder()
     monkeypatch.setattr(prerelease, "ensure_draft_release", ensure_draft)
     monkeypatch.setattr(prerelease, "upload_draft_assets", CallRecorder())
-    monkeypatch.setattr(prerelease, "emit_draft_summary", CallRecorder())
+    monkeypatch.setattr(prerelease, "parse_merge_pr", FixedReturn(None))
+    append_section = CallRecorder()
+    monkeypatch.setattr(prerelease, "append_draft_section", append_section)
+    monkeypatch.setattr(prerelease, "emit_draft_backlink", CallRecorder())
 
     prerelease.main()
 
-    return build_registries, pull_assets, ensure_draft
+    return build_registries, pull_assets, ensure_draft, append_section
 
 
 def test_app_has_changes_returns_true_when_never_released() -> None:
@@ -152,36 +155,45 @@ def test_nothing_changed_returns_without_publishing_or_drafting(monkeypatch: pyt
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
-    build_registries, pull_assets, ensure_draft = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    build_registries, pull_assets, ensure_draft, append_section = run_prerelease(
+        monkeypatch, config, make_plan(set()), tags
+    )
 
     assert build_registries.calls == []
     assert pull_assets.calls == []
     assert ensure_draft.calls == []
+    assert append_section.calls == []
 
 
-def test_only_packages_changed_publishes_but_skips_draft(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(
         packages={"pkg": PackageConfig(path=Path("packages/pkg"), major_minor="1.0", registries={})},
         apps={"myapp": make_app()},
     )
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
-    build_registries, pull_assets, ensure_draft = run_prerelease(monkeypatch, config, make_plan({"pkg"}), tags)
+    build_registries, pull_assets, ensure_draft, append_section = run_prerelease(
+        monkeypatch, config, make_plan({"pkg"}), tags
+    )
 
     assert build_registries.calls != []
     assert pull_assets.calls == []
     assert ensure_draft.calls == []
+    assert append_section.calls != []
 
 
 def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"})
 
-    build_registries, pull_assets, ensure_draft = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    build_registries, pull_assets, ensure_draft, append_section = run_prerelease(
+        monkeypatch, config, make_plan(set()), tags
+    )
 
     assert build_registries.calls == []
     assert pull_assets.calls != []
     assert ensure_draft.calls != []
+    assert append_section.calls != []
 
 
 def test_dev_draft_surfaces_only_changed_apps(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,9 +208,48 @@ def test_dev_draft_surfaces_only_changed_apps(monkeypatch: pytest.MonkeyPatch) -
         changed={"changed-app"},
     )
 
-    _, pull_assets, _ = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    _, pull_assets, _, _ = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert len(pull_assets.calls) == 1
     draft_config = pull_assets.calls[0][0]
     assert isinstance(draft_config, PublishConfig)
     assert set(draft_config.apps) == {"changed-app"}
+
+
+def test_build_prerelease_section_renders_packages_assets_and_pr_link() -> None:
+    published = [("pypi", "placeframe-common", "0.1.0.dev42")]
+    staged_assets = [("MyApp-run-42.apk", Path("/tmp/MyApp-run-42.apk"))]
+
+    section = build_prerelease_section(published, staged_assets, "owner/repo", "42", (15, "Add feature"))
+
+    assert "### [Run #42]" in section
+    assert "https://github.com/owner/repo/actions/runs/42" in section
+    assert "[PR #15: Add feature]" in section
+    assert "https://github.com/owner/repo/pull/15" in section
+    assert "| placeframe-common | 0.1.0.dev42 |" in section
+    assert "[pypi](https://pypi.org/project/placeframe-common/0.1.0.dev42)" in section
+    assert "[MyApp-run-42.apk]" in section
+    assert "https://github.com/owner/repo/releases/download/dev-builds/MyApp-run-42.apk" in section
+
+
+def test_build_prerelease_section_omits_pr_link_when_none() -> None:
+    section = build_prerelease_section([], [], "owner/repo", "42", None)
+
+    assert "### [Run #42]" in section
+    assert "PR #" not in section
+
+
+def test_parse_merge_pr_extracts_pr_number_and_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Merge PR #42: Add feature X\n"))
+
+    result = parse_merge_pr("abc123")
+
+    assert result == (42, "Add feature X")
+
+
+def test_parse_merge_pr_returns_none_for_non_merge_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Just a regular commit\n"))
+
+    result = parse_merge_pr("abc123")
+
+    assert result is None
