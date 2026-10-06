@@ -11,7 +11,7 @@ from ci_devkit.ci_step import ci_step
 from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
 from release_devkit.builds import (
     DigestEntry,
-    matched_ci_run_number,
+    matched_ci_run,
     pull_digest_manifest,
 )
 from release_devkit.drafts import (
@@ -37,7 +37,6 @@ def main(
     actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
     workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
     run_id: Annotated[int, typer.Option(help="CI run id baked into every dev version")],
-    run_number: Annotated[int, typer.Option(help="CI run number for the builds shelf")],
     step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
@@ -46,7 +45,7 @@ def main(
     packages = publish_config.packages
     tags = GitTags()
 
-    _, html_url = matched_ci_run_number(repository, sha, publish_config.ci_workflow)
+    matched_run_id, html_url = matched_ci_run(repository, sha, publish_config.ci_workflow)
     new_image_manifest: dict[str, DigestEntry] = {}
 
     with ci_step("Compute dev publish plan"):
@@ -64,7 +63,7 @@ def main(
 
         has_app_changes = bool(changed_apps)
 
-        manifest = pull_digest_manifest(publish_config.builds_registry, str(run_number), actor, settings.github_token)
+        manifest = pull_digest_manifest(publish_config.builds_registry, matched_run_id, actor, settings.github_token)
         if manifest is not None:
             existing_digests: set[str] = set()
             if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {repository}"):
@@ -97,7 +96,7 @@ def main(
         draft_config = publish_config.model_copy(update={"apps": changed_apps})
         staged_assets = publish_draft_assets(
             draft_config,
-            str(run_number),
+            matched_run_id,
             actor,
             settings.github_token,
             DEV_DRAFT_TAG,
@@ -109,7 +108,7 @@ def main(
     merge_match = _MERGE_PR_PATTERN.search(merge_message)
     pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
 
-    heading_fragments: list[str] = [f"[Integrate run #{run_number}]({html_url})"]
+    heading_fragments: list[str] = [f"[Integrate run #{matched_run_id}]({html_url})"]
     if pr_info is not None:
         pr_number, pr_title = pr_info
         pr_url = f"https://github.com/{repository}/pull/{pr_number}"

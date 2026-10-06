@@ -15,7 +15,7 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 @app.command()
 def main(
     application: Annotated[str, typer.Option("--app", help="App name (the release-devkit.yaml apps key)")],
-    run_number: Annotated[int, typer.Option(help="Build number baked into the version")],
+    run_id: Annotated[int, typer.Option(help="CI run id baked into the version")],
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
     publish_config = load_config(config)
@@ -29,4 +29,4 @@ def main(
     last_version = tags.latest_version(prefix)
     last_in_line = tags.latest_version_in_line(prefix, app_config.major_minor)
     base_version = next_version(app_config.major_minor, last_in_line, last_version, application)
-    print(f"{base_version}+{run_number}")
+    print(f"{base_version}+{run_id}")

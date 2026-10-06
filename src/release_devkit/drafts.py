@@ -17,14 +17,14 @@ _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
 
 def publish_draft_assets(
     config: PublishConfig,
-    run_number: str,
+    run_id: str,
     registry_username: str,
     registry_token: str,
     tag: str,
     repository: str,
     sha: str,
 ) -> list[tuple[str, Path]]:
-    pulled = pull_build_assets(config, run_number, registry_username, registry_token)
+    pulled = pull_build_assets(config, run_id, registry_username, registry_token)
 
     staging = Path(mkdtemp(prefix="draft-assets-"))
     staged: list[tuple[str, Path]] = []
@@ -36,7 +36,7 @@ def publish_draft_assets(
         else:
             stem = source.stem
             suffix = source.suffix
-        name = f"{stem}-run-{run_number}{suffix}"
+        name = f"{stem}-run-{run_id}{suffix}"
         target = staging / name
         shutil.copy2(source, target)
         staged.append((name, target))

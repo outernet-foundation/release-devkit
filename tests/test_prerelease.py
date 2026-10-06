@@ -95,7 +95,7 @@ def patch_common(monkeypatch: pytest.MonkeyPatch) -> CallRecorder:
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())
     monkeypatch.setattr(
-        prerelease, "matched_ci_run_number", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
+        prerelease, "matched_ci_run", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
     )
     monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(None))
     pull_assets = CallRecorder([])
@@ -125,7 +125,6 @@ def run_prerelease(
         actor="bot",
         workspace="/workspace",
         run_id=42,
-        run_number=42,
         step_summary="",
     )
 
@@ -205,7 +204,7 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
     monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
     monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
     monkeypatch.setattr(
-        prerelease, "matched_ci_run_number", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
+        prerelease, "matched_ci_run", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
     )
     monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(manifest))
     monkeypatch.setattr(prerelease, "bash_check", FixedReturn(True))
@@ -232,7 +231,6 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
         actor="bot",
         workspace="/workspace",
         run_id=42,
-        run_number=42,
         step_summary="",
     )
 

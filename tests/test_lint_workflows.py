@@ -71,7 +71,7 @@ GET_APP_VERSION_RUN = (
     "      - id: version\n"
     '        run: uv run --project "$RUNNER_TEMP/release-devkit"'
     " --locked --no-dev get-app-version --app capture-tool"
-    " --run-number ${{ github.run_number }}\n"
+    " --run-id ${{ github.run_id }}\n"
 )
 
 LINT_WORKFLOWS_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
@@ -80,14 +80,14 @@ PRERELEASE_RUN = (
     '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
     " prerelease --repository ${{ github.repository }} --sha ${{ github.sha }}"
     " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
-    " --run-number ${{ github.run_number }} --step-summary $GITHUB_STEP_SUMMARY --run-id ${{ github.run_id }}\n"
+    " --run-id ${{ github.run_id }} --step-summary $GITHUB_STEP_SUMMARY\n"
 )
 
 RELEASE_RUN = (
     '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
     " release --repository ${{ github.repository }} --sha ${{ github.sha }}"
     " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
-    " --run-number ${{ github.run_number }} --step-summary $GITHUB_STEP_SUMMARY\n"
+    " --run-id ${{ github.run_id }} --step-summary $GITHUB_STEP_SUMMARY\n"
 )
 
 VALIDATE_RELEASE_PLAN_RUN = (

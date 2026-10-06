@@ -56,7 +56,7 @@ def test_stamps_next_version_plus_run(monkeypatch: pytest.MonkeyPatch, tmp_path:
     result = invoke(
         monkeypatch,
         "capture-tool-v0.2.7\n",
-        ["--app", "capture-tool", "--config", str(config_path), "--run-number", "42"],
+        ["--app", "capture-tool", "--config", str(config_path), "--run-id", "42"],
     )
 
     assert result.exit_code == 0
@@ -66,7 +66,7 @@ def test_stamps_next_version_plus_run(monkeypatch: pytest.MonkeyPatch, tmp_path:
 def test_no_tags_defaults_to_first_in_line(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
 
-    result = invoke(monkeypatch, "", ["--app", "capture-tool", "--config", str(config_path), "--run-number", "1"])
+    result = invoke(monkeypatch, "", ["--app", "capture-tool", "--config", str(config_path), "--run-id", "1"])
 
     assert result.exit_code == 0
     assert result.output.strip() == "0.2.0+1"
@@ -78,7 +78,7 @@ def test_prerelease_tags_do_not_count(monkeypatch: pytest.MonkeyPatch, tmp_path:
     result = invoke(
         monkeypatch,
         "capture-tool-v0.2.8-preview\ncapture-tool-v0.2.7\n",
-        ["--app", "capture-tool", "--config", str(config_path), "--run-number", "1"],
+        ["--app", "capture-tool", "--config", str(config_path), "--run-id", "1"],
     )
 
     assert result.exit_code == 0
@@ -89,7 +89,7 @@ def test_unknown_app_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
     config_path = write_config(tmp_path)
 
     result = invoke(
-        monkeypatch, "capture-tool-v0.2.7\n", ["--app", "Nope", "--config", str(config_path), "--run-number", "1"]
+        monkeypatch, "capture-tool-v0.2.7\n", ["--app", "Nope", "--config", str(config_path), "--run-id", "1"]
     )
 
     assert result.exit_code == 1

@@ -7,7 +7,7 @@ import typer
 from release_devkit import builds
 from release_devkit.builds import (
     DigestEntry,
-    matched_ci_run_number,
+    matched_ci_run,
     pull_digest_manifest,
 )
 from release_devkit.rendering import render_images_table
@@ -37,14 +37,14 @@ def patch_recorder(monkeypatch: pytest.MonkeyPatch, outputs: list[str]) -> Seque
     return recorder
 
 
-def run_result_json(run_number: int, html_url: str = "https://github.com/owner/repo/actions/runs/99") -> str:
-    return json.dumps({"run_number": run_number, "html_url": html_url})
+def run_result_json(run_id: int, html_url: str = "https://github.com/owner/repo/actions/runs/99") -> str:
+    return json.dumps({"id": run_id, "html_url": html_url})
 
 
-def test_matched_ci_run_number_queries_resolved_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_matched_ci_run_queries_resolved_parent(monkeypatch: pytest.MonkeyPatch) -> None:
     recorder = patch_recorder(monkeypatch, ["def456\n", run_result_json(42) + "\n"])
 
-    result = matched_ci_run_number("owner/repo", "abc1234", "integrate.yml")
+    result = matched_ci_run("owner/repo", "abc1234", "integrate.yml")
 
     assert result == ("42", "https://github.com/owner/repo/actions/runs/99")
     assert ".parents[1].sha // .sha" in recorder.commands[0]
@@ -52,20 +52,20 @@ def test_matched_ci_run_number_queries_resolved_parent(monkeypatch: pytest.Monke
     assert "workflows/integrate.yml/runs" in recorder.commands[1]
 
 
-def test_matched_ci_run_number_falls_back_to_promoted_sha(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_matched_ci_run_falls_back_to_promoted_sha(monkeypatch: pytest.MonkeyPatch) -> None:
     recorder = patch_recorder(monkeypatch, ["abc1234\n", run_result_json(7) + "\n"])
 
-    result = matched_ci_run_number("owner/repo", "abc1234", "integrate.yml")
+    result = matched_ci_run("owner/repo", "abc1234", "integrate.yml")
 
     assert result == ("7", "https://github.com/owner/repo/actions/runs/99")
     assert "head_sha=abc1234" in recorder.commands[1]
 
 
-def test_matched_ci_run_number_exits_when_no_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    patch_recorder(monkeypatch, ["abc1234\n", '{"run_number":null,"html_url":null}\n'])
+def test_matched_ci_run_exits_when_no_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_recorder(monkeypatch, ["abc1234\n", '{"id":null,"html_url":null}\n'])
 
     with pytest.raises(typer.Exit) as exit_info:
-        matched_ci_run_number("owner/repo", "abc1234", "integrate.yml")
+        matched_ci_run("owner/repo", "abc1234", "integrate.yml")
     assert exit_info.value.exit_code == 1
 
 

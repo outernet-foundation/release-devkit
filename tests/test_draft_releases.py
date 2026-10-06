@@ -68,7 +68,7 @@ def make_source_file(name: str = "app.apk") -> Path:
 DRAFT_REPOSITORY = "owner/repo"
 DRAFT_SHA = "abc123def456"
 DRAFT_ACTOR = "bot"
-DRAFT_RUN_ID = "99"
+DRAFT_RUN_ID = 99
 
 
 def patch_bash(monkeypatch: pytest.MonkeyPatch, check_returns: object = False) -> BashLog:
@@ -115,7 +115,6 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
 
     update_pr_draft(
         pr_number=7,
-        run_number=42,
         repository=DRAFT_REPOSITORY,
         sha=DRAFT_SHA,
         actor=DRAFT_ACTOR,
@@ -125,7 +124,7 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
 
     assert any("pr-7" in command for command in bash_log.commands)
     assert any("gh release upload pr-7" in command and "--clobber" in command for command in bash_log.commands)
-    assert any("MyApp-AndroidMobile-run-42.apk" in command for command in bash_log.commands)
+    assert any("MyApp-AndroidMobile-run-99.apk" in command for command in bash_log.commands)
     assert any("gh release edit pr-7" in command and "--notes-file" in command for command in bash_log.commands)
 
 
@@ -152,7 +151,6 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
 
     update_pr_draft(
         pr_number=7,
-        run_number=42,
         repository=DRAFT_REPOSITORY,
         sha=DRAFT_SHA,
         actor=DRAFT_ACTOR,
@@ -173,7 +171,6 @@ def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -
 
     update_pr_draft(
         pr_number=7,
-        run_number=42,
         repository=DRAFT_REPOSITORY,
         sha=DRAFT_SHA,
         actor=DRAFT_ACTOR,
