@@ -25,6 +25,11 @@ PR_DRAFT_TAG_PREFIX = "pr-"
 def update_pr_draft(
     pr_number: Annotated[int, typer.Option(help="PR number whose draft to update")],
     run_number: Annotated[int, typer.Option(help="CI run number whose builds to surface")],
+    repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
+    sha: Annotated[str, typer.Option(help="Commit SHA being released")],
+    actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
+    run_id: Annotated[str, typer.Option(help="CI run id for the actions URL")],
+    step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
     settings = Settings.model_validate({})
@@ -37,23 +42,20 @@ def update_pr_draft(
     staged = publish_draft_assets(
         publish_config,
         resolved_run_number,
-        settings.github_actor,
+        actor,
         settings.github_token,
         tag,
-        settings.github_repository,
-        settings.github_sha,
+        repository,
+        sha,
     )
     manifest = pull_digest_manifest(
-        builds_registry_of(publish_config), resolved_run_number, settings.github_actor, settings.github_token
+        builds_registry_of(publish_config), resolved_run_number, actor, settings.github_token
     )
-    run_url = f"https://github.com/{settings.github_repository}/actions/runs/{settings.github_run_id}"
+    run_url = f"https://github.com/{repository}/actions/runs/{run_id}"
 
-    pr_url = f"https://github.com/{settings.github_repository}/pull/{pr_number}"
+    pr_url = f"https://github.com/{repository}/pull/{pr_number}"
 
-    assets = [
-        AssetLink(name, f"https://github.com/{settings.github_repository}/releases/download/{tag}/{name}")
-        for name, _ in staged
-    ]
+    assets = [AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}") for name, _ in staged]
 
     section = render_draft_section(
         DraftSection(
@@ -66,10 +68,10 @@ def update_pr_draft(
         )
     )
 
-    append_draft_section(tag, settings.github_repository, f"run-{resolved_run_number}", section)
+    append_draft_section(tag, repository, f"run-{resolved_run_number}", section)
 
     summary_lines = [f"### Draft release `{tag}`", ""]
     summary_lines.extend(render_asset_links(assets))
     summary = "\n".join(summary_lines)
     print(summary)
-    write_step_summary(settings.github_step_summary, summary)
+    write_step_summary(step_summary, summary)

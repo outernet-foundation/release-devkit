@@ -84,20 +84,21 @@ DEVKIT_INVOCATION = re.compile(
     r"|validate-release-plan|update-pr-draft-release)" + r'(?P<args>(?: [^)"]*)?)'
 )
 VERB_ARGS: dict[str, re.Pattern[str]] = {
-    "get-app-version": re.compile(r"^ --app \S+$"),
-    "release": re.compile(r"^$"),
-    "prerelease": re.compile(r"^$"),
+    "get-app-version": re.compile(r"^ --app \S+ --run-number .+$"),
+    "release": re.compile(r"^ --repository .+ --sha .+ --actor .+ --workspace .+ --step-summary .+$"),
+    "prerelease": re.compile(r"^ --repository .+ --sha .+ --actor .+ --workspace .+ --step-summary .+ --run-id .+$"),
     "lint-workflows": re.compile(r"^$"),
-    "merge-gate": re.compile(r"^$"),
-    "validate-release-plan": re.compile(r"^$"),
-    "update-pr-draft-release": re.compile(r"^ --pr-number .+ --run-number .+$"),
+    "merge-gate": re.compile(r"^ --head-sha .+ --repository .+$"),
+    "validate-release-plan": re.compile(r"^ --step-summary .+$"),
+    "update-pr-draft-release": re.compile(
+        r"^ --pr-number .+ --run-number .+ --repository .+ --sha .+ --actor .+ --run-id .+ --step-summary .+$"
+    ),
 }
 VERB_ENV: dict[str, dict[str, str]] = {
     "release": {"GITHUB_TOKEN": "${{ github.token }}"},
     "prerelease": {"GITHUB_TOKEN": "${{ github.token }}"},
     "merge-gate": {
         "GITHUB_TOKEN": "${{ steps.mint.outputs.token }}",
-        "HEAD_SHA": MERGE_BOT_REF,
     },
     "validate-release-plan": {},
     "update-pr-draft-release": {"GITHUB_TOKEN": "${{ github.token }}"},

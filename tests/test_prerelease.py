@@ -86,17 +86,21 @@ def noop(*args: object, **kwargs: object) -> None:
     pass
 
 
-def patch_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key, value in {
-        "GITHUB_REPOSITORY": "owner/repo",
-        "GITHUB_SHA": "abc123def456",
-        "GITHUB_ACTOR": "bot",
-        "GITHUB_TOKEN": "token",
-        "GITHUB_RUN_ID": "42",
-        "GITHUB_WORKSPACE": "/workspace",
-        "GITHUB_STEP_SUMMARY": "",
-    }.items():
-        monkeypatch.setenv(key, value)
+def patch_common(monkeypatch: pytest.MonkeyPatch) -> CallRecorder:
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
+    monkeypatch.setattr(prerelease, "setup_publishing_environment", noop)
+    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
+    monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
+    monkeypatch.setattr(drafts, "bash", CallRecorder())
+    monkeypatch.setattr(
+        prerelease, "matched_ci_run_number", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
+    )
+    monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(None))
+    pull_assets = CallRecorder([])
+    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
+    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Not a merge commit\n"))
+    return pull_assets
 
 
 def run_prerelease(
@@ -105,28 +109,23 @@ def run_prerelease(
     release_plan: ReleasePlan,
     tags: FakeTags,
 ) -> tuple[CallRecorder, CallRecorder, CallRecorder]:
-    patch_environment(monkeypatch)
     monkeypatch.setattr(prerelease, "load_config", FixedReturn(config))
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
-    monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
-    monkeypatch.setattr(prerelease, "setup_publishing_environment", noop)
+    pull_assets = patch_common(monkeypatch)
     publish_packages = CallRecorder([])
     monkeypatch.setattr(prerelease, "publish_packages", publish_packages)
-    monkeypatch.setattr(
-        prerelease, "matched_ci_run_number", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
-    )
-    monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(None))
-    pull_assets = CallRecorder([])
-    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
-    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
-    monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
-    monkeypatch.setattr(drafts, "bash", CallRecorder())
-    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Not a merge commit\n"))
     append_section = CallRecorder()
     monkeypatch.setattr(prerelease, "append_draft_section", append_section)
 
-    prerelease.main()
+    prerelease.main(
+        repository="owner/repo",
+        sha="abc123def456",
+        actor="bot",
+        workspace="/workspace",
+        run_id="42",
+        step_summary="",
+    )
 
     return publish_packages, pull_assets, append_section
 
@@ -198,7 +197,7 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
         "other-capture": DigestEntry(ref="ghcr.io/owner/repo/other-capture", digest=digest_existing, tags=["tree-2"]),
     }
 
-    patch_environment(monkeypatch)
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
     monkeypatch.setattr(prerelease, "load_config", FixedReturn(config))
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
     monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
@@ -225,7 +224,14 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
 
     monkeypatch.setattr(prerelease, "append_draft_section", capture_section)
 
-    prerelease.main()
+    prerelease.main(
+        repository="owner/repo",
+        sha="abc123def456",
+        actor="bot",
+        workspace="/workspace",
+        run_id="42",
+        step_summary="",
+    )
 
     assert pull_assets.calls == []
     assert len(sections) == 1

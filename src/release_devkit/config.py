@@ -10,14 +10,7 @@ DEFAULT_CONFIG_PATH = Path("release-devkit.yaml")
 
 
 class Settings(BaseSettings):
-    github_repository: str = ""
-    github_sha: str = ""
-    github_actor: str = ""
     github_token: str = ""
-    github_workspace: str = ""
-    github_step_summary: str | None = None
-    github_run_id: str = ""
-    github_run_number: str = ""
     nuget_api_key: str = ""
 
 

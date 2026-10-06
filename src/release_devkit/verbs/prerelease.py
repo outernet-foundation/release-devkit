@@ -33,17 +33,18 @@ _MERGE_PR_PATTERN = re.compile(r"Merge PR #(\d+): (.+)")
 
 @app.command()
 def main(
+    repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
+    sha: Annotated[str, typer.Option(help="Commit SHA being released")],
+    actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
+    workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
+    run_id: Annotated[str, typer.Option(help="CI run id baked into every dev version")],
+    step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
-    dry_run: Annotated[bool, typer.Option(help="Plan publishes without executing them")] = False,
-    run_id: Annotated[
-        str, typer.Option(help="CI run id baked into every dev version (defaults to the ambient CI run id)")
-    ] = "",
 ) -> None:
-    settings = Settings.model_validate({})
-    resolved_run_id = run_id or settings.github_run_id
-    if not resolved_run_id.isdigit():
-        raise SystemExit("dev run id must be all digits: pass --run-id or run inside CI")
+    if not run_id.isdigit():
+        raise SystemExit("dev run id must be all digits")
 
+    settings = Settings.model_validate({})
     publish_config = load_config(config)
     packages = publish_config.packages
     tags = GitTags()
@@ -66,14 +67,14 @@ def main(
                 summary_lines.append(f"| {plan.name} | False | - |")
                 continue
             versions = ", ".join(
-                f"{registry_name}: {identity} @ {DEV_VERSION_FORMATS[registry_name](plan.version, resolved_run_id)}"
+                f"{registry_name}: {identity} @ {DEV_VERSION_FORMATS[registry_name](plan.version, run_id)}"
                 for registry_name, identity in package.registries.items()
             )
             summary_lines.append(f"| {plan.name} | True | {versions} |")
         summary = "\n".join(summary_lines)
 
         print(summary)
-        write_step_summary(settings.github_step_summary, summary)
+        write_step_summary(step_summary, summary)
 
         changed_apps: dict[str, AppConfig] = {}
         for name, app in publish_config.apps.items():
@@ -89,16 +90,14 @@ def main(
 
         builds_registry = builds_registry_of(publish_config)
         if builds_registry is not None:
-            run_number, html_url = matched_ci_run_number(
-                settings.github_repository, settings.github_sha, publish_config.ci_workflow
-            )
+            run_number, html_url = matched_ci_run_number(repository, sha, publish_config.ci_workflow)
             integrate_run = (run_number, html_url)
-            manifest = pull_digest_manifest(builds_registry, run_number, settings.github_actor, settings.github_token)
+            manifest = pull_digest_manifest(builds_registry, run_number, actor, settings.github_token)
             if manifest is not None:
                 existing_digests: set[str] = set()
-                if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {settings.github_repository}"):
+                if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {repository}"):
                     draft_body = bash_output(
-                        f"gh release view {DEV_DRAFT_TAG} --repo {settings.github_repository} --json body --jq .body"
+                        f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json body --jq .body"
                     )
                     existing_digests = set(re.findall(r"sha256:[a-f0-9]{64}", draft_body))
                 new_image_manifest = {
@@ -110,14 +109,10 @@ def main(
             print("Nothing to publish")
             return
 
-        if dry_run:
-            print("Dry run \u2014 skipping publish")
-            return
-
     published: list[tuple[str, str, str]] = []
     if has_package_changes:
-        setup_publishing_environment(release_plan, packages, settings.github_workspace)
-        published = publish_packages(packages, release_plan, settings.nuget_api_key, DevStrategy(resolved_run_id))
+        setup_publishing_environment(release_plan, packages, workspace)
+        published = publish_packages(packages, release_plan, settings.nuget_api_key, DevStrategy(run_id))
 
         if published:
             recap = "\n".join([
@@ -126,7 +121,7 @@ def main(
             ])
             print(recap)
             print("Consume these by exact version pin - there is no discovery tooling by design")
-            write_step_summary(settings.github_step_summary, recap)
+            write_step_summary(step_summary, recap)
 
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
@@ -134,14 +129,14 @@ def main(
         staged_assets = publish_draft_assets(
             draft_config,
             run_number,
-            settings.github_actor,
+            actor,
             settings.github_token,
             DEV_DRAFT_TAG,
-            settings.github_repository,
-            settings.github_sha,
+            repository,
+            sha,
         )
 
-    merge_message = bash_output(f"git log -1 --format=%B {settings.github_sha}").strip()
+    merge_message = bash_output(f"git log -1 --format=%B {sha}").strip()
     merge_match = _MERGE_PR_PATTERN.search(merge_message)
     pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
 
@@ -150,11 +145,11 @@ def main(
         section_run_number, run_url = integrate_run
         heading_fragments.append(f"[Integrate run #{section_run_number}]({run_url})")
     else:
-        run_url = f"https://github.com/{settings.github_repository}/actions/runs/{resolved_run_id}"
-        heading_fragments.append(f"[Run #{resolved_run_id}]({run_url})")
+        run_url = f"https://github.com/{repository}/actions/runs/{run_id}"
+        heading_fragments.append(f"[Run #{run_id}]({run_url})")
     if pr_info is not None:
         pr_number, pr_title = pr_info
-        pr_url = f"https://github.com/{settings.github_repository}/pull/{pr_number}"
+        pr_url = f"https://github.com/{repository}/pull/{pr_number}"
         heading_fragments.append(f"[PR #{pr_number}: {pr_title}]({pr_url})")
 
     package_rows: list[PackageRow] | None = None
@@ -176,7 +171,7 @@ def main(
             package_rows.append(PackageRow(name, plan.version, registries))
 
     assets = [
-        AssetLink(name, f"https://github.com/{settings.github_repository}/releases/download/{DEV_DRAFT_TAG}/{name}")
+        AssetLink(name, f"https://github.com/{repository}/releases/download/{DEV_DRAFT_TAG}/{name}")
         for name, _ in staged_assets
     ] or None
 
@@ -188,12 +183,10 @@ def main(
             images=new_image_manifest or None,
         )
     )
-    anchor = f"run-{resolved_run_id}"
-    append_draft_section(DEV_DRAFT_TAG, settings.github_repository, anchor, section)
+    anchor = f"run-{run_id}"
+    append_draft_section(DEV_DRAFT_TAG, repository, anchor, section)
 
-    draft_url = bash_output(
-        f"gh release view {DEV_DRAFT_TAG} --repo {settings.github_repository} --json url --jq .url"
-    ).strip()
+    draft_url = bash_output(f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json url --jq .url").strip()
     backlink_text = f"### Draft release `{DEV_DRAFT_TAG}` updated\n- [Section `{anchor}`]({draft_url}#{anchor})"
     print(backlink_text)
-    write_step_summary(settings.github_step_summary, backlink_text)
+    write_step_summary(step_summary, backlink_text)

@@ -44,12 +44,7 @@ def noop(*args: object, **kwargs: object) -> None:
 
 
 def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key, value in {
-        "GITHUB_REPOSITORY": "owner/repo",
-        "GITHUB_WORKSPACE": "/workspace",
-        "GITHUB_STEP_SUMMARY": "",
-    }.items():
-        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
 
     config = PublishConfig(
         ci_workflow="integrate.yml",
@@ -75,6 +70,12 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     delete_recorder = CallRecorder()
     monkeypatch.setattr(release, "delete_draft_release", delete_recorder)
 
-    release.main()
+    release.main(
+        repository="owner/repo",
+        sha="abc123def456",
+        actor="bot",
+        workspace="/workspace",
+        step_summary="",
+    )
 
     assert delete_recorder.calls == [(DEV_DRAFT_TAG, "owner/repo")]

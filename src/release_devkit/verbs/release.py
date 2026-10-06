@@ -29,6 +29,11 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 @app.command()
 def main(
+    repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
+    sha: Annotated[str, typer.Option(help="Commit SHA being released")],
+    actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
+    workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
+    step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
     settings = Settings.model_validate({})
@@ -37,13 +42,13 @@ def main(
     tags = GitTags()
 
     with ci_step("Compute publish plan"):
-        release_plan = compute_and_print_plan(publish_config, tags, settings.github_step_summary)
+        release_plan = compute_and_print_plan(publish_config, tags, step_summary)
 
     if not release_plan.anything_releases():
         print("Nothing to publish")
         return
 
-    setup_publishing_environment(release_plan, packages, settings.github_workspace)
+    setup_publishing_environment(release_plan, packages, workspace)
 
     if packages:
         publish_packages(packages, release_plan, settings.nuget_api_key, StableStrategy())
@@ -63,14 +68,14 @@ def main(
 
     year_month = datetime.now(UTC).strftime("%Y.%m")
     existing = bash_output(
-        f"gh release list --repo {settings.github_repository} --json tagName"
+        f"gh release list --repo {repository} --json tagName"
         f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
     ).strip()
     count = int(existing) if existing else 0
     release_tag = f"{year_month}.{count + 1}"
 
-    run_number, _ = matched_ci_run_number(settings.github_repository, settings.github_sha, publish_config.ci_workflow)
-    pulled = pull_build_assets(publish_config, run_number, settings.github_actor, settings.github_token)
+    run_number, _ = matched_ci_run_number(repository, sha, publish_config.ci_workflow)
+    pulled = pull_build_assets(publish_config, run_number, actor, settings.github_token)
     staging = Path(mkdtemp(prefix="release-assets-"))
     assets: list[Path] = []
     for artifact, source in pulled:
@@ -79,9 +84,7 @@ def main(
         shutil.copy2(source, asset)
         assets.append(asset)
 
-    manifest = pull_digest_manifest(
-        builds_registry_of(publish_config), run_number, settings.github_actor, settings.github_token
-    )
+    manifest = pull_digest_manifest(builds_registry_of(publish_config), run_number, actor, settings.github_token)
 
     with ci_step("Create GitHub Release"):
         rows: list[PackageRow] = []
@@ -112,10 +115,10 @@ def main(
         bash(
             f"gh release create {release_tag} --title {release_tag}"
             f" --notes-file {notes_path}"
-            f" --repo {settings.github_repository}"
+            f" --repo {repository}"
             f" {asset_args}"
         )
         Path(notes_path).unlink()
         print(f"  Release created: {release_tag}")
 
-    delete_draft_release(DEV_DRAFT_TAG, settings.github_repository)
+    delete_draft_release(DEV_DRAFT_TAG, repository)

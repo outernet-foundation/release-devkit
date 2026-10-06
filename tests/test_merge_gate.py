@@ -3,10 +3,8 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 
 import pytest
-from pydantic import ValidationError
 
 from release_devkit.verbs import merge_gate
-from release_devkit.verbs.merge_gate import Settings
 
 HEAD_SHA = "a" * 40
 GREEN_ROLLUP = [{"name": "lint-workflows", "status": "COMPLETED", "conclusion": "SUCCESS"}]
@@ -71,13 +69,10 @@ def exit_message(exit_request: SystemExit) -> str:
 def run_gate(
     monkeypatch: pytest.MonkeyPatch,
     responses: dict[str, str],
-    environment: dict[str, str] | None = None,
+    repository: str = "owner/repo",
     bash_check_fn: Callable[[str], bool] | None = None,
     delete_draft_fn: Callable[[str, str], None] | None = None,
 ) -> tuple[SystemExit | None, BashLog]:
-    monkeypatch.delenv("HEAD_SHA", raising=False)
-    for key, value in (environment or {"HEAD_SHA": HEAD_SHA}).items():
-        monkeypatch.setenv(key, value)
     monkeypatch.setattr(merge_gate, "bash_output", CommandResponses(responses))
     bash_log = BashLog()
     monkeypatch.setattr(merge_gate, "bash", bash_log)
@@ -85,19 +80,10 @@ def run_gate(
     monkeypatch.setattr(merge_gate, "ci_step", null_ci_step)
     monkeypatch.setattr(merge_gate, "delete_draft_release", delete_draft_fn or noop_delete_draft)
     try:
-        merge_gate.main()
+        merge_gate.main(head_sha=HEAD_SHA, repository=repository)
     except SystemExit as exit_request:
         return exit_request, bash_log
     return None, bash_log
-
-
-def test_settings_requires_head_sha_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("HEAD_SHA", raising=False)
-    with pytest.raises(ValidationError):
-        Settings.model_validate({})
-    assert "pr_number" not in Settings.model_fields
-    monkeypatch.setenv("HEAD_SHA", HEAD_SHA)
-    assert Settings.model_validate({}).head_sha == HEAD_SHA
 
 
 def test_gate_refuses_without_the_ready_to_merge_label(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -253,7 +239,6 @@ def test_gate_deletes_pr_draft_after_merge(monkeypatch: pytest.MonkeyPatch) -> N
     exit_request, _ = run_gate(
         monkeypatch,
         gate_responses(payload),
-        environment={"HEAD_SHA": HEAD_SHA, "GITHUB_REPOSITORY": "owner/repo"},
         delete_draft_fn=record_draft_deletion,
     )
 

@@ -70,17 +70,29 @@ WRAPPER_STEP = """
 GET_APP_VERSION_RUN = (
     "      - id: version\n"
     '        run: uv run --project "$RUNNER_TEMP/release-devkit"'
-    " --locked --no-dev get-app-version --app capture-tool\n"
+    " --locked --no-dev get-app-version --app capture-tool"
+    " --run-number ${{ github.run_number }}\n"
 )
 
 LINT_WORKFLOWS_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
 
-PRERELEASE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev prerelease\n'
+PRERELEASE_RUN = (
+    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
+    " prerelease --repository ${{ github.repository }} --sha ${{ github.sha }}"
+    " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
+    " --step-summary $GITHUB_STEP_SUMMARY --run-id ${{ github.run_id }}\n"
+)
 
-RELEASE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release\n'
+RELEASE_RUN = (
+    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
+    " release --repository ${{ github.repository }} --sha ${{ github.sha }}"
+    " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
+    " --step-summary $GITHUB_STEP_SUMMARY\n"
+)
 
 VALIDATE_RELEASE_PLAN_RUN = (
-    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev validate-release-plan\n'
+    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
+    " validate-release-plan --step-summary $GITHUB_STEP_SUMMARY\n"
 )
 
 RELEASE_ENV = "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n"
@@ -101,13 +113,13 @@ MINT_STEP = (
     "          private-key: ${{ secrets.MERGE_BOT_APP_PRIVATE_KEY }}\n"
 )
 
-MERGE_GATE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev merge-gate\n'
-
-MERGE_GATE_ENV = (
-    "        env:\n"
-    "          GITHUB_TOKEN: ${{ steps.mint.outputs.token }}\n"
-    "          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}\n"
+MERGE_GATE_RUN = (
+    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
+    " merge-gate --head-sha ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}"
+    " --repository ${{ github.repository }}\n"
 )
+
+MERGE_GATE_ENV = "        env:\n          GITHUB_TOKEN: ${{ steps.mint.outputs.token }}\n"
 
 NUGET_LOGIN_STEP = (
     "      - uses: NuGet/login@v1\n        id: nuget-login\n        with:\n          user: ${{ secrets.NUGET_USER }}\n"
@@ -325,7 +337,7 @@ def test_unlocked_invocation_is_rejected(tmp_path: Path) -> None:
 
 
 def test_rejected_verb_flags_are_flagged(tmp_path: Path) -> None:
-    step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev prerelease --run-id 42\n'
+    step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev prerelease --bogus 42\n'
     jobs = f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("carries rejected arguments" in problem for problem in problems)
@@ -728,15 +740,15 @@ def test_merge_gate_requires_minted_token_env(tmp_path: Path) -> None:
     assert any("merge-gate requires env GITHUB_TOKEN" in problem for problem in problems)
 
 
-def test_merge_gate_requires_the_dispatch_head_sha_env(tmp_path: Path) -> None:
-    wrong_env = MERGE_GATE_ENV.replace(
-        "${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}",
-        "${{ github.event.workflow_run.head_sha }}",
+def test_merge_gate_requires_head_sha_flag(tmp_path: Path) -> None:
+    step = (
+        '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
+        " merge-gate --repository ${{ github.repository }}\n"
     )
-    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{MERGE_GATE_RUN}{wrong_env}"
+    steps = f"{MERGE_BOT_CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{MINT_STEP}{step}{MERGE_GATE_ENV}"
     path = write_workflow(tmp_path, merge_gate_document(steps), name="merge-gate.yml")
     problems = validate_workflow_file(path)
-    assert any("merge-gate requires env HEAD_SHA" in problem for problem in problems)
+    assert any("carries rejected arguments" in problem for problem in problems)
 
 
 def test_merge_gate_workflow_requires_labeled_trigger_only(tmp_path: Path) -> None:
