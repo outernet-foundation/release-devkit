@@ -34,6 +34,7 @@ def update_pr_draft(
     publish_config = load_config(config)
     resolved_run_id = str(run_id)
     manifest = pull_digest_manifest(publish_config.builds_registry, resolved_run_id, actor, settings.github_token)
+
     if not any(app.builds for app in publish_config.apps.values()):
         return
 

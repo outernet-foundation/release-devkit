@@ -39,7 +39,7 @@ def main(
     publish_config = load_config(config)
     matched_run_id, _ = matched_ci_run(repository, sha, publish_config.ci_workflow)
     manifest = pull_digest_manifest(publish_config.builds_registry, matched_run_id, actor, settings.github_token)
-    packages = publish_config.packages
+
     tags = GitTags()
 
     with ci_step("Compute publish plan"):
@@ -49,11 +49,11 @@ def main(
         print("Nothing to publish")
         return
 
-    if packages:
-        publish_packages(packages, release_plan, settings.nuget_api_key, StableStrategy(), workspace)
+    if publish_config.packages:
+        publish_packages(publish_config.packages, release_plan, settings.nuget_api_key, StableStrategy(), workspace)
 
     with ci_step("Create version tags"):
-        for name in packages:
+        for name in publish_config.packages:
             plan = release_plan.plans[name]
             if plan.publish:
                 tag = f"{name}-v{plan.version}"

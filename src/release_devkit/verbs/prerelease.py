@@ -42,9 +42,9 @@ def main(
     settings = Settings.model_validate({})
     publish_config = load_config(config)
     matched_run_id, html_url = matched_ci_run(repository, sha, publish_config.ci_workflow)
+    manifest = pull_digest_manifest(publish_config.builds_registry, matched_run_id, actor, settings.github_token)
 
     new_image_manifest: dict[str, DigestEntry] = {}
-    manifest = pull_digest_manifest(publish_config.builds_registry, matched_run_id, actor, settings.github_token)
     if manifest is not None:
         existing_digests: set[str] = set()
         if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {repository}"):
@@ -79,7 +79,9 @@ def main(
 
     published: list[tuple[str, str, str]] = []
     if release_plan.publishing:
-        published = publish_packages(packages, release_plan, settings.nuget_api_key, DevStrategy(matched_run_id), workspace)
+        published = publish_packages(
+            packages, release_plan, settings.nuget_api_key, DevStrategy(matched_run_id), workspace
+        )
 
         if published:
             recap = "\n".join([
