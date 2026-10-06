@@ -8,7 +8,7 @@ import typer
 from bashrun.bash import bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 
-from release_devkit.config import DEFAULT_CONFIG_PATH, AppConfig, Settings, load_config, write_step_summary
+from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
 from release_devkit.builds import (
     DigestEntry,
     builds_registry_of,
@@ -22,7 +22,7 @@ from release_devkit.drafts import (
 )
 from release_devkit.plan import compute_release_plan, setup_publishing_environment
 from release_devkit.publishing import DevStrategy, publish_packages
-from release_devkit.registries import DEV_VERSION_FORMATS, registry_url
+from release_devkit.registries import registry_url
 from release_devkit.rendering import AssetLink, DraftSection, PackageRow, RegistryLink, render_draft_section
 from release_devkit.tags import GitTags
 
@@ -53,34 +53,15 @@ def main(
     with ci_step("Compute dev publish plan"):
         release_plan = compute_release_plan(publish_config, tags)
 
-        summary_lines = [
-            "### Dev Publish Plan",
-            "| Package | Publish | Versions |",
-            "|---|---|---|",
-        ]
-        for name, package in packages.items():
-            plan = release_plan.plans[name]
-            if not plan.publish:
-                summary_lines.append(f"| {plan.name} | False | - |")
-                continue
-            versions = ", ".join(
-                f"{registry_name}: {identity} @ {DEV_VERSION_FORMATS[registry_name](plan.version, run_id)}"
-                for registry_name, identity in package.registries.items()
+        changed_apps = {
+            name: app
+            for name, app in publish_config.apps.items()
+            if app.builds is not None
+            and tags.has_changes_since(
+                f"{name}-v{v}" if (v := tags.latest_version(f"{name}-v")) else None,
+                app.path,
             )
-            summary_lines.append(f"| {plan.name} | True | {versions} |")
-        summary = "\n".join(summary_lines)
-
-        print(summary)
-        write_step_summary(step_summary, summary)
-
-        changed_apps: dict[str, AppConfig] = {}
-        for name, app in publish_config.apps.items():
-            if app.builds is None:
-                continue
-            last_version = tags.latest_version(f"{name}-v")
-            tag = f"{name}-v{last_version}" if last_version else None
-            if tags.has_changes_since(tag, app.path):
-                changed_apps[name] = app
+        }
 
         has_package_changes = release_plan.publishing
         has_app_changes = bool(changed_apps)
