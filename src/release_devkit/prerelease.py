@@ -8,10 +8,9 @@ import typer
 from bashrun.bash import bash_check, bash_output
 from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
-from ci_devkit.setup import configure_git, free_disk_space, install_dotnet, install_node
 
-from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, select_packages
-from .create_release import (
+from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config
+from .builds import (
     DigestEntry,
     builds_registry_of,
     matched_ci_run_number,
@@ -28,7 +27,7 @@ from .draft_releases import (
     upload_draft_assets,
 )
 from .outputs import append_line
-from .plan import TagSource, compute_release_plan, render_dev_summary
+from .plan import compute_release_plan, setup_publishing_environment
 from .registries import DEV_VERSION_FORMATS, NPM_DEV_DIST_TAG, PublishRequest, build_registries, registry_url
 from .tags import GitTags
 
@@ -55,8 +54,6 @@ def main(
     run_id: Annotated[
         str, typer.Option(help="CI run id baked into every dev version (defaults to the ambient CI run id)")
     ] = "",
-    only: Annotated[list[str] | None, typer.Option(help="Restrict to named packages (repeatable).")] = None,
-    exclude: Annotated[list[str] | None, typer.Option(help="Skip named packages (repeatable).")] = None,
 ) -> None:
     settings = Settings.model_validate({})
     resolved_run_id = run_id or settings.github_run_id
@@ -64,7 +61,7 @@ def main(
         raise SystemExit("dev run id must be all digits: pass --run-id or run inside CI")
 
     publish_config = load_config(config)
-    packages = select_packages(publish_config.packages, only or [], exclude or [])
+    packages = publish_config.packages
     tags = GitTags()
 
     run_number = ""
@@ -72,17 +69,37 @@ def main(
     new_image_manifest: dict[str, DigestEntry] = {}
 
     with ci_step("Compute dev publish plan"):
-        release_plan = compute_release_plan(publish_config, packages, tags)
+        release_plan = compute_release_plan(publish_config, tags)
 
-        summary = render_dev_summary(packages, release_plan.plans, resolved_run_id)
+        summary_lines = [
+            "### Dev Publish Plan",
+            "| Package | Publish | Versions |",
+            "|---|---|---|",
+        ]
+        for name, package in packages.items():
+            plan = release_plan.plans[name]
+            if not plan.publish:
+                summary_lines.append(f"| {plan.name} | False | - |")
+                continue
+            versions = ", ".join(
+                f"{registry_name}: {identity} @ {DEV_VERSION_FORMATS[registry_name](plan.version, resolved_run_id)}"
+                for registry_name, identity in package.registries.items()
+            )
+            summary_lines.append(f"| {plan.name} | True | {versions} |")
+        summary = "\n".join(summary_lines)
+
         print(summary)
         append_line(settings.github_step_summary, summary)
 
-        changed_apps = {
-            name: app
-            for name, app in publish_config.apps.items()
-            if app.builds is not None and app_has_changes(tags, name, app)
-        }
+        changed_apps: dict[str, AppConfig] = {}
+        for name, app in publish_config.apps.items():
+            if app.builds is None:
+                continue
+            last_version = tags.latest_version(f"{name}-v")
+            tag = f"{name}-v{last_version}" if last_version else None
+            if tags.has_changes_since(tag, app.path):
+                changed_apps[name] = app
+
         has_package_changes = release_plan.publishing
         has_app_changes = bool(changed_apps)
 
@@ -94,7 +111,12 @@ def main(
             integrate_run = (run_number, html_url)
             manifest = pull_digest_manifest(builds_registry, run_number, settings.github_actor, settings.github_token)
             if manifest is not None:
-                existing_digests = existing_dev_builds_digests(settings.github_repository)
+                existing_digests: set[str] = set()
+                if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {settings.github_repository}"):
+                    draft_body = bash_output(
+                        f"gh release view {DEV_DRAFT_TAG} --repo {settings.github_repository} --json body --jq .body"
+                    )
+                    existing_digests = set(re.findall(r"sha256:[a-f0-9]{64}", draft_body))
                 new_image_manifest = {
                     target: entry for target, entry in manifest.items() if entry.digest not in existing_digests
                 }
@@ -105,16 +127,12 @@ def main(
             return
 
         if dry_run:
-            print("Dry run — skipping publish")
+            print("Dry run \u2014 skipping publish")
             return
 
     published: list[tuple[str, str, str]] = []
     if has_package_changes:
-        with ci_step("Setup"):
-            configure_git(settings.github_workspace)
-            free_disk_space()
-            install_dotnet("8.0")
-            install_node("24", "https://registry.npmjs.org")
+        setup_publishing_environment(release_plan, packages, settings.github_workspace)
 
         registries = build_registries(settings.nuget_api_key)
         for name, package in packages.items():
@@ -159,7 +177,10 @@ def main(
         ensure_draft_release(DEV_DRAFT_TAG, settings.github_repository, settings.github_sha)
         upload_draft_assets(DEV_DRAFT_TAG, settings.github_repository, staged_assets)
 
-    pr_info = parse_merge_pr(settings.github_sha)
+    merge_message = bash_output(f"git log -1 --format=%B {settings.github_sha}").strip()
+    merge_match = _MERGE_PR_PATTERN.search(merge_message)
+    pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
+
     section = build_prerelease_section(
         published,
         staged_assets,
@@ -170,22 +191,8 @@ def main(
         new_image_manifest,
     )
     anchor = f"run-{resolved_run_id}"
-    append_draft_section(DEV_DRAFT_TAG, settings.github_repository, settings.github_sha, anchor, section)
+    append_draft_section(DEV_DRAFT_TAG, settings.github_repository, anchor, section)
     emit_draft_backlink(settings.github_step_summary, DEV_DRAFT_TAG, settings.github_repository, anchor)
-
-
-def app_has_changes(tags: TagSource, app_name: str, app: AppConfig) -> bool:
-    last_version = tags.latest_version(f"{app_name}-v")
-    tag = f"{app_name}-v{last_version}" if last_version else None
-    return tags.has_changes_since(tag, app.path)
-
-
-def parse_merge_pr(sha: str) -> tuple[int, str] | None:
-    message = bash_output(f"git log -1 --format=%B {sha}").strip()
-    match = _MERGE_PR_PATTERN.search(message)
-    if match is None:
-        return None
-    return int(match.group(1)), match.group(2)
 
 
 def build_prerelease_section(
@@ -207,7 +214,7 @@ def build_prerelease_section(
         pr_number, pr_title = pr_info
         pr_url = f"https://github.com/{repository}/pull/{pr_number}"
         heading_parts.append(f"[PR #{pr_number}: {pr_title}]({pr_url})")
-    lines = [f"### {' — '.join(heading_parts)}"]
+    lines = [f"### {' \u2014 '.join(heading_parts)}"]
 
     if published:
         lines.extend(["", "| Package | Version | Registry |", "|---|---|---|"])
@@ -230,10 +237,3 @@ def build_prerelease_section(
         lines.extend(render_images_table(image_manifest))
 
     return "\n".join(lines)
-
-
-def existing_dev_builds_digests(repository: str) -> set[str]:
-    if not bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {repository}"):
-        return set()
-    body = bash_output(f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json body --jq .body")
-    return set(re.findall(r"sha256:[a-f0-9]{64}", body))

@@ -4,7 +4,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from release_devkit.config import PackageConfig, load_config, select_packages
+from release_devkit.config import load_config
 
 
 def write_config(tmp_path: Path, payload: dict[str, object]) -> Path:
@@ -132,54 +132,6 @@ def test_load_config_rejects_malformed_major_minor(tmp_path: Path):
 
         with pytest.raises(ValidationError, match="major_minor"):
             load_config(write_config(tmp_path, payload))
-
-
-def package_names(packages: dict[str, PackageConfig]) -> list[str]:
-    return list(packages)
-
-
-def loaded_packages(tmp_path: Path) -> dict[str, PackageConfig]:
-    return load_config(write_config(tmp_path, base_payload())).packages
-
-
-def test_select_packages_only_preserves_config_order(tmp_path: Path):
-    packages = loaded_packages(tmp_path)
-
-    selected = select_packages(packages, ["placeframe-arfoundation", "placeframe-api-client"], [])
-
-    assert package_names(selected) == ["placeframe-api-client", "placeframe-arfoundation"]
-
-
-def test_select_packages_exclude(tmp_path: Path):
-    packages = loaded_packages(tmp_path)
-
-    selected = select_packages(packages, [], ["placeframe-core"])
-
-    assert package_names(selected) == ["placeframe-api-client", "placeframe-arfoundation"]
-
-
-def test_select_packages_unfiltered_returns_all(tmp_path: Path):
-    packages = loaded_packages(tmp_path)
-
-    assert package_names(select_packages(packages, [], [])) == [
-        "placeframe-api-client",
-        "placeframe-core",
-        "placeframe-arfoundation",
-    ]
-
-
-def test_select_packages_rejects_unknown_name(tmp_path: Path):
-    packages = loaded_packages(tmp_path)
-
-    with pytest.raises(SystemExit, match="Unknown package 'nope'"):
-        select_packages(packages, ["nope"], [])
-
-
-def test_select_packages_rejects_only_with_exclude(tmp_path: Path):
-    packages = loaded_packages(tmp_path)
-
-    with pytest.raises(SystemExit, match="mutually exclusive"):
-        select_packages(packages, ["placeframe-core"], ["placeframe-core"])
 
 
 REPO_CONFIG = Path(__file__).resolve().parent.parent / "release-devkit.yaml"

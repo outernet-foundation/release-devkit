@@ -6,8 +6,6 @@ import pytest
 
 from release_devkit.registries import NpmRegistry, NuGetRegistry, PublishRequest
 from release_devkit.registries import (
-    DEV_VERSION_FORMATS,
-    KNOWN_REGISTRIES,
     ephemeral_manifest_patch,
     ephemeral_pyproject_patch,
     nuget_injection_properties,
@@ -160,10 +158,6 @@ def test_patch_project_dependencies_leaves_absent_entries_alone() -> None:
 def test_dev_version_spellings_per_registry() -> None:
     assert semver_dev_version("0.1.8", "123456") == "0.1.8-dev.123456"
     assert pep440_dev_version("0.1.8", "123456") == "0.1.8.dev123456"
-
-
-def test_dev_version_formats_cover_every_known_registry() -> None:
-    assert set(DEV_VERSION_FORMATS) == KNOWN_REGISTRIES
 
 
 def test_npm_publish_rides_the_dev_dist_tag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

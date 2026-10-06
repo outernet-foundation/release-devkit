@@ -12,7 +12,7 @@ from ci_devkit.ci_step import ci_step
 from pydantic_settings import BaseSettings
 
 from .config import DEFAULT_CONFIG_PATH, BuildArtifactConfig, load_config
-from .create_release import (
+from .builds import (
     DigestEntry,
     builds_registry_of,
     pull_build_assets,
@@ -61,7 +61,7 @@ def update_pr_draft(
     section = build_draft_section(
         settings.github_repository, tag, resolved_run_number, run_url, pr_number, staged, manifest or {}
     )
-    append_draft_section(tag, settings.github_repository, settings.github_sha, f"run-{resolved_run_number}", section)
+    append_draft_section(tag, settings.github_repository, f"run-{resolved_run_number}", section)
     emit_draft_summary(settings.github_step_summary, tag, settings.github_repository, staged)
 
 
@@ -141,8 +141,7 @@ def delete_draft_release(tag: str, repository: str) -> None:
         print(f"  Draft release {tag} deleted")
 
 
-def append_draft_section(tag: str, repository: str, sha: str, anchor: str, section: str) -> None:
-    ensure_draft_release(tag, repository, sha)
+def append_draft_section(tag: str, repository: str, anchor: str, section: str) -> None:
     body = bash_output(f"gh release view {tag} --repo {repository} --json body --jq .body")
     updated = replace_or_prepend_section(body, anchor, section.strip())
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:

@@ -2,10 +2,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from ci_devkit.ci_step import ci_step
+from ci_devkit.setup import configure_git, install_dotnet, install_node
+
 from .config import PackageConfig, PublishConfig
 from .tags import parse_major_minor, parse_version
 from .manifests import DependencyEdge, resolve_edges
-from .registries import DEV_VERSION_FORMATS
 
 UNCHANGED_FALLBACK_VERSION = "0.0.0"
 
@@ -44,11 +46,10 @@ class ReleasePlan:
         return bool(self.publishing) or bool(self.app_versions)
 
 
-def compute_release_plan(
-    publish_config: PublishConfig, packages: dict[str, PackageConfig], tags: TagSource
-) -> ReleasePlan:
-    edges = resolve_edges(publish_config.packages)
-    plans = compute_plan(publish_config.packages, tags, edges)
+def compute_release_plan(publish_config: PublishConfig, tags: TagSource) -> ReleasePlan:
+    packages = publish_config.packages
+    edges = resolve_edges(packages)
+    plans = compute_plan(packages, tags, edges)
     publishing = {name for name in packages if plans[name].publish}
     resolved_versions = {
         name: resolve_dependency_versions(edges[name], plans, publishing) for name in packages if name in publishing
@@ -74,6 +75,20 @@ def compute_release_plan(
         app_last_versions=app_last_versions,
         app_versions=app_versions,
     )
+
+
+def publishing_registries(release_plan: ReleasePlan, packages: dict[str, PackageConfig]) -> set[str]:
+    return {registry_name for name in release_plan.publishing for registry_name in packages[name].registries}
+
+
+def setup_publishing_environment(release_plan: ReleasePlan, packages: dict[str, PackageConfig], workspace: str) -> None:
+    with ci_step("Setup"):
+        configure_git(workspace)
+        registries_to_publish = publishing_registries(release_plan, packages)
+        if "nuget" in registries_to_publish:
+            install_dotnet("8.0")
+        if "npm" in registries_to_publish:
+            install_node("24", "https://registry.npmjs.org")
 
 
 def compute_plan(
@@ -145,41 +160,18 @@ def next_version(major_minor: str, last_in_line: str | None, last_overall: str |
     return f"{major}.{minor}.{patch + 1}"
 
 
-def render_summary(plans: dict[str, PackagePlan]) -> str:
+def render_plan_summary(release_plan: ReleasePlan) -> str:
     lines = [
         "### Publish Plan",
         "| Package | Publish | Version |",
         "|---|---|---|",
     ]
-    lines.extend(f"| {plan.name} | {plan.publish} | {plan.version} |" for plan in plans.values())
-    return "\n".join(lines)
-
-
-def render_plan_summary(release_plan: ReleasePlan) -> str:
-    lines = [render_summary(release_plan.plans), "", "### App Versions"]
+    lines.extend(f"| {plan.name} | {plan.publish} | {plan.version} |" for plan in release_plan.plans.values())
+    lines.extend(["", "### App Versions"])
     for app_name, last_version in release_plan.app_last_versions.items():
         new_version = release_plan.app_versions.get(app_name)
         if new_version is not None:
             lines.append(f"- {app_name}: {last_version or '(none)'} -> {new_version}")
         else:
             lines.append(f"- {app_name}: {last_version or '0.0.0'} (unchanged)")
-    return "\n".join(lines)
-
-
-def render_dev_summary(packages: dict[str, PackageConfig], plans: dict[str, PackagePlan], run_id: str) -> str:
-    lines = [
-        "### Dev Publish Plan",
-        "| Package | Publish | Versions |",
-        "|---|---|---|",
-    ]
-    for name, package in packages.items():
-        plan = plans[name]
-        if not plan.publish:
-            lines.append(f"| {plan.name} | False | - |")
-            continue
-        versions = ", ".join(
-            f"{registry_name}: {identity} @ {DEV_VERSION_FORMATS[registry_name](plan.version, run_id)}"
-            for registry_name, identity in package.registries.items()
-        )
-        lines.append(f"| {plan.name} | True | {versions} |")
     return "\n".join(lines)

@@ -644,7 +644,7 @@ def run_actionlint() -> None:
 
 
 def ensure_actionlint() -> Path:
-    cache_directory = actionlint_cache_dir()
+    cache_directory = Path.home() / ".cache" / "release-devkit" / f"actionlint-v{ACTIONLINT_VERSION}"
     binary = cache_directory / "actionlint"
     if binary.is_file():
         return binary
@@ -668,10 +668,6 @@ def ensure_actionlint() -> Path:
     if not binary.is_file():
         raise SystemExit(f"actionlint binary missing after extracting {tarball_name}")
     return binary
-
-
-def actionlint_cache_dir() -> Path:
-    return Path.home() / ".cache" / "release-devkit" / f"actionlint-v{ACTIONLINT_VERSION}"
 
 
 def expected_checksum(checksums: str, tarball_name: str) -> str:

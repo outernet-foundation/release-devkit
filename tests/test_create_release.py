@@ -4,14 +4,12 @@ from pathlib import Path
 import pytest
 import typer
 
-from release_devkit import create_release
+from release_devkit import builds
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PublishConfig
-from release_devkit.create_release import (
+from release_devkit.builds import (
     DigestEntry,
     builds_registry_of,
-    ghcr_package_url,
     matched_ci_run_number,
-    pick_tree_tag,
     pull_digest_manifest,
     render_images_table,
 )
@@ -37,7 +35,7 @@ class FixedReturn:
 
 def patch_recorder(monkeypatch: pytest.MonkeyPatch, outputs: list[str]) -> SequentialOutputs:
     recorder = SequentialOutputs(outputs)
-    monkeypatch.setattr("release_devkit.create_release.bash_output", recorder)
+    monkeypatch.setattr("release_devkit.builds.bash_output", recorder)
     return recorder
 
 
@@ -102,7 +100,7 @@ def test_pull_digest_manifest_returns_none_when_no_registry() -> None:
 
 
 def test_pull_digest_manifest_returns_none_when_build_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(create_release, "build_exists", FixedReturn(False))
+    monkeypatch.setattr(builds, "build_exists", FixedReturn(False))
 
     assert pull_digest_manifest("ghcr.io/owner/repo/builds", "42", "", "") is None
 
@@ -121,8 +119,8 @@ def test_pull_digest_manifest_parses_manifest(monkeypatch: pytest.MonkeyPatch) -
     ) -> None:
         (target_directory / "images-digests.json").write_text(json.dumps(manifest_data), encoding="utf-8")
 
-    monkeypatch.setattr(create_release, "build_exists", FixedReturn(True))
-    monkeypatch.setattr(create_release, "pull_build", fake_pull_build)
+    monkeypatch.setattr(builds, "build_exists", FixedReturn(True))
+    monkeypatch.setattr(builds, "pull_build", fake_pull_build)
 
     result = pull_digest_manifest("ghcr.io/owner/repo/builds", "42", "", "")
 
@@ -151,26 +149,3 @@ def test_render_images_table_links_tree_tag_to_ghcr_url() -> None:
         for line in lines
     )
     assert any("`sha256:abc123`" in line for line in lines)
-
-
-def test_ghcr_package_url_encodes_nested_path() -> None:
-    assert (
-        ghcr_package_url("ghcr.io/outernet-foundation/placeframe-capture-tool/zed-capture")
-        == "https://github.com/orgs/outernet-foundation/packages/container/placeframe-capture-tool%2Fzed-capture"
-    )
-
-
-def test_ghcr_package_url_returns_none_for_non_ghcr() -> None:
-    assert ghcr_package_url("docker.io/library/nginx") is None
-
-
-def test_pick_tree_tag_prefers_tree_prefixed() -> None:
-    assert pick_tree_tag(["latest", "tree-abc"]) == "tree-abc"
-
-
-def test_pick_tree_tag_falls_back_to_first() -> None:
-    assert pick_tree_tag(["latest"]) == "latest"
-
-
-def test_pick_tree_tag_returns_empty_for_no_tags() -> None:
-    assert pick_tree_tag([]) == ""

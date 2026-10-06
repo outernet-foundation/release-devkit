@@ -23,10 +23,13 @@ class GitTags:
         return None
 
     def has_changes_since(self, tag: str | None, path: Path) -> bool:
-        return has_changes_since_tag(tag, path)
+        if tag is None:
+            return True
+        return not bash_check(f"git diff --quiet {tag} HEAD -- {path}")
 
     def create_and_push_tag(self, tag: str) -> None:
-        create_and_push_tag(tag)
+        bash(f"git tag {tag}")
+        bash(f"git push origin {tag}")
 
 
 def parse_version(version: str) -> tuple[int, int, int]:
@@ -44,14 +47,3 @@ def list_tag_versions(prefix: str) -> list[str]:
     if not output:
         return []
     return [tag[len(prefix) :] for tag in output.splitlines()]
-
-
-def has_changes_since_tag(tag: str | None, path: Path) -> bool:
-    if tag is None:
-        return True
-    return not bash_check(f"git diff --quiet {tag} HEAD -- {path}")
-
-
-def create_and_push_tag(tag: str) -> None:
-    bash(f"git tag {tag}")
-    bash(f"git push origin {tag}")

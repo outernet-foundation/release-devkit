@@ -7,13 +7,10 @@ import pytest
 
 from release_devkit import prerelease
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PackageConfig, PublishConfig
-from release_devkit.create_release import DigestEntry
+from release_devkit.builds import DigestEntry
 from release_devkit.plan import PackagePlan, ReleasePlan
 from release_devkit.prerelease import (
-    app_has_changes,
     build_prerelease_section,
-    existing_dev_builds_digests,
-    parse_merge_pr,
 )
 
 
@@ -116,10 +113,7 @@ def run_prerelease(
     monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
     monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
     monkeypatch.setattr(prerelease, "append_line", noop)
-    monkeypatch.setattr(prerelease, "configure_git", noop)
-    monkeypatch.setattr(prerelease, "free_disk_space", noop)
-    monkeypatch.setattr(prerelease, "install_dotnet", noop)
-    monkeypatch.setattr(prerelease, "install_node", noop)
+    monkeypatch.setattr(prerelease, "setup_publishing_environment", noop)
     build_registries = CallRecorder({})
     monkeypatch.setattr(prerelease, "build_registries", build_registries)
     monkeypatch.setattr(
@@ -132,7 +126,7 @@ def run_prerelease(
     ensure_draft = CallRecorder()
     monkeypatch.setattr(prerelease, "ensure_draft_release", ensure_draft)
     monkeypatch.setattr(prerelease, "upload_draft_assets", CallRecorder())
-    monkeypatch.setattr(prerelease, "parse_merge_pr", FixedReturn(None))
+    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Not a merge commit\n"))
     append_section = CallRecorder()
     monkeypatch.setattr(prerelease, "append_draft_section", append_section)
     monkeypatch.setattr(prerelease, "emit_draft_backlink", CallRecorder())
@@ -140,24 +134,6 @@ def run_prerelease(
     prerelease.main()
 
     return build_registries, pull_assets, ensure_draft, append_section
-
-
-def test_app_has_changes_returns_true_when_never_released() -> None:
-    tags = FakeTags(versions={"myapp": None}, changed=set())
-
-    assert app_has_changes(tags, "myapp", make_app()) is True
-
-
-def test_app_has_changes_returns_true_when_source_changed() -> None:
-    tags = FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"})
-
-    assert app_has_changes(tags, "myapp", make_app()) is True
-
-
-def test_app_has_changes_returns_false_when_source_unchanged() -> None:
-    tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
-
-    assert app_has_changes(tags, "myapp", make_app()) is False
 
 
 def test_nothing_changed_returns_without_publishing_or_drafting(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -270,22 +246,6 @@ def test_build_prerelease_section_renders_images_table() -> None:
     assert "`sha256:abc`" in section
 
 
-def test_existing_dev_builds_digests_extracts_digests(monkeypatch: pytest.MonkeyPatch) -> None:
-    digest_a = "sha256:" + "a" * 64
-    digest_b = "sha256:" + "b" * 64
-    body = f"### Run #1\n\n| x | `{digest_a}` |\n\n`{digest_b}`"
-    monkeypatch.setattr(prerelease, "bash_check", FixedReturn(True))
-    monkeypatch.setattr(prerelease, "bash_output", FixedReturn(body))
-
-    assert existing_dev_builds_digests("owner/repo") == {digest_a, digest_b}
-
-
-def test_existing_dev_builds_digests_returns_empty_when_no_draft(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(prerelease, "bash_check", FixedReturn(False))
-
-    assert existing_dev_builds_digests("owner/repo") == set()
-
-
 def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
@@ -307,16 +267,22 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
         prerelease, "matched_ci_run_number", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
     )
     monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(manifest))
-    monkeypatch.setattr(prerelease, "existing_dev_builds_digests", FixedReturn({digest_existing}))
+    monkeypatch.setattr(prerelease, "bash_check", FixedReturn(True))
+
+    def mock_bash_output(command: str) -> str:
+        if "git log" in command:
+            return "Not a merge commit\n"
+        return f"`{digest_existing}`"
+
+    monkeypatch.setattr(prerelease, "bash_output", mock_bash_output)
     pull_assets = CallRecorder([])
     monkeypatch.setattr(prerelease, "pull_build_assets", pull_assets)
     monkeypatch.setattr(prerelease, "stage_draft_assets", CallRecorder([]))
     monkeypatch.setattr(prerelease, "ensure_draft_release", CallRecorder())
     monkeypatch.setattr(prerelease, "upload_draft_assets", CallRecorder())
-    monkeypatch.setattr(prerelease, "parse_merge_pr", FixedReturn(None))
     sections: list[str] = []
 
-    def capture_section(tag: str, repository: str, sha: str, anchor: str, section: str) -> None:
+    def capture_section(tag: str, repository: str, anchor: str, section: str) -> None:
         sections.append(section)
 
     monkeypatch.setattr(prerelease, "append_draft_section", capture_section)
@@ -328,19 +294,3 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
     assert len(sections) == 1
     assert digest_new in sections[0]
     assert digest_existing not in sections[0]
-
-
-def test_parse_merge_pr_extracts_pr_number_and_title(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Merge PR #42: Add feature X\n"))
-
-    result = parse_merge_pr("abc123")
-
-    assert result == (42, "Add feature X")
-
-
-def test_parse_merge_pr_returns_none_for_non_merge_commit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Just a regular commit\n"))
-
-    result = parse_merge_pr("abc123")
-
-    assert result is None

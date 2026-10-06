@@ -8,7 +8,7 @@ import pytest
 
 from release_devkit import draft_releases
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PublishConfig
-from release_devkit.create_release import DigestEntry, pull_build_assets
+from release_devkit.builds import DigestEntry, pull_build_assets
 from release_devkit.draft_releases import (
     append_draft_section,
     build_draft_section,
@@ -293,7 +293,7 @@ def test_append_draft_section_writes_notes_file(monkeypatch: pytest.MonkeyPatch)
     bash_log = patch_bash(monkeypatch, check_returns=False)
     monkeypatch.setattr(draft_releases, "bash_output", FixedReturn(""))
 
-    append_draft_section("dev-builds", "owner/repo", "abc123", "run-42", "### Heading")
+    append_draft_section("dev-builds", "owner/repo", "run-42", "### Heading")
 
     assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
 

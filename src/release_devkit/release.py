@@ -6,13 +6,12 @@ from typing import Annotated
 import typer
 from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
-from ci_devkit.setup import configure_git, free_disk_space, install_dotnet, install_node
 
-from .config import DEFAULT_CONFIG_PATH, load_config, select_packages
+from .config import DEFAULT_CONFIG_PATH, load_config
 from .create_release import run_create_release
 from .draft_releases import DEV_DRAFT_TAG, delete_draft_release
 from .outputs import append_line
-from .plan import compute_release_plan, render_plan_summary
+from .plan import compute_release_plan, render_plan_summary, setup_publishing_environment
 from .registries import PublishRequest, build_registries
 from .tags import GitTags
 
@@ -29,16 +28,14 @@ class Settings(BaseSettings):
 @app.command()
 def main(
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
-    only: Annotated[list[str] | None, typer.Option(help="Restrict to named packages (repeatable).")] = None,
-    exclude: Annotated[list[str] | None, typer.Option(help="Skip named packages (repeatable).")] = None,
 ) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
-    packages = select_packages(publish_config.packages, only or [], exclude or [])
+    packages = publish_config.packages
     tags = GitTags()
 
     with ci_step("Compute publish plan"):
-        release_plan = compute_release_plan(publish_config, packages, tags)
+        release_plan = compute_release_plan(publish_config, tags)
         summary = render_plan_summary(release_plan)
         print(summary)
         append_line(settings.github_step_summary, summary)
@@ -47,12 +44,7 @@ def main(
         print("Nothing to publish")
         return
 
-    with ci_step("Setup"):
-        configure_git(settings.github_workspace)
-        if packages:
-            free_disk_space()
-            install_dotnet("8.0")
-            install_node("24", "https://registry.npmjs.org")
+    setup_publishing_environment(release_plan, packages, settings.github_workspace)
 
     if packages:
         registries = build_registries(settings.nuget_api_key)

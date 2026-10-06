@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from release_devkit.tags import create_and_push_tag, has_changes_since_tag, list_tag_versions
+from release_devkit.tags import GitTags, list_tag_versions
 
 
 class CommandRecorder:
@@ -36,24 +36,24 @@ def test_list_tag_versions_empty_when_no_tags(monkeypatch: pytest.MonkeyPatch) -
     assert list_tag_versions("pkg-v") == []
 
 
-def test_has_changes_since_tag_without_tag_is_true() -> None:
-    assert has_changes_since_tag(None, Path("pkg")) is True
+def test_has_changes_since_without_tag_is_true() -> None:
+    assert GitTags().has_changes_since(None, Path("pkg")) is True
 
 
 def always_clean_diff(_command: str) -> bool:
     return False
 
 
-def test_has_changes_since_tag_negates_quiet_diff(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_has_changes_since_negates_quiet_diff(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("release_devkit.tags.bash_check", always_clean_diff)
 
-    assert has_changes_since_tag("pkg-v1.0.0", Path("pkg")) is True
+    assert GitTags().has_changes_since("pkg-v1.0.0", Path("pkg")) is True
 
 
 def test_create_and_push_tag_tags_and_pushes(monkeypatch: pytest.MonkeyPatch) -> None:
     recorder = CommandRecorder()
     monkeypatch.setattr("release_devkit.tags.bash", recorder)
 
-    create_and_push_tag("pkg-v1.0.1")
+    GitTags().create_and_push_tag("pkg-v1.0.1")
 
     assert recorder.commands == ["git tag pkg-v1.0.1", "git push origin pkg-v1.0.1"]

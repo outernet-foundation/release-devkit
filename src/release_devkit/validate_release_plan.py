@@ -27,7 +27,7 @@ def main(
     publish_config = load_config(config)
 
     with ci_step("Validate publish plan"):
-        release_plan = compute_release_plan(publish_config, publish_config.packages, GitTags())
+        release_plan = compute_release_plan(publish_config, GitTags())
         summary = render_plan_summary(release_plan)
         print(summary)
         append_line(settings.github_step_summary, summary)
