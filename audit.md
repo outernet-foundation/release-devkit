@@ -10,9 +10,9 @@
 - [x] Delete 3 meta-tests (`test_fake_tag_source_satisfies_protocol`, `test_package_plan_dataclass_shape`, `test_dev_version_formats_cover_every_known_registry`) + 1 redundant `test_render_summary` (subsumed by `test_render_plan_summary`)
 - [x] Remove defensive double-call of `ensure_draft_release` inside `append_draft_section` (both callers already ensure)
 - [x] Remove unused `sha` parameter from `append_draft_section` signature + update all callers
-- [x] Extract `builds.py` from `verbs/create_release.py` — shared utilities (`DigestEntry`, `MatchedRun`, `matched_ci_run_number`, `builds_registry_of`, `pull_build_assets`, `pull_digest_manifest`, `render_images_table`) moved to `builds.py`; `verbs/create_release.py` is now a ~80-line pure verb; `verbs/prerelease.py` and `verbs/draft_releases.py` import from `builds` instead of `create_release`
+- [x] Extract `builds.py` from `verbs/create_release.py` — shared utilities (`DigestEntry`, `MatchedRun`, `matched_ci_run_number`, `builds_registry_of`, `pull_build_assets`, `pull_digest_manifest`, `render_images_table`) moved to `builds.py`; `verbs/create_release.py` is now a ~80-line pure verb; `verbs/prerelease.py` and `verbs/update_pr_draft.py` import from `builds` instead of `create_release`
 - [x] Inline single-call helpers — `pick_tree_tag` and `ghcr_package_url` inlined into `render_images_table` (builds.py); `select_artifact_file` inlined into `pull_build_assets` (builds.py); `app_has_changes`, `parse_merge_pr`, `existing_dev_builds_digests` inlined into `main` (verbs/prerelease.py); `render_dev_summary` inlined into `main` (verbs/prerelease.py, removed from plan.py). 13 dedicated tests deleted; integration tests cover the inlined logic.
-- [ ] **NEXT: Extract `drafts.py` from `verbs/draft_releases.py`** — same grab-bag smell as the original `create_release.py`. The file is a verb (`update-pr-draft-release`) that's also a shared library for 3 other verbs. `prerelease.py` imports 6 things, `release.py` imports 2, `merge_gate.py` imports 1. Extract the 8 shared functions + `DEV_DRAFT_TAG` into a top-level `drafts.py`: `ensure_draft_release`, `delete_draft_release`, `upload_draft_assets`, `append_draft_section`, `replace_or_prepend_section`, `_parse_sections`, `_join_sections`, `emit_draft_backlink`, `stage_draft_assets`. The verb file keeps `update_pr_app`, `Settings`, `PR_DRAFT_TAG_PREFIX`, `update_pr_draft`, `build_draft_section`, `emit_draft_summary` (last two are single-call within the verb). Verb becomes ~65 lines; `drafts.py` is ~110 lines.
+- [x] Extract `drafts.py` from `verbs/draft_releases.py` — same grab-bag smell as the original `create_release.py`. The file was a verb (`update-pr-draft-release`) that was also a shared library for 3 other verbs. `prerelease.py` imported 6 things, `release.py` imported 2, `merge_gate.py` imported 1. Extracted the 9 shared functions + `DEV_DRAFT_TAG` + `_ANCHOR_PATTERN` into top-level `drafts.py`: `stage_draft_assets`, `ensure_draft_release`, `upload_draft_assets`, `delete_draft_release`, `append_draft_section`, `replace_or_prepend_section`, `_parse_sections`, `_join_sections`, `emit_draft_backlink`. The verb file renamed `verbs/draft_releases.py` → `verbs/update_pr_draft.py`, keeps `update_pr_app`, `Settings`, `PR_DRAFT_TAG_PREFIX`, `update_pr_draft`, `build_draft_section`, `emit_draft_summary`. Verb is ~100 lines; `drafts.py` is ~95 lines.
 - [ ] Fold `outputs.py` into a shared module — `builds.py` now exists as the natural home
 - [ ] Shared `Settings` base class — judgement call on the right factoring
 - [ ] `conftest.py` for test helpers — test-only, lower stakes
@@ -43,35 +43,53 @@ The actual verb (`run_create_release`) was 1 of 11 things in the file. The impor
 
 **Fix applied:** Extracted the 6 shared utilities + `DigestEntry` + `MatchedRun` into `builds.py`. `verbs/create_release.py` is now a ~80-line pure verb; `builds.py` is a ~170-line focused asset/digest library that all three verbs import from cleanly.
 
-### 2. `outputs.py` — a 9-line file-per-function [SKIPPED — builds.py now exists as natural home]
+### 2. `verbs/draft_releases.py` is a shared library masquerading as a verb module — same smell [DONE]
+
+`verbs/draft_releases.py` (189 lines) exported **9 shared functions** + `DEV_DRAFT_TAG` consumed by 3 other verb modules:
+
+| Export | Imported by |
+|---|---|
+| `DEV_DRAFT_TAG` | `verbs/prerelease.py`, `verbs/release.py` |
+| `stage_draft_assets` | `verbs/prerelease.py` |
+| `ensure_draft_release` | `verbs/prerelease.py` |
+| `upload_draft_assets` | `verbs/prerelease.py` |
+| `append_draft_section` | `verbs/prerelease.py` |
+| `emit_draft_backlink` | `verbs/prerelease.py` |
+| `delete_draft_release` | `verbs/release.py`, `verbs/merge_gate.py` |
+
+The actual verb (`update_pr_draft`) was 1 of 14 things in the file. Same inverted-dependency smell as finding #1: `verbs/prerelease.py`, `verbs/release.py`, and `verbs/merge_gate.py` imported from a "verb" peer, not from a shared library.
+
+**Fix applied:** Extracted the 9 shared functions + `DEV_DRAFT_TAG` + `_ANCHOR_PATTERN` into top-level `drafts.py`. The verb file renamed `verbs/draft_releases.py` → `verbs/update_pr_draft.py`, keeping only `update_pr_app`, `Settings`, `PR_DRAFT_TAG_PREFIX`, `update_pr_draft`, `build_draft_section`, `emit_draft_summary`. `drafts.py` is ~95 lines; the verb is ~100 lines. All three consuming verbs now import from `..drafts`.
+
+### 3. `outputs.py` — a 9-line file-per-function [SKIPPED — builds.py now exists as natural home]
 
 One function (`append_line`), 4 lines of logic, 4 callers across 4 modules. This is a file that exists only to hold a single trivial helper. It adds an import and a file to the tree for zero structural benefit.
 
 **Fix:** Fold `append_line` into `builds.py` (or `config.py`, or a `ci_io.py`). Eliminates 1 file. `builds.py` now exists as the natural home.
 
-### 3. Setup block duplicated verbatim between `verbs/release.py` and `verbs/prerelease.py` [DONE]
+### 4. Setup block duplicated verbatim between `verbs/release.py` and `verbs/prerelease.py` [DONE]
 
 `verbs/release.py:48-54` and `verbs/prerelease.py:111-117` were character-identical setup blocks.
 
 **Fix applied:** Extracted `setup_publishing_environment(release_plan, packages, workspace)` into `plan.py`. Both verbs call it.
 
-### 4. Seven `Settings` classes with overlapping fields [SKIPPED — judgement call on factoring]
+### 5. Seven `Settings` classes with overlapping fields [SKIPPED — judgement call on factoring]
 
 Every verb file in `verbs/` defines its own `Settings(BaseSettings)`:
 
 | Field | Files that declare it |
 |---|---|
-| `github_repository` | release, prerelease, create_release, draft_releases, merge_gate (5) |
-| `github_sha` | prerelease, create_release, draft_releases (3) |
-| `github_actor` | prerelease, create_release, draft_releases (3) |
-| `github_token` | prerelease, create_release, draft_releases (3) |
-| `github_step_summary` | release, prerelease, draft_releases, validate_release_plan (4) |
+| `github_repository` | release, prerelease, create_release, update_pr_draft, merge_gate (5) |
+| `github_sha` | prerelease, create_release, update_pr_draft (3) |
+| `github_actor` | prerelease, create_release, update_pr_draft (3) |
+| `github_token` | prerelease, create_release, update_pr_draft (3) |
+| `github_step_summary` | release, prerelease, update_pr_draft, validate_release_plan (4) |
 | `github_workspace` | release, prerelease (2) |
 | `nuget_api_key` | release, prerelease (2) |
 
 That's ~40 lines of field declarations, many duplicated. A shared base `Settings` (or a single `Settings` with all CI env fields, where each verb reads what it needs) would eliminate the repetition. The per-verb approach means a new env var added to one verb doesn't appear in another's `Settings` — but the overlapping fields are all ambient CI env (`GITHUB_*`), not verb-specific.
 
-### 5. `GitTags` pass-through delegate methods create a dual layer [DONE]
+### 6. `GitTags` pass-through delegate methods create a dual layer [DONE]
 
 `tags.py` had both module-level functions AND a `GitTags` class whose methods delegated to them.
 
@@ -178,6 +196,7 @@ The `with ci_step("Compute dev publish plan"):` block wraps plan computation, su
 | Change | Status | Lines saved |
 |---|---|---|
 | Extract `builds.py` from `verbs/create_release.py` | **done** | ~0 net, but 252→~80 for create_release |
+| Extract `drafts.py` from `verbs/draft_releases.py` | **done** | ~0 net, but 189→~100 for verb, ~95 in `drafts.py` |
 | Fold `outputs.py` into a shared module | skipped | ~5 |
 | Inline `render_summary` into `render_plan_summary` | **done** | ~8 |
 | Inline `actionlint_cache_dir` into `ensure_actionlint` | **done** | ~3 |
