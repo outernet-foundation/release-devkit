@@ -7,7 +7,6 @@ from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from .config import PackageConfig, PublishConfig
 from .manifests import DependencyEdge, resolve_edges
-from .outputs import append_line
 from .tags import parse_major_minor, parse_version
 
 UNCHANGED_FALLBACK_VERSION = "0.0.0"
@@ -66,7 +65,9 @@ def compute_and_print_plan(config: PublishConfig, tags: TagSource, step_summary:
     summary = "\n".join(lines)
 
     print(summary)
-    append_line(step_summary, summary)
+    if step_summary:
+        with Path(step_summary).open("a", encoding="utf-8") as file:
+            file.write(summary + "\n")
     return release_plan
 
 

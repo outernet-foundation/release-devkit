@@ -110,7 +110,6 @@ def run_prerelease(
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
     monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
-    monkeypatch.setattr(prerelease, "append_line", noop)
     monkeypatch.setattr(prerelease, "setup_publishing_environment", noop)
     build_registries = CallRecorder({})
     monkeypatch.setattr(prerelease, "build_registries", build_registries)
@@ -204,7 +203,6 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
     monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
     monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
-    monkeypatch.setattr(prerelease, "append_line", noop)
     monkeypatch.setattr(
         prerelease, "matched_ci_run_number", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
     )

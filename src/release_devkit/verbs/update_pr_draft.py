@@ -12,7 +12,6 @@ from ..builds import (
     pull_digest_manifest,
     render_images_table,
 )
-from ..outputs import append_line
 from ..drafts import (
     append_draft_section,
     publish_draft_assets,
@@ -80,4 +79,6 @@ def update_pr_draft(
         summary_lines.append(f"- [{name}]({url})")
     summary = "\n".join(summary_lines)
     print(summary)
-    append_line(settings.github_step_summary, summary)
+    if settings.github_step_summary:
+        with Path(settings.github_step_summary).open("a", encoding="utf-8") as file:
+            file.write(summary + "\n")

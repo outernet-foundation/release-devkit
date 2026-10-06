@@ -22,7 +22,6 @@ from ..drafts import (
     append_draft_section,
     publish_draft_assets,
 )
-from ..outputs import append_line
 from ..plan import compute_release_plan, setup_publishing_environment
 from ..registries import DEV_VERSION_FORMATS, NPM_DEV_DIST_TAG, PublishRequest, build_registries, registry_url
 from ..tags import GitTags
@@ -85,7 +84,9 @@ def main(
         summary = "\n".join(summary_lines)
 
         print(summary)
-        append_line(settings.github_step_summary, summary)
+        if settings.github_step_summary:
+            with Path(settings.github_step_summary).open("a", encoding="utf-8") as file:
+                file.write(summary + "\n")
 
         changed_apps: dict[str, AppConfig] = {}
         for name, app in publish_config.apps.items():
@@ -163,7 +164,9 @@ def main(
             ])
             print(recap)
             print("Consume these by exact version pin - there is no discovery tooling by design")
-            append_line(settings.github_step_summary, recap)
+            if settings.github_step_summary:
+                with Path(settings.github_step_summary).open("a", encoding="utf-8") as file:
+                    file.write(recap + "\n")
 
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
@@ -223,4 +226,6 @@ def main(
     ).strip()
     backlink_text = f"### Draft release `{DEV_DRAFT_TAG}` updated\n- [Section `{anchor}`]({draft_url}#{anchor})"
     print(backlink_text)
-    append_line(settings.github_step_summary, backlink_text)
+    if settings.github_step_summary:
+        with Path(settings.github_step_summary).open("a", encoding="utf-8") as file:
+            file.write(backlink_text + "\n")
