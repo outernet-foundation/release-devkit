@@ -5,9 +5,9 @@ from typing import Protocol
 from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
-from .config import PackageConfig, PublishConfig, write_step_summary
-from .manifests import DependencyEdge, resolve_edges
-from .tags import parse_major_minor, parse_version
+from release_devkit.config import PackageConfig, PublishConfig, write_step_summary
+from release_devkit.manifests import DependencyEdge, resolve_edges
+from release_devkit.tags import parse_major_minor, parse_version
 
 UNCHANGED_FALLBACK_VERSION = "0.0.0"
 

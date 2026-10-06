@@ -2,9 +2,9 @@ from typing import Protocol
 
 from ci_devkit.ci_step import ci_step
 
-from .config import PackageConfig
-from .plan import PackagePlan, ReleasePlan, ResolvedDependency
-from .registries import (
+from release_devkit.config import PackageConfig
+from release_devkit.plan import PackagePlan, ReleasePlan, ResolvedDependency
+from release_devkit.registries import (
     DEV_VERSION_FORMATS,
     NPM_DEV_DIST_TAG,
     PublishRequest,

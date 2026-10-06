@@ -8,8 +8,8 @@ from tempfile import NamedTemporaryFile, mkdtemp
 from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 
-from .builds import pull_build_assets
-from .config import PublishConfig
+from release_devkit.builds import pull_build_assets
+from release_devkit.config import PublishConfig
 
 DEV_DRAFT_TAG = "dev-builds"
 _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')

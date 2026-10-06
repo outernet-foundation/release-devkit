@@ -6,9 +6,9 @@ from typing import Annotated
 import typer
 from ci_devkit.ci_step import ci_step
 
-from ..config import DEFAULT_CONFIG_PATH, Settings, load_config
-from ..plan import compute_and_print_plan
-from ..tags import GitTags
+from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config
+from release_devkit.plan import compute_and_print_plan
+from release_devkit.tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 

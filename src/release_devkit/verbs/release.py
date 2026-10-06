@@ -10,14 +10,14 @@ import typer
 from bashrun.bash import bash, bash_output
 from ci_devkit.ci_step import ci_step
 
-from ..config import DEFAULT_CONFIG_PATH, Settings, load_config
-from ..drafts import DEV_DRAFT_TAG, delete_draft_release
-from ..plan import UNCHANGED_FALLBACK_VERSION, compute_and_print_plan, setup_publishing_environment
-from ..publishing import StableStrategy, publish_packages
-from ..registries import registry_url
-from ..rendering import PackageRow, RegistryLink, render_release_body
-from ..tags import GitTags
-from ..builds import (
+from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config
+from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release
+from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, compute_and_print_plan, setup_publishing_environment
+from release_devkit.publishing import StableStrategy, publish_packages
+from release_devkit.registries import registry_url
+from release_devkit.rendering import PackageRow, RegistryLink, render_release_body
+from release_devkit.tags import GitTags
+from release_devkit.builds import (
     builds_registry_of,
     matched_ci_run_number,
     pull_build_assets,

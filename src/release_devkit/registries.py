@@ -11,7 +11,7 @@ from typing import Protocol
 from bashrun.bash import bash, bash_output
 from pydantic import BaseModel, ConfigDict, Field
 
-from .csproj import load_project_roots, read_package_references
+from release_devkit.csproj import load_project_roots, read_package_references
 
 NUGET_SOURCE = "https://api.nuget.org/v3/index.json"
 PYPI_SIMPLE_INDEX = "https://pypi.org/simple/"

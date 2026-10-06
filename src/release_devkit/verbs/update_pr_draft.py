@@ -5,16 +5,16 @@ from typing import Annotated
 
 import typer
 
-from ..config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
-from ..builds import (
+from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
+from release_devkit.builds import (
     builds_registry_of,
     pull_digest_manifest,
 )
-from ..drafts import (
+from release_devkit.drafts import (
     append_draft_section,
     publish_draft_assets,
 )
-from ..rendering import AssetLink, DraftSection, render_asset_links, render_draft_section
+from release_devkit.rendering import AssetLink, DraftSection, render_asset_links, render_draft_section
 
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 

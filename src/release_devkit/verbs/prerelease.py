@@ -8,23 +8,23 @@ import typer
 from bashrun.bash import bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 
-from ..config import DEFAULT_CONFIG_PATH, AppConfig, Settings, load_config, write_step_summary
-from ..builds import (
+from release_devkit.config import DEFAULT_CONFIG_PATH, AppConfig, Settings, load_config, write_step_summary
+from release_devkit.builds import (
     DigestEntry,
     builds_registry_of,
     matched_ci_run_number,
     pull_digest_manifest,
 )
-from ..drafts import (
+from release_devkit.drafts import (
     DEV_DRAFT_TAG,
     append_draft_section,
     publish_draft_assets,
 )
-from ..plan import compute_release_plan, setup_publishing_environment
-from ..publishing import DevStrategy, publish_packages
-from ..registries import DEV_VERSION_FORMATS, registry_url
-from ..rendering import AssetLink, DraftSection, PackageRow, RegistryLink, render_draft_section
-from ..tags import GitTags
+from release_devkit.plan import compute_release_plan, setup_publishing_environment
+from release_devkit.publishing import DevStrategy, publish_packages
+from release_devkit.registries import DEV_VERSION_FORMATS, registry_url
+from release_devkit.rendering import AssetLink, DraftSection, PackageRow, RegistryLink, render_draft_section
+from release_devkit.tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 

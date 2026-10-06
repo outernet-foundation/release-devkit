@@ -5,9 +5,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import PackageConfig
-from .csproj import load_project_roots, read_package_references
-from .registries import NpmManifest, PyprojectProjectTable, SENTINEL_VERSION
+from release_devkit.config import PackageConfig
+from release_devkit.csproj import load_project_roots, read_package_references
+from release_devkit.registries import NpmManifest, PyprojectProjectTable, SENTINEL_VERSION
 
 DEPENDENCY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*")
 

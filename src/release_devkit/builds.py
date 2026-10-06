@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from ci_devkit.builds import build_exists, pull_build
 from ci_devkit.ci_step import ci_step
 
-from .config import BuildArtifactConfig, PublishConfig
+from release_devkit.config import BuildArtifactConfig, PublishConfig
 
 DIGEST_PROJECT = "images-digests"
 DIGEST_PLATFORM = "all"

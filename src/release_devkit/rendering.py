@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .builds import DigestEntry
+from release_devkit.builds import DigestEntry
 
 
 @dataclass
