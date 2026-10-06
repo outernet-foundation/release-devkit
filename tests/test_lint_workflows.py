@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from release_devkit.lint_workflows import (
+from release_devkit.verbs.lint_workflows import (
     WRAPPER_COMMIT_ENV_VAR,
     default_workflows,
     validate_devkit_wrapper,

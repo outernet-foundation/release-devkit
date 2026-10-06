@@ -11,15 +11,15 @@ from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 from pydantic_settings import BaseSettings
 
-from .config import DEFAULT_CONFIG_PATH, BuildArtifactConfig, load_config
-from .builds import (
+from ..config import DEFAULT_CONFIG_PATH, BuildArtifactConfig, load_config
+from ..builds import (
     DigestEntry,
     builds_registry_of,
     pull_build_assets,
     pull_digest_manifest,
     render_images_table,
 )
-from .outputs import append_line
+from ..outputs import append_line
 
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 

@@ -6,10 +6,10 @@ from tempfile import mkdtemp
 
 import pytest
 
-from release_devkit import draft_releases
+from release_devkit.verbs import draft_releases
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PublishConfig
 from release_devkit.builds import DigestEntry, pull_build_assets
-from release_devkit.draft_releases import (
+from release_devkit.verbs.draft_releases import (
     append_draft_section,
     build_draft_section,
     delete_draft_release,

@@ -11,7 +11,7 @@ import typer
 import yaml
 from bashrun.bash import CalledProcessError, bash, bash_output
 
-from .config import load_config
+from ..config import load_config
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 

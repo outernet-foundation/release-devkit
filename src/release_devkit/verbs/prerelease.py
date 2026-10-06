@@ -9,8 +9,8 @@ from bashrun.bash import bash_check, bash_output
 from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
 
-from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config
-from .builds import (
+from ..config import DEFAULT_CONFIG_PATH, AppConfig, load_config
+from ..builds import (
     DigestEntry,
     builds_registry_of,
     matched_ci_run_number,
@@ -26,10 +26,10 @@ from .draft_releases import (
     stage_draft_assets,
     upload_draft_assets,
 )
-from .outputs import append_line
-from .plan import compute_release_plan, setup_publishing_environment
-from .registries import DEV_VERSION_FORMATS, NPM_DEV_DIST_TAG, PublishRequest, build_registries, registry_url
-from .tags import GitTags
+from ..outputs import append_line
+from ..plan import compute_release_plan, setup_publishing_environment
+from ..registries import DEV_VERSION_FORMATS, NPM_DEV_DIST_TAG, PublishRequest, build_registries, registry_url
+from ..tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 

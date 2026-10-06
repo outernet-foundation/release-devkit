@@ -5,8 +5,8 @@ from contextlib import nullcontext
 import pytest
 from pydantic import ValidationError
 
-from release_devkit import merge_gate
-from release_devkit.merge_gate import Settings
+from release_devkit.verbs import merge_gate
+from release_devkit.verbs.merge_gate import Settings
 
 HEAD_SHA = "a" * 40
 GREEN_ROLLUP = [{"name": "lint-workflows", "status": "COMPLETED", "conclusion": "SUCCESS"}]

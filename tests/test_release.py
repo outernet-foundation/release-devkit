@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from release_devkit import release
+from release_devkit.verbs import release
 from release_devkit.config import AppConfig, PublishConfig
-from release_devkit.draft_releases import DEV_DRAFT_TAG
+from release_devkit.verbs.draft_releases import DEV_DRAFT_TAG
 from release_devkit.plan import ReleasePlan
 
 

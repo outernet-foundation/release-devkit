@@ -7,10 +7,10 @@ import typer
 from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
 
-from .config import DEFAULT_CONFIG_PATH, load_config
-from .outputs import append_line
-from .plan import compute_release_plan, render_plan_summary
-from .tags import GitTags
+from ..config import DEFAULT_CONFIG_PATH, load_config
+from ..outputs import append_line
+from ..plan import compute_release_plan, render_plan_summary
+from ..tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 

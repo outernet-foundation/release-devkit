@@ -11,11 +11,11 @@ from bashrun.bash import bash, bash_output
 from pydantic_settings import BaseSettings
 from ci_devkit.ci_step import ci_step
 
-from .config import PublishConfig, load_config
-from .registries import registry_url
-from .tags import GitTags
-from .plan import UNCHANGED_FALLBACK_VERSION
-from .builds import (
+from ..config import PublishConfig, load_config
+from ..registries import registry_url
+from ..tags import GitTags
+from ..plan import UNCHANGED_FALLBACK_VERSION
+from ..builds import (
     builds_registry_of,
     matched_ci_run_number,
     pull_build_assets,

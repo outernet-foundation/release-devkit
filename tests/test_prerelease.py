@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from release_devkit import prerelease
+from release_devkit.verbs import prerelease
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PackageConfig, PublishConfig
 from release_devkit.builds import DigestEntry
 from release_devkit.plan import PackagePlan, ReleasePlan
-from release_devkit.prerelease import (
+from release_devkit.verbs.prerelease import (
     build_prerelease_section,
 )
 

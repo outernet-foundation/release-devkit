@@ -28,14 +28,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-get-app-version = "release_devkit.get_app_version:app"
-create-release = "release_devkit.create_release:app"
-lint-workflows = "release_devkit.lint_workflows:app"
-merge-gate = "release_devkit.merge_gate:app"
-prerelease = "release_devkit.prerelease:app"
-release = "release_devkit.release:app"
-validate-release-plan = "release_devkit.validate_release_plan:app"
-update-pr-draft-release = "release_devkit.draft_releases:update_pr_app"
+get-app-version = "release_devkit.verbs.get_app_version:app"
+create-release = "release_devkit.verbs.create_release:app"
+lint-workflows = "release_devkit.verbs.lint_workflows:app"
+merge-gate = "release_devkit.verbs.merge_gate:app"
+prerelease = "release_devkit.verbs.prerelease:app"
+release = "release_devkit.verbs.release:app"
+validate-release-plan = "release_devkit.verbs.validate_release_plan:app"
+update-pr-draft-release = "release_devkit.verbs.draft_releases:update_pr_app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/release_devkit"]
