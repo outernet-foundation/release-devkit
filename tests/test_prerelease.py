@@ -123,7 +123,7 @@ def run_prerelease(
         sha="abc123def456",
         actor="bot",
         workspace="/workspace",
-        run_id="42",
+        run_id=42,
         step_summary="",
     )
 
@@ -229,7 +229,7 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
         sha="abc123def456",
         actor="bot",
         workspace="/workspace",
-        run_id="42",
+        run_id=42,
         step_summary="",
     )
 

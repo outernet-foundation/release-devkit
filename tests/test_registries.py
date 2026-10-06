@@ -134,8 +134,9 @@ def test_ephemeral_pyproject_patch_rewrites_sentinel_specifiers(tmp_path: Path) 
 
 
 def test_dev_version_spellings_per_registry() -> None:
-    assert semver_dev_version("0.1.8", "123456") == "0.1.8-dev.123456"
-    assert pep440_dev_version("0.1.8", "123456") == "0.1.8.dev123456"
+    assert semver_dev_version("0.1.8", 123456) == "0.1.8-dev.123456"
+
+    assert pep440_dev_version("0.1.8", 123456) == "0.1.8.dev123456"
 
 
 def test_npm_publish_rides_the_dev_dist_tag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
