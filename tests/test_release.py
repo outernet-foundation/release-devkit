@@ -28,6 +28,9 @@ class CallRecorder:
 
 
 class FakeTags:
+    def latest_version(self, prefix: str) -> str | None:
+        return None
+
     def create_and_push_tag(self, tag: str) -> None:
         pass
 
@@ -64,7 +67,11 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(release, "GitTags", FixedReturn(FakeTags()))
     monkeypatch.setattr(release, "ci_step", null_ci_step)
     monkeypatch.setattr(release, "setup_publishing_environment", noop)
-    monkeypatch.setattr(release, "cut_github_release", noop)
+    monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
+    monkeypatch.setattr(release, "matched_ci_run_number", FixedReturn(("42", "url")))
+    monkeypatch.setattr(release, "pull_build_assets", FixedReturn([]))
+    monkeypatch.setattr(release, "pull_digest_manifest", FixedReturn(None))
+    monkeypatch.setattr(release, "bash", noop)
     delete_recorder = CallRecorder()
     monkeypatch.setattr(release, "delete_draft_release", delete_recorder)
 

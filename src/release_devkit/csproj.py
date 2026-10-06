@@ -32,7 +32,13 @@ def load_project_roots(package_path: Path) -> list[Element]:
 
 
 def read_package_references(root: Element) -> list[PackageReference]:
-    defaults = read_property_defaults(root)
+    defaults: dict[str, str] = {}
+    for group in root.iter():
+        if local_name(group) != "PropertyGroup":
+            continue
+        for child in group:
+            defaults[local_name(child)] = (child.text or "").strip()
+
     references: list[PackageReference] = []
     for element in root.iter():
         if local_name(element) != "PackageReference":
@@ -54,16 +60,6 @@ def read_package_references(root: Element) -> list[PackageReference]:
             )
         references.append(PackageReference(identity=identity, version=default, property_name=property_name))
     return references
-
-
-def read_property_defaults(root: Element) -> dict[str, str]:
-    defaults: dict[str, str] = {}
-    for group in root.iter():
-        if local_name(group) != "PropertyGroup":
-            continue
-        for child in group:
-            defaults[local_name(child)] = (child.text or "").strip()
-    return defaults
 
 
 def local_name(element: Element) -> str:

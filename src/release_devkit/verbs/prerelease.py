@@ -20,7 +20,6 @@ from ..builds import (
 from ..drafts import (
     DEV_DRAFT_TAG,
     append_draft_section,
-    emit_draft_backlink,
     publish_draft_assets,
 )
 from ..outputs import append_line
@@ -183,59 +182,45 @@ def main(
     merge_match = _MERGE_PR_PATTERN.search(merge_message)
     pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
 
-    section = build_prerelease_section(
-        published,
-        staged_assets,
-        settings.github_repository,
-        resolved_run_id,
-        integrate_run,
-        pr_info,
-        new_image_manifest,
-    )
-    anchor = f"run-{resolved_run_id}"
-    append_draft_section(DEV_DRAFT_TAG, settings.github_repository, anchor, section)
-    emit_draft_backlink(settings.github_step_summary, DEV_DRAFT_TAG, settings.github_repository, anchor)
-
-
-def build_prerelease_section(
-    published: list[tuple[str, str, str]],
-    staged_assets: list[tuple[str, Path]],
-    repository: str,
-    run_id: str,
-    integrate_run: tuple[str, str] | None,
-    pr_info: tuple[int, str] | None,
-    image_manifest: dict[str, DigestEntry],
-) -> str:
     if integrate_run is not None:
-        run_number, run_url = integrate_run
-        heading_parts = [f"[Integrate run #{run_number}]({run_url})"]
+        section_run_number, run_url = integrate_run
+        heading_parts = [f"[Integrate run #{section_run_number}]({run_url})"]
     else:
-        run_url = f"https://github.com/{repository}/actions/runs/{run_id}"
-        heading_parts = [f"[Run #{run_id}]({run_url})"]
+        run_url = f"https://github.com/{settings.github_repository}/actions/runs/{resolved_run_id}"
+        heading_parts = [f"[Run #{resolved_run_id}]({run_url})"]
     if pr_info is not None:
         pr_number, pr_title = pr_info
-        pr_url = f"https://github.com/{repository}/pull/{pr_number}"
+        pr_url = f"https://github.com/{settings.github_repository}/pull/{pr_number}"
         heading_parts.append(f"[PR #{pr_number}: {pr_title}]({pr_url})")
-    lines = [f"### {' \u2014 '.join(heading_parts)}"]
+    section_lines = [f"### {' \u2014 '.join(heading_parts)}"]
 
     if published:
-        lines.extend(["", "| Package | Version | Registry |", "|---|---|---|"])
+        section_lines.extend(["", "| Package | Version | Registry |", "|---|---|---|"])
         for registry_name, identity, version in published:
             url = registry_url(registry_name, identity, version)
             if url is not None:
-                lines.append(f"| {identity} | {version} | [{registry_name}]({url}) |")
+                section_lines.append(f"| {identity} | {version} | [{registry_name}]({url}) |")
             else:
-                lines.append(f"| {identity} | {version} | {registry_name} |")
+                section_lines.append(f"| {identity} | {version} | {registry_name} |")
 
     if staged_assets:
-        lines.append("")
+        section_lines.append("")
         for name, _ in staged_assets:
-            url = f"https://github.com/{repository}/releases/download/{DEV_DRAFT_TAG}/{name}"
-            lines.append(f"- [{name}]({url})")
+            url = f"https://github.com/{settings.github_repository}/releases/download/{DEV_DRAFT_TAG}/{name}"
+            section_lines.append(f"- [{name}]({url})")
 
-    if image_manifest:
-        lines.append("")
-        lines.append("#### Built images")
-        lines.extend(render_images_table(image_manifest))
+    if new_image_manifest:
+        section_lines.append("")
+        section_lines.append("#### Built images")
+        section_lines.extend(render_images_table(new_image_manifest))
 
-    return "\n".join(lines)
+    section = "\n".join(section_lines)
+    anchor = f"run-{resolved_run_id}"
+    append_draft_section(DEV_DRAFT_TAG, settings.github_repository, anchor, section)
+
+    draft_url = bash_output(
+        f"gh release view {DEV_DRAFT_TAG} --repo {settings.github_repository} --json url --jq .url"
+    ).strip()
+    backlink_text = f"### Draft release `{DEV_DRAFT_TAG}` updated\n- [Section `{anchor}`]({draft_url}#{anchor})"
+    print(backlink_text)
+    append_line(settings.github_step_summary, backlink_text)

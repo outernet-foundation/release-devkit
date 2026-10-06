@@ -8,9 +8,6 @@ from release_devkit.registries import NpmRegistry, NuGetRegistry, PublishRequest
 from release_devkit.registries import (
     ephemeral_manifest_patch,
     ephemeral_pyproject_patch,
-    nuget_injection_properties,
-    patch_project_dependencies,
-    patch_project_version,
     pep440_dev_version,
     semver_dev_version,
 )
@@ -102,19 +99,6 @@ def test_patch_restores_on_error(tmp_path: Path):
     assert manifest_path.read_text(encoding="utf-8") == original
 
 
-def test_patch_project_version_replaces_the_project_table_version() -> None:
-    patched = patch_project_version(PYPROJECT, "0.1.3")
-    assert 'version = "0.1.3"\n' in patched
-    assert 'version = "0.0.0.dev0"' not in patched
-    assert 'version = "not-this-one"' in patched
-
-
-def test_patch_project_version_raises_without_a_project_version() -> None:
-    without_version = '[project]\nname = "example"\n\n[build-system]\nrequires = ["hatchling"]\n'
-    with pytest.raises(ValueError, match="no \\[project\\] version"):
-        patch_project_version(without_version, "0.1.3")
-
-
 def test_ephemeral_pyproject_patch_restores_the_original(tmp_path: Path) -> None:
     manifest_path = tmp_path / "pyproject.toml"
     manifest_path.write_text(PYPROJECT, encoding="utf-8")
@@ -147,12 +131,6 @@ def test_ephemeral_pyproject_patch_rewrites_sentinel_specifiers(tmp_path: Path) 
         assert '"pydantic>=2"' in patched
 
     assert manifest_path.read_text(encoding="utf-8") == PYPROJECT_WITH_SENTINELS
-
-
-def test_patch_project_dependencies_leaves_absent_entries_alone() -> None:
-    patched = patch_project_dependencies(PYPROJECT_WITH_SENTINELS, {"elsewhere": "9.9.9"})
-
-    assert patched == PYPROJECT_WITH_SENTINELS
 
 
 def test_dev_version_spellings_per_registry() -> None:
@@ -312,19 +290,27 @@ def test_nuget_publish_writes_the_nupkg_outside_the_package_root(
     assert outdir in push_command
 
 
-def test_nuget_injection_properties_without_matching_reference_is_loud(tmp_path: Path) -> None:
+def test_nuget_publish_without_matching_reference_is_loud(tmp_path: Path) -> None:
     write_nuget_project(tmp_path)
 
     with pytest.raises(ValueError, match=r"no PackageReference found for \['Org.Missing'\]"):
-        nuget_injection_properties(tmp_path, {"Org.Missing": "1.0.0"})
+        NuGetRegistry("key").publish(
+            PublishRequest(
+                path=tmp_path, identity="Org.Consumer", version="1.0.6", dependency_versions={"Org.Missing": "1.0.0"}
+            )
+        )
 
 
-def test_nuget_injection_properties_literal_version_is_loud(tmp_path: Path) -> None:
+def test_nuget_publish_with_literal_version_is_loud(tmp_path: Path) -> None:
     csproj = NUGET_CSPROJ.replace('Version="$(SiblingVersion)"', 'Version="1.0.0"')
     (tmp_path / "Consumer.csproj").write_text(csproj, encoding="utf-8")
 
     with pytest.raises(ValueError, match=r"carries literal version '1.0.0'"):
-        nuget_injection_properties(tmp_path, {"Org.Sibling": "1.0.6"})
+        NuGetRegistry("key").publish(
+            PublishRequest(
+                path=tmp_path, identity="Org.Consumer", version="1.0.6", dependency_versions={"Org.Sibling": "1.0.6"}
+            )
+        )
 
 
 def test_nuget_push_failure_never_leaks_the_api_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

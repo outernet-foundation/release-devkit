@@ -52,7 +52,23 @@ class NuGetRegistry:
         self.api_key = api_key
 
     def publish(self, request: PublishRequest) -> None:
-        properties = nuget_injection_properties(request.path, request.dependency_versions)
+        properties: dict[str, str] = {}
+        found: set[str] = set()
+        for root in load_project_roots(request.path):
+            for reference in read_package_references(root):
+                if reference.identity not in request.dependency_versions:
+                    continue
+                if reference.property_name is None:
+                    raise ValueError(
+                        f"package reference '{reference.identity}' carries literal version "
+                        f"'{reference.version}'; same-unit references must use a '$(Property)' version"
+                    )
+                properties[reference.property_name] = request.dependency_versions[reference.identity]
+                found.add(reference.identity)
+        missing = set(request.dependency_versions) - found
+        if missing:
+            raise ValueError(f"no PackageReference found for {sorted(missing)} under '{request.path}'")
+
         command = f"dotnet pack -c Release -p:Version={request.version}"
         if properties:
             property_flags = " ".join(f"-p:{name}={version}" for name, version in properties.items())
@@ -121,33 +137,27 @@ def ephemeral_pyproject_patch(package_path: Path, version: str, dependency_versi
     manifest_path = package_path / "pyproject.toml"
     original = manifest_path.read_text(encoding="utf-8")
     try:
-        patched = patch_project_dependencies(original, dependency_versions)
-        manifest_path.write_text(patch_project_version(patched, version), encoding="utf-8")
+        patched = original
+        for dependency_name, dependency_version in dependency_versions.items():
+            sentinel_specifier = f"{dependency_name}=={SENTINEL_VERSION}"
+            if sentinel_specifier in patched:
+                patched = patched.replace(sentinel_specifier, f"{dependency_name}=={dependency_version}")
+        lines = patched.splitlines(keepends=True)
+        in_project_table = False
+        for index, line in enumerate(lines):
+            if line.startswith("["):
+                in_project_table = line.strip() == "[project]"
+                continue
+            if in_project_table and PYPROJECT_VERSION_PATTERN.match(line):
+                lines[index] = f'version = "{version}"\n'
+                patched = "".join(lines)
+                break
+        else:
+            raise ValueError("pyproject.toml carries no [project] version to patch")
+        manifest_path.write_text(patched, encoding="utf-8")
         yield
     finally:
         manifest_path.write_text(original, encoding="utf-8")
-
-
-def patch_project_version(original: str, version: str) -> str:
-    lines = original.splitlines(keepends=True)
-    in_project_table = False
-    for index, line in enumerate(lines):
-        if line.startswith("["):
-            in_project_table = line.strip() == "[project]"
-            continue
-        if in_project_table and PYPROJECT_VERSION_PATTERN.match(line):
-            lines[index] = f'version = "{version}"\n'
-            return "".join(lines)
-    raise ValueError("pyproject.toml carries no [project] version to patch")
-
-
-def patch_project_dependencies(original: str, dependency_versions: dict[str, str]) -> str:
-    patched = original
-    for dependency_name, dependency_version in dependency_versions.items():
-        sentinel_specifier = f"{dependency_name}=={SENTINEL_VERSION}"
-        if sentinel_specifier in patched:
-            patched = patched.replace(sentinel_specifier, f"{dependency_name}=={dependency_version}")
-    return patched
 
 
 KNOWN_REGISTRIES = frozenset({"nuget", "npm", "pypi"})
@@ -183,23 +193,3 @@ DEV_VERSION_FORMATS: dict[str, Callable[[str, str], str]] = {
 
 def build_registries(nuget_api_key: str) -> dict[str, Registry]:
     return {"nuget": NuGetRegistry(nuget_api_key), "npm": NpmRegistry(), "pypi": PyPIRegistry()}
-
-
-def nuget_injection_properties(package_path: Path, dependency_versions: dict[str, str]) -> dict[str, str]:
-    properties: dict[str, str] = {}
-    found: set[str] = set()
-    for root in load_project_roots(package_path):
-        for reference in read_package_references(root):
-            if reference.identity not in dependency_versions:
-                continue
-            if reference.property_name is None:
-                raise ValueError(
-                    f"package reference '{reference.identity}' carries literal version "
-                    f"'{reference.version}'; same-unit references must use a '$(Property)' version"
-                )
-            properties[reference.property_name] = dependency_versions[reference.identity]
-            found.add(reference.identity)
-    missing = set(dependency_versions) - found
-    if missing:
-        raise ValueError(f"no PackageReference found for {sorted(missing)} under '{package_path}'")
-    return properties

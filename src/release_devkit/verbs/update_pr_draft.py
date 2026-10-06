@@ -8,7 +8,6 @@ from pydantic_settings import BaseSettings
 
 from ..config import DEFAULT_CONFIG_PATH, load_config
 from ..builds import (
-    DigestEntry,
     builds_registry_of,
     pull_digest_manifest,
     render_images_table,
@@ -59,41 +58,26 @@ def update_pr_draft(
         builds_registry_of(publish_config), resolved_run_number, settings.github_actor, settings.github_token
     )
     run_url = f"https://github.com/{settings.github_repository}/actions/runs/{settings.github_run_id}"
-    section = build_draft_section(
-        settings.github_repository, tag, resolved_run_number, run_url, pr_number, staged, manifest or {}
-    )
-    append_draft_section(tag, settings.github_repository, f"run-{resolved_run_number}", section)
-    emit_draft_summary(settings.github_step_summary, tag, settings.github_repository, staged)
 
-
-def build_draft_section(
-    repository: str,
-    tag: str,
-    run_number: str,
-    run_url: str,
-    pr_number: int,
-    staged: list[tuple[str, Path]],
-    image_manifest: dict[str, DigestEntry],
-) -> str:
-    pr_url = f"https://github.com/{repository}/pull/{pr_number}"
-    lines = [f"### [Run #{run_number}]({run_url}) — [PR #{pr_number}]({pr_url})"]
-    if image_manifest:
-        lines.append("")
-        lines.append("#### Built images")
-        lines.extend(render_images_table(image_manifest))
+    pr_url = f"https://github.com/{settings.github_repository}/pull/{pr_number}"
+    section_lines = [f"### [Run #{resolved_run_number}]({run_url}) \u2014 [PR #{pr_number}]({pr_url})"]
+    if manifest:
+        section_lines.append("")
+        section_lines.append("#### Built images")
+        section_lines.extend(render_images_table(manifest))
     if staged:
-        lines.append("")
+        section_lines.append("")
         for name, _ in staged:
-            url = f"https://github.com/{repository}/releases/download/{tag}/{name}"
-            lines.append(f"- [{name}]({url})")
-    return "\n".join(lines)
+            url = f"https://github.com/{settings.github_repository}/releases/download/{tag}/{name}"
+            section_lines.append(f"- [{name}]({url})")
+    section = "\n".join(section_lines)
 
+    append_draft_section(tag, settings.github_repository, f"run-{resolved_run_number}", section)
 
-def emit_draft_summary(summary_path: str | None, tag: str, repository: str, staged: list[tuple[str, Path]]) -> None:
-    lines = [f"### Draft release `{tag}`", ""]
+    summary_lines = [f"### Draft release `{tag}`", ""]
     for name, _ in staged:
-        url = f"https://github.com/{repository}/releases/download/{tag}/{name}"
-        lines.append(f"- [{name}]({url})")
-    summary = "\n".join(lines)
+        url = f"https://github.com/{settings.github_repository}/releases/download/{tag}/{name}"
+        summary_lines.append(f"- [{name}]({url})")
+    summary = "\n".join(summary_lines)
     print(summary)
-    append_line(summary_path, summary)
+    append_line(settings.github_step_summary, summary)

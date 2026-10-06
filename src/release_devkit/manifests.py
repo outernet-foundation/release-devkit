@@ -28,20 +28,15 @@ class ManifestDependency:
 
 
 def resolve_edges(packages: dict[str, PackageConfig]) -> dict[str, list[DependencyEdge]]:
-    identity_index = build_identity_index(packages)
-    return {name: read_package_edges(name, package, identity_index) for name, package in packages.items()}
-
-
-def build_identity_index(packages: dict[str, PackageConfig]) -> dict[tuple[str, str], str]:
-    index: dict[tuple[str, str], str] = {}
+    identity_index: dict[tuple[str, str], str] = {}
     for name, package in packages.items():
         for registry_name, identity in package.registries.items():
             key = (registry_name, identity)
-            owner = index.get(key)
+            owner = identity_index.get(key)
             if owner is not None and owner != name:
                 raise ValueError(f"packages '{owner}' and '{name}' share {registry_name} identity '{identity}'")
-            index[key] = name
-    return index
+            identity_index[key] = name
+    return {name: read_package_edges(name, package, identity_index) for name, package in packages.items()}
 
 
 def read_package_edges(

@@ -11,7 +11,7 @@ from bashrun.bash import bash, bash_output
 from ci_devkit.ci_step import ci_step
 from pydantic_settings import BaseSettings
 
-from ..config import DEFAULT_CONFIG_PATH, PublishConfig, load_config
+from ..config import DEFAULT_CONFIG_PATH, load_config
 from ..drafts import DEV_DRAFT_TAG, delete_draft_release
 from ..plan import UNCHANGED_FALLBACK_VERSION, compute_and_print_plan, setup_publishing_environment
 from ..registries import PublishRequest, build_registries, registry_url
@@ -88,26 +88,29 @@ def main(
             tags.create_and_push_tag(tag)
             print(f"  Tagged: {tag}")
 
-    cut_github_release(publish_config, settings)
-    delete_draft_release(DEV_DRAFT_TAG, settings.github_repository)
-
-
-def cut_github_release(publish_config: PublishConfig, settings: Settings) -> None:
     year_month = datetime.now(UTC).strftime("%Y.%m")
     existing = bash_output(
         f"gh release list --repo {settings.github_repository} --json tagName"
         f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
     ).strip()
     count = int(existing) if existing else 0
-    tag = f"{year_month}.{count + 1}"
+    release_tag = f"{year_month}.{count + 1}"
 
-    assets, run_number = collect_build_assets(publish_config, settings)
+    run_number, _ = matched_ci_run_number(settings.github_repository, settings.github_sha, publish_config.ci_workflow)
+    pulled = pull_build_assets(publish_config, run_number, settings.github_actor, settings.github_token)
+    staging = Path(mkdtemp(prefix="release-assets-"))
+    assets: list[Path] = []
+    for artifact, source in pulled:
+        asset_name = artifact.name or source.name
+        asset = staging / asset_name
+        shutil.copy2(source, asset)
+        assets.append(asset)
+
     manifest = pull_digest_manifest(
         builds_registry_of(publish_config), run_number, settings.github_actor, settings.github_token
     )
 
     with ci_step("Create GitHub Release"):
-        tags = GitTags()
         lines: list[str] = []
 
         lines.extend(["## Packages", "", "| Package | Version | Registry |", "|---|---|---|"])
@@ -141,23 +144,12 @@ def cut_github_release(publish_config: PublishConfig, settings: Settings) -> Non
             file.write(notes)
             notes_path = file.name
         bash(
-            f"gh release create {tag} --title {tag}"
+            f"gh release create {release_tag} --title {release_tag}"
             f" --notes-file {notes_path}"
             f" --repo {settings.github_repository}"
             f" {asset_args}"
         )
         Path(notes_path).unlink()
-        print(f"  Release created: {tag}")
+        print(f"  Release created: {release_tag}")
 
-
-def collect_build_assets(publish_config: PublishConfig, settings: Settings) -> tuple[list[Path], str]:
-    run_number, _ = matched_ci_run_number(settings.github_repository, settings.github_sha, publish_config.ci_workflow)
-    pulled = pull_build_assets(publish_config, run_number, settings.github_actor, settings.github_token)
-    staging = Path(mkdtemp(prefix="release-assets-"))
-    assets: list[Path] = []
-    for artifact, source in pulled:
-        asset_name = artifact.name or source.name
-        asset = staging / asset_name
-        shutil.copy2(source, asset)
-        assets.append(asset)
-    return assets, run_number
+    delete_draft_release(DEV_DRAFT_TAG, settings.github_repository)

@@ -10,9 +10,6 @@ from release_devkit import drafts
 from release_devkit.config import AppConfig, BuildArtifactConfig, BuildsConfig, PackageConfig, PublishConfig
 from release_devkit.builds import DigestEntry
 from release_devkit.plan import PackagePlan, ReleasePlan
-from release_devkit.verbs.prerelease import (
-    build_prerelease_section,
-)
 
 
 class FakeTags:
@@ -107,7 +104,7 @@ def run_prerelease(
     config: PublishConfig,
     release_plan: ReleasePlan,
     tags: FakeTags,
-) -> tuple[CallRecorder, CallRecorder, CallRecorder, CallRecorder]:
+) -> tuple[CallRecorder, CallRecorder, CallRecorder]:
     patch_environment(monkeypatch)
     monkeypatch.setattr(prerelease, "load_config", FixedReturn(config))
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(release_plan))
@@ -123,32 +120,26 @@ def run_prerelease(
     monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(None))
     pull_assets = CallRecorder([])
     monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
-    monkeypatch.setattr(drafts, "stage_draft_assets", CallRecorder([]))
-    ensure_draft = CallRecorder()
-    monkeypatch.setattr(drafts, "ensure_draft_release", ensure_draft)
-    monkeypatch.setattr(drafts, "upload_draft_assets", CallRecorder())
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
+    monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
+    monkeypatch.setattr(drafts, "bash", CallRecorder())
     monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Not a merge commit\n"))
     append_section = CallRecorder()
     monkeypatch.setattr(prerelease, "append_draft_section", append_section)
-    monkeypatch.setattr(prerelease, "emit_draft_backlink", CallRecorder())
 
     prerelease.main()
 
-    return build_registries, pull_assets, ensure_draft, append_section
+    return build_registries, pull_assets, append_section
 
 
 def test_nothing_changed_returns_without_publishing_or_drafting(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
-    build_registries, pull_assets, ensure_draft, append_section = run_prerelease(
-        monkeypatch, config, make_plan(set()), tags
-    )
+    build_registries, pull_assets, append_section = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert build_registries.calls == []
     assert pull_assets.calls == []
-    assert ensure_draft.calls == []
     assert append_section.calls == []
 
 
@@ -159,13 +150,10 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
     )
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
-    build_registries, pull_assets, ensure_draft, append_section = run_prerelease(
-        monkeypatch, config, make_plan({"pkg"}), tags
-    )
+    build_registries, pull_assets, append_section = run_prerelease(monkeypatch, config, make_plan({"pkg"}), tags)
 
     assert build_registries.calls != []
     assert pull_assets.calls == []
-    assert ensure_draft.calls == []
     assert append_section.calls != []
 
 
@@ -173,13 +161,10 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"})
 
-    build_registries, pull_assets, ensure_draft, append_section = run_prerelease(
-        monkeypatch, config, make_plan(set()), tags
-    )
+    build_registries, pull_assets, append_section = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert build_registries.calls == []
     assert pull_assets.calls != []
-    assert ensure_draft.calls != []
     assert append_section.calls != []
 
 
@@ -195,57 +180,12 @@ def test_dev_draft_surfaces_only_changed_apps(monkeypatch: pytest.MonkeyPatch) -
         changed={"changed-app"},
     )
 
-    _, pull_assets, _, _ = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    _, pull_assets, _ = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert len(pull_assets.calls) == 1
     draft_config = pull_assets.calls[0][0]
     assert isinstance(draft_config, PublishConfig)
     assert set(draft_config.apps) == {"changed-app"}
-
-
-def test_build_prerelease_section_renders_packages_assets_and_pr_link() -> None:
-    published = [("pypi", "placeframe-common", "0.1.0.dev42")]
-    staged_assets = [("MyApp-run-42.apk", Path("/tmp/MyApp-run-42.apk"))]
-
-    section = build_prerelease_section(
-        published,
-        staged_assets,
-        "owner/repo",
-        "42",
-        ("40", "https://github.com/owner/repo/actions/runs/40"),
-        (15, "Add feature"),
-        {},
-    )
-
-    assert "### [Integrate run #40]" in section
-    assert "https://github.com/owner/repo/actions/runs/40" in section
-    assert "[PR #15: Add feature]" in section
-    assert "https://github.com/owner/repo/pull/15" in section
-    assert "| placeframe-common | 0.1.0.dev42 |" in section
-    assert "[pypi](https://pypi.org/project/placeframe-common/0.1.0.dev42)" in section
-    assert "[MyApp-run-42.apk]" in section
-    assert "https://github.com/owner/repo/releases/download/dev-builds/MyApp-run-42.apk" in section
-
-
-def test_build_prerelease_section_omits_pr_link_when_none() -> None:
-    section = build_prerelease_section([], [], "owner/repo", "42", None, None, {})
-
-    assert "### [Run #42]" in section
-    assert "https://github.com/owner/repo/actions/runs/42" in section
-    assert "PR #" not in section
-
-
-def test_build_prerelease_section_renders_images_table() -> None:
-    manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
-
-    section = build_prerelease_section(
-        [], [], "owner/repo", "42", ("40", "https://github.com/owner/repo/actions/runs/40"), None, manifest
-    )
-
-    assert "#### Built images" in section
-    assert "zed-capture" in section
-    assert "tree-1" in section
-    assert "`sha256:abc`" in section
 
 
 def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -279,9 +219,6 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
     monkeypatch.setattr(prerelease, "bash_output", mock_bash_output)
     pull_assets = CallRecorder([])
     monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
-    monkeypatch.setattr(drafts, "stage_draft_assets", CallRecorder([]))
-    monkeypatch.setattr(drafts, "ensure_draft_release", CallRecorder())
-    monkeypatch.setattr(drafts, "upload_draft_assets", CallRecorder())
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     sections: list[str] = []
 
@@ -289,7 +226,6 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
         sections.append(section)
 
     monkeypatch.setattr(prerelease, "append_draft_section", capture_section)
-    monkeypatch.setattr(prerelease, "emit_draft_backlink", CallRecorder())
 
     prerelease.main()
 

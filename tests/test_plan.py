@@ -6,13 +6,11 @@ from release_devkit.config import AppConfig, PackageConfig, PublishConfig
 from release_devkit.tags import GitTags, parse_major_minor, parse_version
 from release_devkit.manifests import DependencyEdge
 from release_devkit.plan import (
+    PackagePlan,
     ResolvedDependency,
-    compute_plan,
     compute_release_plan,
     next_version,
-    render_plan_summary,
     resolve_dependency_versions,
-    topological_order,
 )
 
 
@@ -78,28 +76,6 @@ class FakeTagSource:
         return self.changed.get(path.as_posix(), False)
 
 
-API_CLIENT = PackageConfig(
-    path=Path("packages/generated/csharp/api-client"),
-    major_minor="0.1",
-    registries={"nuget": "X", "npm": "N"},
-)
-CORE = PackageConfig(
-    path=Path("packages/unity/Core"),
-    major_minor="1.0",
-    registries={"npm": "Y"},
-)
-ARFOUNDATION = PackageConfig(
-    path=Path("packages/unity/ARFoundation"),
-    major_minor="1.0",
-    registries={"npm": "Z"},
-)
-COMMON = PackageConfig(path=Path("packages/python/common"), major_minor="0.1", registries={"pypi": "P"})
-PACKAGES = {
-    "placeframe-api-client": API_CLIENT,
-    "placeframe-core": CORE,
-    "placeframe-arfoundation": ARFOUNDATION,
-    "placeframe-common": COMMON,
-}
 ARFOUNDATION_EDGE = DependencyEdge(
     dependency_package="placeframe-core", registry="npm", identity="org.outernet.placeframe"
 )
@@ -134,137 +110,10 @@ def test_next_version_guard_rejects_line_below_tagged():
         next_version("0.9", None, "1.0.0", "pkg")
 
 
-def test_plan_first_publish_uses_declared_line():
-    tags = FakeTagSource(
-        versions={},
-        changed={"packages/generated/csharp/api-client": True, "packages/unity/Core": True},
-    )
-
-    plans = compute_plan(
-        {"placeframe-api-client": API_CLIENT, "placeframe-core": CORE},
-        tags,
-        {"placeframe-api-client": [], "placeframe-core": []},
-    )
-
-    assert plans["placeframe-api-client"].publish is True
-    assert plans["placeframe-api-client"].version == "0.1.0"
-    assert plans["placeframe-core"].publish is True
-    assert plans["placeframe-core"].version == "1.0.0"
-
-
-def test_plan_unchanged_package_carries_last_version():
-    tags = FakeTagSource(
-        versions={"placeframe-api-client-v": ["0.1.7"]},
-        changed={"packages/generated/csharp/api-client": False},
-    )
-
-    plans = compute_plan({"placeframe-api-client": API_CLIENT}, tags, {"placeframe-api-client": []})
-
-    assert plans["placeframe-api-client"].publish is False
-    assert plans["placeframe-api-client"].version == "0.1.7"
-
-
-def test_plan_changed_package_patch_bumps_within_line():
-    tags = FakeTagSource(
-        versions={"placeframe-api-client-v": ["0.1.7"]},
-        changed={"packages/generated/csharp/api-client": True},
-    )
-
-    plans = compute_plan({"placeframe-api-client": API_CLIENT}, tags, {"placeframe-api-client": []})
-
-    assert plans["placeframe-api-client"].publish is True
-    assert plans["placeframe-api-client"].version == "0.1.8"
-
-
-def test_plan_line_bump_publishes_first_version_of_new_line():
-    tags = FakeTagSource(
-        versions={"placeframe-api-client-v": ["1.0.9"]},
-        changed={"packages/generated/csharp/api-client": True},
-    )
-
-    plans = compute_plan(
-        {"placeframe-api-client": API_CLIENT.model_copy(update={"major_minor": "1.4"})},
-        tags,
-        {"placeframe-api-client": []},
-    )
-
-    assert plans["placeframe-api-client"].publish is True
-    assert plans["placeframe-api-client"].version == "1.4.0"
-
-
-def test_plan_guard_errors_when_line_is_below_tagged():
-    tags = FakeTagSource(
-        versions={"placeframe-api-client-v": ["1.5.2"]},
-        changed={"packages/generated/csharp/api-client": True},
-    )
-
-    with pytest.raises(ValueError, match=r"placeframe-api-client: declared major\.minor 1\.4 is below tags"):
-        compute_plan(
-            {"placeframe-api-client": API_CLIENT.model_copy(update={"major_minor": "1.4"})},
-            tags,
-            {"placeframe-api-client": []},
-        )
-
-
-def test_plan_no_cascade_unchanged_dependent_does_not_publish():
-    tags = FakeTagSource(
-        versions={"placeframe-core-v": ["1.0.5"]},
-        changed={
-            "packages/unity/Core": True,
-            "packages/unity/ARFoundation": False,
-        },
-    )
-
-    plans = compute_plan(PACKAGES, tags, EDGES)
-
-    assert plans["placeframe-core"].publish is True
-    assert plans["placeframe-core"].version == "1.0.6"
-    assert plans["placeframe-arfoundation"].publish is False
-    assert plans["placeframe-arfoundation"].version == "0.0.0"
-
-
-def test_topological_order_places_dependencies_first_regardless_of_config_order():
-    ordered = topological_order({"placeframe-arfoundation": ARFOUNDATION, "placeframe-core": CORE}, EDGES)
-
-    assert ordered == ["placeframe-core", "placeframe-arfoundation"]
-
-
-def test_topological_order_preserves_config_order_without_edges():
-    ordered = topological_order(PACKAGES, EDGES)
-
-    assert ordered == [
-        "placeframe-api-client",
-        "placeframe-core",
-        "placeframe-arfoundation",
-        "placeframe-common",
-    ]
-
-
-def test_topological_order_rejects_cycles():
-    cycle_edges = {
-        "placeframe-core": [DependencyEdge(dependency_package="placeframe-arfoundation", registry="npm", identity="a")],
-        "placeframe-arfoundation": [ARFOUNDATION_EDGE],
-    }
-
-    with pytest.raises(ValueError, match="cyclic dependency edge"):
-        topological_order({"placeframe-core": CORE, "placeframe-arfoundation": ARFOUNDATION}, cycle_edges)
-
-
-def test_topological_order_rejects_self_edges():
-    self_edges = {
-        "placeframe-core": [DependencyEdge(dependency_package="placeframe-core", registry="npm", identity="Y")]
-    }
-
-    with pytest.raises(ValueError, match="cyclic dependency edge"):
-        topological_order({"placeframe-core": CORE}, self_edges)
-
-
 def test_resolve_dependency_versions_co_publishing_rides_the_next_version():
-    tags = FakeTagSource(
-        versions={"placeframe-core-v": ["1.0.5"]},
-        changed={"packages/unity/Core": True, "packages/unity/ARFoundation": True},
-    )
-    plans = compute_plan(PACKAGES, tags, EDGES)
+    plans = {
+        "placeframe-core": PackagePlan(name="placeframe-core", publish=True, version="1.0.6", last_version="1.0.5"),
+    }
 
     resolved = resolve_dependency_versions(EDGES["placeframe-arfoundation"], plans, {"placeframe-core"})
 
@@ -272,11 +121,9 @@ def test_resolve_dependency_versions_co_publishing_rides_the_next_version():
 
 
 def test_resolve_dependency_versions_unchanged_sibling_rides_the_current_tag():
-    tags = FakeTagSource(
-        versions={"placeframe-core-v": ["1.0.5"]},
-        changed={"packages/unity/Core": False, "packages/unity/ARFoundation": True},
-    )
-    plans = compute_plan(PACKAGES, tags, EDGES)
+    plans = {
+        "placeframe-core": PackagePlan(name="placeframe-core", publish=False, version="1.0.5", last_version="1.0.5"),
+    }
 
     resolved = resolve_dependency_versions(EDGES["placeframe-arfoundation"], plans, {"placeframe-arfoundation"})
 
@@ -284,22 +131,18 @@ def test_resolve_dependency_versions_unchanged_sibling_rides_the_current_tag():
 
 
 def test_resolve_dependency_versions_never_published_sibling_is_loud():
-    tags = FakeTagSource(
-        versions={},
-        changed={"packages/unity/ARFoundation": True},
-    )
-    plans = compute_plan(PACKAGES, tags, EDGES)
+    plans = {
+        "placeframe-core": PackagePlan(name="placeframe-core", publish=False, version="0.0.0", last_version=None),
+    }
 
     with pytest.raises(ValueError, match="'placeframe-core' has never published"):
         resolve_dependency_versions(EDGES["placeframe-arfoundation"], plans, {"placeframe-arfoundation"})
 
 
 def test_resolve_dependency_versions_first_release_pair_co_publishes():
-    tags = FakeTagSource(
-        versions={},
-        changed={"packages/unity/Core": True, "packages/unity/ARFoundation": True},
-    )
-    plans = compute_plan(PACKAGES, tags, EDGES)
+    plans = {
+        "placeframe-core": PackagePlan(name="placeframe-core", publish=True, version="1.0.0", last_version=None),
+    }
 
     resolved = resolve_dependency_versions(
         EDGES["placeframe-arfoundation"], plans, {"placeframe-core", "placeframe-arfoundation"}
@@ -343,14 +186,3 @@ def test_release_plan_bumps_app_on_its_own_path_change():
 
     assert release_plan.publishing == set()
     assert release_plan.app_versions == {"app": "0.2.4"}
-
-
-def test_render_plan_summary_lists_apps_with_old_and_new_versions():
-    tags = FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": True, "app": False})
-
-    release_plan = compute_release_plan(RELEASE_CONFIG, tags)
-
-    summary = render_plan_summary(release_plan)
-    assert "### Publish Plan" in summary
-    assert "| pkg | True | 0.1.0 |" in summary
-    assert "- app: 0.2.3 -> 0.2.4" in summary

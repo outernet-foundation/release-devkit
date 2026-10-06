@@ -49,7 +49,22 @@ class ReleasePlan:
 
 def compute_and_print_plan(config: PublishConfig, tags: TagSource, step_summary: str | None) -> ReleasePlan:
     release_plan = compute_release_plan(config, tags)
-    summary = render_plan_summary(release_plan)
+
+    lines = [
+        "### Publish Plan",
+        "| Package | Publish | Version |",
+        "|---|---|---|",
+    ]
+    lines.extend(f"| {plan.name} | {plan.publish} | {plan.version} |" for plan in release_plan.plans.values())
+    lines.extend(["", "### App Versions"])
+    for app_name, last_version in release_plan.app_last_versions.items():
+        new_version = release_plan.app_versions.get(app_name)
+        if new_version is not None:
+            lines.append(f"- {app_name}: {last_version or '(none)'} -> {new_version}")
+        else:
+            lines.append(f"- {app_name}: {last_version or '0.0.0'} (unchanged)")
+    summary = "\n".join(lines)
+
     print(summary)
     append_line(step_summary, summary)
     return release_plan
@@ -58,53 +73,21 @@ def compute_and_print_plan(config: PublishConfig, tags: TagSource, step_summary:
 def compute_release_plan(publish_config: PublishConfig, tags: TagSource) -> ReleasePlan:
     packages = publish_config.packages
     edges = resolve_edges(packages)
-    plans = compute_plan(packages, tags, edges)
-    publishing = {name for name in packages if plans[name].publish}
-    resolved_versions = {
-        name: resolve_dependency_versions(edges[name], plans, publishing) for name in packages if name in publishing
-    }
-    any_package_published = any(plans[name].publish for name in packages)
-    app_last_versions: dict[str, str | None] = {}
-    app_versions: dict[str, str] = {}
-    for app_name, app_config in publish_config.apps.items():
-        prefix = f"{app_name}-v"
-        last_version = tags.latest_version(prefix)
-        last_in_line = tags.latest_version_in_line(prefix, app_config.major_minor)
-        app_last_versions[app_name] = last_version
-        changed = tags.has_changes_since(f"{prefix}{last_version}" if last_version else None, app_config.path)
-        # Apps depend on packages — bump if any package changed
-        if any_package_published:
-            changed = True
-        if changed:
-            app_versions[app_name] = next_version(app_config.major_minor, last_in_line, last_version, app_name)
-    return ReleasePlan(
-        plans=plans,
-        publishing=publishing,
-        resolved_versions=resolved_versions,
-        app_last_versions=app_last_versions,
-        app_versions=app_versions,
-    )
 
+    dependencies = {name: {edge.dependency_package for edge in edges.get(name, [])} for name in packages}
+    ordered: list[str] = []
+    placed: set[str] = set()
+    remaining = list(packages)
+    while remaining:
+        ready = next((name for name in remaining if dependencies[name] <= placed), None)
+        if ready is None:
+            raise ValueError(f"cyclic dependency edge among packages: {sorted(remaining)}")
+        ordered.append(ready)
+        placed.add(ready)
+        remaining.remove(ready)
 
-def publishing_registries(release_plan: ReleasePlan, packages: dict[str, PackageConfig]) -> set[str]:
-    return {registry_name for name in release_plan.publishing for registry_name in packages[name].registries}
-
-
-def setup_publishing_environment(release_plan: ReleasePlan, packages: dict[str, PackageConfig], workspace: str) -> None:
-    with ci_step("Setup"):
-        configure_git(workspace)
-        registries_to_publish = publishing_registries(release_plan, packages)
-        if "nuget" in registries_to_publish:
-            install_dotnet("8.0")
-        if "npm" in registries_to_publish:
-            install_node("24", "https://registry.npmjs.org")
-
-
-def compute_plan(
-    packages: dict[str, PackageConfig], tags: TagSource, edges: dict[str, list[DependencyEdge]]
-) -> dict[str, PackagePlan]:
     plans: dict[str, PackagePlan] = {}
-    for name in topological_order(packages, edges):
+    for name in ordered:
         package = packages[name]
         prefix = f"{name}-v"
         last_version = tags.latest_version(prefix)
@@ -120,7 +103,43 @@ def compute_plan(
             ),
             last_version=last_version,
         )
-    return plans
+
+    publishing = {name for name in packages if plans[name].publish}
+    resolved_versions = {
+        name: resolve_dependency_versions(edges[name], plans, publishing) for name in packages if name in publishing
+    }
+    any_package_published = any(plans[name].publish for name in packages)
+    app_last_versions: dict[str, str | None] = {}
+    app_versions: dict[str, str] = {}
+    for app_name, app_config in publish_config.apps.items():
+        prefix = f"{app_name}-v"
+        last_version = tags.latest_version(prefix)
+        last_in_line = tags.latest_version_in_line(prefix, app_config.major_minor)
+        app_last_versions[app_name] = last_version
+        changed = tags.has_changes_since(f"{prefix}{last_version}" if last_version else None, app_config.path)
+        if any_package_published:
+            changed = True
+        if changed:
+            app_versions[app_name] = next_version(app_config.major_minor, last_in_line, last_version, app_name)
+    return ReleasePlan(
+        plans=plans,
+        publishing=publishing,
+        resolved_versions=resolved_versions,
+        app_last_versions=app_last_versions,
+        app_versions=app_versions,
+    )
+
+
+def setup_publishing_environment(release_plan: ReleasePlan, packages: dict[str, PackageConfig], workspace: str) -> None:
+    with ci_step("Setup"):
+        configure_git(workspace)
+        registries_to_publish = {
+            registry_name for name in release_plan.publishing for registry_name in packages[name].registries
+        }
+        if "nuget" in registries_to_publish:
+            install_dotnet("8.0")
+        if "npm" in registries_to_publish:
+            install_node("24", "https://registry.npmjs.org")
 
 
 def resolve_dependency_versions(
@@ -141,21 +160,6 @@ def resolve_dependency_versions(
     return resolved
 
 
-def topological_order(packages: dict[str, PackageConfig], edges: dict[str, list[DependencyEdge]]) -> list[str]:
-    dependencies = {name: {edge.dependency_package for edge in edges.get(name, [])} for name in packages}
-    ordered: list[str] = []
-    placed: set[str] = set()
-    remaining = list(packages)
-    while remaining:
-        ready = next((name for name in remaining if dependencies[name] <= placed), None)
-        if ready is None:
-            raise ValueError(f"cyclic dependency edge among packages: {sorted(remaining)}")
-        ordered.append(ready)
-        placed.add(ready)
-        remaining.remove(ready)
-    return ordered
-
-
 def next_version(major_minor: str, last_in_line: str | None, last_overall: str | None, subject: str) -> str:
     line = parse_major_minor(major_minor)
     if last_overall is not None and parse_version(last_overall)[:2] > line:
@@ -167,20 +171,3 @@ def next_version(major_minor: str, last_in_line: str | None, last_overall: str |
         return f"{line[0]}.{line[1]}.0"
     major, minor, patch = parse_version(last_in_line)
     return f"{major}.{minor}.{patch + 1}"
-
-
-def render_plan_summary(release_plan: ReleasePlan) -> str:
-    lines = [
-        "### Publish Plan",
-        "| Package | Publish | Version |",
-        "|---|---|---|",
-    ]
-    lines.extend(f"| {plan.name} | {plan.publish} | {plan.version} |" for plan in release_plan.plans.values())
-    lines.extend(["", "### App Versions"])
-    for app_name, last_version in release_plan.app_last_versions.items():
-        new_version = release_plan.app_versions.get(app_name)
-        if new_version is not None:
-            lines.append(f"- {app_name}: {last_version or '(none)'} -> {new_version}")
-        else:
-            lines.append(f"- {app_name}: {last_version or '0.0.0'} (unchanged)")
-    return "\n".join(lines)

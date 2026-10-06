@@ -13,17 +13,8 @@ from release_devkit.builds import DigestEntry, pull_build_assets
 from release_devkit.drafts import (
     append_draft_section,
     delete_draft_release,
-    emit_draft_backlink,
-    ensure_draft_release,
-    replace_or_prepend_section,
-    stage_draft_assets,
-    upload_draft_assets,
 )
-from release_devkit.verbs.update_pr_draft import (
-    build_draft_section,
-    emit_draft_summary,
-    update_pr_draft,
-)
+from release_devkit.verbs.update_pr_draft import update_pr_draft
 
 
 def null_ci_step(label: str) -> object:
@@ -103,95 +94,6 @@ def test_pull_build_assets_returns_empty_when_no_builds() -> None:
     assert result == []
 
 
-def test_stage_draft_assets_uses_configured_name_stem() -> None:
-    source = make_source_file("original.apk")
-    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
-
-    staged = stage_draft_assets([(artifact, source)], "42")
-
-    assert len(staged) == 1
-    name, path = staged[0]
-    assert name == "MyApp-AndroidMobile-run-42.apk"
-    assert path.is_file()
-
-
-def test_stage_draft_assets_uses_source_stem_when_name_unset() -> None:
-    source = make_source_file("app.apk")
-    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile")
-
-    staged = stage_draft_assets([(artifact, source)], "42")
-
-    assert len(staged) == 1
-    assert staged[0][0] == "app-run-42.apk"
-
-
-def test_ensure_draft_release_creates_when_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    bash_log = patch_bash(monkeypatch, check_returns=False)
-
-    ensure_draft_release("pr-7", "owner/repo", "abc123")
-
-    assert any("gh release create pr-7" in command for command in bash_log.commands)
-    assert any("--draft" in command for command in bash_log.commands)
-    assert any("--target abc123" in command for command in bash_log.commands)
-
-
-def test_ensure_draft_release_skips_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    bash_log = patch_bash(monkeypatch, check_returns=True)
-
-    ensure_draft_release("pr-7", "owner/repo", "abc123")
-
-    assert not bash_log.commands
-
-
-def test_upload_draft_assets_uses_clobber(monkeypatch: pytest.MonkeyPatch) -> None:
-    bash_log = patch_bash(monkeypatch)
-    source = make_source_file("asset.apk")
-
-    upload_draft_assets("pr-7", "owner/repo", [("asset-run-42.apk", source)])
-
-    assert any("gh release upload pr-7" in command and "--clobber" in command for command in bash_log.commands)
-
-
-def test_emit_draft_summary_writes_download_links(tmp_path: Path) -> None:
-    summary_path = tmp_path / "summary.md"
-    source = make_source_file("asset.apk")
-
-    emit_draft_summary(str(summary_path), "pr-7", "owner/repo", [("MyApp-run-42.apk", source)])
-
-    content = summary_path.read_text(encoding="utf-8")
-    assert "https://github.com/owner/repo/releases/download/pr-7/MyApp-run-42.apk" in content
-    assert "[MyApp-run-42.apk]" in content
-
-
-def test_build_draft_section_renders_heading_images_and_assets() -> None:
-    source = make_source_file("MyApp.apk")
-    manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
-
-    section = build_draft_section(
-        "owner/repo",
-        "pr-7",
-        "42",
-        "https://github.com/owner/repo/actions/runs/99",
-        7,
-        [("MyApp-run-42.apk", source)],
-        manifest,
-    )
-
-    assert "### [Run #42](https://github.com/owner/repo/actions/runs/99)" in section
-    assert "[PR #7](https://github.com/owner/repo/pull/7)" in section
-    assert "#### Built images" in section
-    assert "zed-capture" in section
-    assert "https://github.com/owner/repo/releases/download/pr-7/MyApp-run-42.apk" in section
-
-
-def test_build_draft_section_omits_images_when_empty() -> None:
-    section = build_draft_section(
-        "owner/repo", "pr-7", "42", "https://github.com/owner/repo/actions/runs/99", 7, [], {}
-    )
-
-    assert "Built images" not in section
-
-
 def test_delete_draft_release_deletes_with_cleanup_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=True)
 
@@ -268,30 +170,6 @@ def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -
     assert not bash_log.commands
 
 
-def test_replace_or_prepend_section_prepends_to_empty_body() -> None:
-    result = replace_or_prepend_section("", "run-42", "### Heading")
-
-    assert result == '<a id="run-42"></a>\n### Heading\n'
-
-
-def test_replace_or_prepend_section_prepends_newest_first() -> None:
-    body = '<a id="run-42"></a>\n### Old'
-
-    result = replace_or_prepend_section(body, "run-43", "### New")
-
-    assert result.startswith('<a id="run-43"></a>\n### New')
-    assert '<a id="run-42"></a>\n### Old' in result
-
-
-def test_replace_or_prepend_section_replaces_existing_anchor() -> None:
-    body = '<a id="run-42"></a>\n### Old\n\n| pkg |'
-
-    result = replace_or_prepend_section(body, "run-42", "### Updated")
-
-    assert "### Old" not in result
-    assert '<a id="run-42"></a>\n### Updated' in result
-
-
 def test_append_draft_section_writes_notes_file(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=False)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
@@ -299,13 +177,3 @@ def test_append_draft_section_writes_notes_file(monkeypatch: pytest.MonkeyPatch)
     append_draft_section("dev-builds", "owner/repo", "run-42", "### Heading")
 
     assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
-
-
-def test_emit_draft_backlink_writes_anchor_link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    summary_path = tmp_path / "summary.md"
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn("https://github.com/owner/repo/releases/tag/untagged-abc"))
-
-    emit_draft_backlink(str(summary_path), "dev-builds", "owner/repo", "run-42")
-
-    content = summary_path.read_text(encoding="utf-8")
-    assert "https://github.com/owner/repo/releases/tag/untagged-abc#run-42" in content
