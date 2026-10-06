@@ -4,18 +4,18 @@
 
 - [x] Inline `render_summary` into `render_plan_summary` (plan.py) — also fixes callee-before-caller
 - [x] `REGISTRY_URL_BUILDERS` lambdas → format strings (registries.py)
-- [x] Inline `actionlint_cache_dir` into `ensure_actionlint` (lint_workflows.py)
-- [x] Extract `setup_publishing_environment` helper into plan.py; release.py + prerelease.py call it
+- [x] Inline `actionlint_cache_dir` into `ensure_actionlint` (verbs/lint_workflows.py)
+- [x] Extract `setup_publishing_environment` helper into plan.py; verbs/release.py + verbs/prerelease.py call it
 - [x] Fold `GitTags` pass-through delegates (`has_changes_since_tag`, `create_and_push_tag`) into class methods
 - [x] Delete 3 meta-tests (`test_fake_tag_source_satisfies_protocol`, `test_package_plan_dataclass_shape`, `test_dev_version_formats_cover_every_known_registry`) + 1 redundant `test_render_summary` (subsumed by `test_render_plan_summary`)
 - [x] Remove defensive double-call of `ensure_draft_release` inside `append_draft_section` (both callers already ensure)
 - [x] Remove unused `sha` parameter from `append_draft_section` signature + update all callers
-- [x] Extract `builds.py` from `create_release.py` — shared utilities (`DigestEntry`, `MatchedRun`, `matched_ci_run_number`, `builds_registry_of`, `pull_build_assets`, `pull_digest_manifest`, `render_images_table`) moved to `builds.py`; `create_release.py` is now a ~80-line pure verb; `prerelease.py` and `draft_releases.py` import from `builds` instead of `create_release`
-- [x] Inline single-call helpers — `pick_tree_tag` and `ghcr_package_url` inlined into `render_images_table` (builds.py); `select_artifact_file` inlined into `pull_build_assets` (builds.py); `app_has_changes`, `parse_merge_pr`, `existing_dev_builds_digests` inlined into `main` (prerelease.py); `render_dev_summary` inlined into `main` (prerelease.py, removed from plan.py). 13 dedicated tests deleted; integration tests cover the inlined logic.
+- [x] Extract `builds.py` from `verbs/create_release.py` — shared utilities (`DigestEntry`, `MatchedRun`, `matched_ci_run_number`, `builds_registry_of`, `pull_build_assets`, `pull_digest_manifest`, `render_images_table`) moved to `builds.py`; `verbs/create_release.py` is now a ~80-line pure verb; `verbs/prerelease.py` and `verbs/draft_releases.py` import from `builds` instead of `create_release`
+- [x] Inline single-call helpers — `pick_tree_tag` and `ghcr_package_url` inlined into `render_images_table` (builds.py); `select_artifact_file` inlined into `pull_build_assets` (builds.py); `app_has_changes`, `parse_merge_pr`, `existing_dev_builds_digests` inlined into `main` (verbs/prerelease.py); `render_dev_summary` inlined into `main` (verbs/prerelease.py, removed from plan.py). 13 dedicated tests deleted; integration tests cover the inlined logic.
 - [ ] Fold `outputs.py` into a shared module — `builds.py` now exists as the natural home
 - [ ] Shared `Settings` base class — judgement call on the right factoring
 - [ ] `conftest.py` for test helpers — test-only, lower stakes
-- [ ] Fix `prerelease.py:main` ci_step block scope — changes CI output structure
+- [ ] Fix `verbs/prerelease.py:main` ci_step block scope — changes CI output structure
 - [ ] `ephemeral_manifest_patch` / `ephemeral_pyproject_patch` skeleton dedup — extraction awkward under no-closures rule
 - [ ] `MatchedRun` model simplification — defensible validation of external API response
 
@@ -25,22 +25,22 @@ Verification: ruff check ✅, ruff format ✅, basedpyright 0 errors ✅, 224 te
 
 ## Architectural flaws causing line/file bloat
 
-### 1. `create_release.py` is a shared library masquerading as a verb module — biggest finding [DONE]
+### 1. `verbs/create_release.py` is a shared library masquerading as a verb module — biggest finding [DONE]
 
-`create_release.py` (was 252 lines, 11 functions/classes) exported **6 shared utilities** consumed by 3 other modules:
+`verbs/create_release.py` (was 252 lines, 11 functions/classes) exported **6 shared utilities** consumed by 3 other modules:
 
 | Export | Imported by |
 |---|---|
-| `DigestEntry` | `prerelease.py`, `draft_releases.py` |
-| `matched_ci_run_number` | `prerelease.py` |
-| `pull_build_assets` | `draft_releases.py`, `prerelease.py` |
-| `builds_registry_of` | `draft_releases.py`, `prerelease.py` |
-| `pull_digest_manifest` | `draft_releases.py`, `prerelease.py` |
-| `render_images_table` | `draft_releases.py`, `prerelease.py` |
+| `DigestEntry` | `verbs/prerelease.py`, `verbs/draft_releases.py` |
+| `matched_ci_run_number` | `verbs/prerelease.py` |
+| `pull_build_assets` | `verbs/draft_releases.py`, `verbs/prerelease.py` |
+| `builds_registry_of` | `verbs/draft_releases.py`, `verbs/prerelease.py` |
+| `pull_digest_manifest` | `verbs/draft_releases.py`, `verbs/prerelease.py` |
+| `render_images_table` | `verbs/draft_releases.py`, `verbs/prerelease.py` |
 
-The actual verb (`run_create_release`) was 1 of 11 things in the file. The import graph was inverted: `draft_releases.py` and `prerelease.py` imported from a "verb" peer, not from a shared library.
+The actual verb (`run_create_release`) was 1 of 11 things in the file. The import graph was inverted: `verbs/draft_releases.py` and `verbs/prerelease.py` imported from a "verb" peer, not from a shared library.
 
-**Fix applied:** Extracted the 6 shared utilities + `DigestEntry` + `MatchedRun` into `builds.py`. `create_release.py` is now a ~80-line pure verb; `builds.py` is a ~170-line focused asset/digest library that all three verbs import from cleanly.
+**Fix applied:** Extracted the 6 shared utilities + `DigestEntry` + `MatchedRun` into `builds.py`. `verbs/create_release.py` is now a ~80-line pure verb; `builds.py` is a ~170-line focused asset/digest library that all three verbs import from cleanly.
 
 ### 2. `outputs.py` — a 9-line file-per-function [SKIPPED — builds.py now exists as natural home]
 
@@ -48,15 +48,15 @@ One function (`append_line`), 4 lines of logic, 4 callers across 4 modules. This
 
 **Fix:** Fold `append_line` into `builds.py` (or `config.py`, or a `ci_io.py`). Eliminates 1 file. `builds.py` now exists as the natural home.
 
-### 3. Setup block duplicated verbatim between `release.py` and `prerelease.py` [DONE]
+### 3. Setup block duplicated verbatim between `verbs/release.py` and `verbs/prerelease.py` [DONE]
 
-`release.py:48-54` and `prerelease.py:111-117` were character-identical setup blocks.
+`verbs/release.py:48-54` and `verbs/prerelease.py:111-117` were character-identical setup blocks.
 
 **Fix applied:** Extracted `setup_publishing_environment(release_plan, packages, workspace)` into `plan.py`. Both verbs call it.
 
 ### 4. Seven `Settings` classes with overlapping fields [SKIPPED — judgement call on factoring]
 
-Every verb file defines its own `Settings(BaseSettings)`:
+Every verb file in `verbs/` defines its own `Settings(BaseSettings)`:
 
 | Field | Files that declare it |
 |---|---|
@@ -85,14 +85,14 @@ Per the inline-single-call-helpers rule (no try block, no idempotency-guard pred
 | Helper | Was in | Body | Status |
 |---|---|---|---|
 | `render_summary` | plan.py | 7 lines | **inlined** into `render_plan_summary` (prior pass) |
-| `actionlint_cache_dir` | lint_workflows.py | 1 line | **inlined** into `ensure_actionlint` (prior pass) |
-| `pick_tree_tag` | builds.py (was create_release.py) | 5 lines | **inlined** into `render_images_table` |
-| `ghcr_package_url` | builds.py (was create_release.py) | 9 lines | **inlined** into `render_images_table` |
-| `select_artifact_file` | builds.py (was create_release.py) | 13 lines | **inlined** into `pull_build_assets` |
-| `app_has_changes` | prerelease.py | 4 lines | **inlined** into `main` |
-| `parse_merge_pr` | prerelease.py | 6 lines | **inlined** into `main` |
-| `existing_dev_builds_digests` | prerelease.py | 4 lines | **inlined** into `main` |
-| `render_dev_summary` | plan.py | 17 lines | **inlined** into `prerelease.py:main` (removed from plan.py) |
+| `actionlint_cache_dir` | verbs/lint_workflows.py | 1 line | **inlined** into `ensure_actionlint` (prior pass) |
+| `pick_tree_tag` | builds.py (was verbs/create_release.py) | 5 lines | **inlined** into `render_images_table` |
+| `ghcr_package_url` | builds.py (was verbs/create_release.py) | 9 lines | **inlined** into `render_images_table` |
+| `select_artifact_file` | builds.py (was verbs/create_release.py) | 13 lines | **inlined** into `pull_build_assets` |
+| `app_has_changes` | verbs/prerelease.py | 4 lines | **inlined** into `main` |
+| `parse_merge_pr` | verbs/prerelease.py | 6 lines | **inlined** into `main` |
+| `existing_dev_builds_digests` | verbs/prerelease.py | 4 lines | **inlined** into `main` |
+| `render_dev_summary` | plan.py | 17 lines | **inlined** into `verbs/prerelease.py:main` (removed from plan.py) |
 
 13 dedicated tests deleted (3 for `pick_tree_tag`, 2 for `ghcr_package_url`, 3 for `app_has_changes`, 2 for `existing_dev_builds_digests`, 2 for `parse_merge_pr`, 1 for `render_dev_summary`). Integration tests cover the inlined logic.
 
@@ -111,7 +111,7 @@ All other files follow caller-first ordering correctly.
 No catch-and-rethrow smells found. The three `try` blocks are all legitimate:
 - `NuGetRegistry.publish` (registries.py): catches `CalledProcessError` to **sanitize** the error (strip the API key from the command text before re-raising as `SystemExit`). Specific exception, specific recovery.
 - `NpmRegistry.publish` (registries.py): catches `CalledProcessError` to swallow `EPUBLISHCONFLICT` (idempotent re-publish). Specific exception, specific recovery.
-- `run_actionlint` (lint_workflows.py): catches `CalledProcessError` to convert to `SystemExit(returncode)` at the CLI boundary. Top-level boundary pattern.
+- `run_actionlint` (verbs/lint_workflows.py): catches `CalledProcessError` to convert to `SystemExit(returncode)` at the CLI boundary. Top-level boundary pattern.
 
 No guards against impossible scenarios found. The `if not verb_steps: return` early-returns and the `is_mapping`/`is_object_list` TypeGuard checks all guard real conditions.
 
@@ -166,7 +166,7 @@ A pydantic model with two `| None` fields, used once to parse a `gh api --jq` re
 
 ## Control-flow smell [SKIPPED — changes CI output structure]
 
-### `prerelease.py:main` — `ci_step` block too broad, early returns inside it
+### `verbs/prerelease.py:main` — `ci_step` block too broad, early returns inside it
 
 The `with ci_step("Compute dev publish plan"):` block wraps plan computation, summary rendering, changed-app detection, CI-run lookup, digest pulling, image-change detection, **and** both early returns (nothing-to-publish, dry-run). The step label says "compute plan" but the block does 7 things. The early returns inside the context manager mean `ci_step`'s exit code fires on the early-return path — surprising for a step labeled "compute." The change detection and early-return decisions should be outside the `ci_step`.
 
@@ -176,7 +176,7 @@ The `with ci_step("Compute dev publish plan"):` block wraps plan computation, su
 
 | Change | Status | Lines saved |
 |---|---|---|
-| Extract `builds.py` from `create_release.py` | **done** | ~0 net, but 252→~80 for create_release |
+| Extract `builds.py` from `verbs/create_release.py` | **done** | ~0 net, but 252→~80 for create_release |
 | Fold `outputs.py` into a shared module | skipped | ~5 |
 | Inline `render_summary` into `render_plan_summary` | **done** | ~8 |
 | Inline `actionlint_cache_dir` into `ensure_actionlint` | **done** | ~3 |
@@ -188,6 +188,6 @@ The `with ci_step("Compute dev publish plan"):` block wraps plan computation, su
 | Delete meta-tests | **done** | ~20 (tests) |
 | Shared `Settings` base | skipped | ~25-30 |
 | `conftest.py` for test helpers | skipped | ~100 (tests) |
-| Fix `prerelease.py:main` ci_step scope | skipped | — |
+| Fix `verbs/prerelease.py:main` ci_step scope | skipped | — |
 
 Net source lines reduced: ~80 (plus ~40 test lines). All changes verified: ruff, basedpyright, 224 tests passing.
