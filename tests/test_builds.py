@@ -138,7 +138,7 @@ def test_render_images_table_links_tree_tag_to_ghcr_url() -> None:
         )
     }
 
-    lines = render_images_table(manifest)
+    lines = render_images_table(manifest).splitlines()
 
     assert lines[0] == "| Image | Tag | Digest |"
     assert any(

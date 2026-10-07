@@ -19,8 +19,14 @@ class PackageRow:
     registries: list[RegistryLink] = field(default_factory=list)
 
 
-def render_images_table(manifest: dict[str, DigestEntry]) -> list[str]:
-    lines = ["| Image | Tag | Digest |", "|---|---|---|"]
+def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
+    lines = [f"| {' | '.join(headers)} |", f"|{'|'.join('---' for _ in headers)}|"]
+    lines.extend(f"| {' | '.join(row)} |" for row in rows)
+    return "\n".join(lines)
+
+
+def render_images_table(manifest: dict[str, DigestEntry]) -> str:
+    rows: list[list[str]] = []
     for target, entry in manifest.items():
         tree_tag = next(
             (tag for tag in entry.tags if tag.startswith("tree-")),
@@ -33,5 +39,5 @@ def render_images_table(manifest: dict[str, DigestEntry]) -> list[str]:
             if len(parts) >= 2:
                 url = f"https://github.com/orgs/{parts[0]}/packages/container/{parts[1].replace('/', '%2F')}"
         tag_cell = f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—")
-        lines.append(f"| {target} | {tag_cell} | `{entry.digest}` |")
-    return lines
+        rows.append([target, tag_cell, f"`{entry.digest}`"])
+    return markdown_table(["Image", "Tag", "Digest"], rows)

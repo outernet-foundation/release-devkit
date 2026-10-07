@@ -11,7 +11,7 @@ from bashrun.bash import bash, bash_check, bash_output
 from release_devkit.builds import pull_build_assets
 from release_devkit.context import VerbContext
 from release_devkit.plan import package_rows
-from release_devkit.rendering import render_images_table
+from release_devkit.rendering import markdown_table, render_images_table
 
 DEV_DRAFT_TAG = "dev-builds"
 
@@ -27,11 +27,12 @@ def write_release(
 ) -> None:
     repository = context.settings.github_repository
 
+    view_command = f"gh release view {tag} --repo {repository}"
     body = ""
-    if not bash_check(f"gh release view {tag} --repo {repository}"):
-        bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
+    if bash_check(view_command):
+        body = json.loads(bash_output(f"{view_command} --json body"))["body"]
     else:
-        body = json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body"))["body"]
+        bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
 
     staged: list[tuple[str, str, Path]] = []
     if context.publish_config.apps:
@@ -54,10 +55,10 @@ def write_release(
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
 
     prefix = "#" * (2 if publish else 4)
-    blocks: list[list[str]] = []
+    blocks: list[str] = []
 
     if heading is not None:
-        blocks.append([heading])
+        blocks.append(heading)
 
     if published is not None:
         configured = context.publish_config.packages
@@ -65,56 +66,46 @@ def write_release(
             identity: name for name, package in configured.items() for identity in package.registries.values()
         }
         overrides = {names_by_identity[identity]: version for _, identity, version in published}
-        rows = package_rows(configured, overrides)
-        if rows:
-            package_lines = ["| Package | Version | Registry |", "|---|---|---|"]
-            for row in rows:
-                if not row.registries:
-                    package_lines.append(f"| {row.name} | {row.version} | — |")
-                    continue
-                registry_versions = {link.version for link in row.registries}
-                if len(registry_versions) == 1:
-                    version_cell = next(iter(registry_versions))
-                else:
-                    version_cell = ", ".join(f"{link.version} ({link.name})" for link in row.registries)
-                registry_parts: list[str] = []
-                for link in row.registries:
-                    if link.url is not None:
-                        registry_parts.append(f"[{link.name}]({link.url})")
-                    else:
-                        registry_parts.append(link.name)
-                package_lines.append(f"| {row.name} | {version_cell} | {', '.join(registry_parts)} |")
-            blocks.append([f"{prefix} Packages", *package_lines])
+        table_rows: list[list[str]] = []
+        for package_row in package_rows(configured, overrides):
+            if not package_row.registries:
+                table_rows.append([package_row.name, package_row.version, "—"])
+                continue
+            registry_versions = {link.version for link in package_row.registries}
+            if len(registry_versions) == 1:
+                version_cell = next(iter(registry_versions))
+            else:
+                version_cell = ", ".join(f"{link.version} ({link.name})" for link in package_row.registries)
+            registries_cell = ", ".join(
+                f"[{link.name}]({link.url})" if link.url is not None else link.name for link in package_row.registries
+            )
+            table_rows.append([package_row.name, version_cell, registries_cell])
+        if table_rows:
+            blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
     if staged:
-        app_lines = ["| App | Version | Asset |", "|---|---|---|"]
+        table_rows = []
         for app_name, asset_name, _ in staged:
             version = versions.get(app_name)
             version_cell = version if version is not None else "—"
             asset_url = f"https://github.com/{repository}/releases/download/{tag}/{asset_name}"
-            app_lines.append(f"| {app_name} | {version_cell} | [{asset_name}]({asset_url}) |")
-        blocks.append([f"{prefix} Apps", *app_lines])
+            table_rows.append([app_name, version_cell, f"[{asset_name}]({asset_url})"])
+        blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], table_rows)}")
 
     if context.manifest:
-        blocks.append([f"{prefix} Built images", *render_images_table(context.manifest)])
+        blocks.append(f"{prefix} Built images\n{render_images_table(context.manifest)}")
 
-    section = "\n\n".join("\n".join(block) for block in blocks)
+    section = "\n\n".join(blocks)
 
     if not publish:
         anchor = f"sha-{context.short}"
         parts = re.split(r'<a id="([^"]+)"></a>', body)
-        sections: list[tuple[str, str]] = [
-            (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "")
-            for index in range(1, len(parts), 2)
-        ]
-        new_entry = (anchor, section)
-        for index, (existing_anchor, _) in enumerate(sections):
-            if existing_anchor == anchor:
-                sections[index] = new_entry
-                break
+        sections = {parts[index]: parts[index + 1].strip() for index in range(1, len(parts), 2)}
+        if anchor in sections:
+            sections[anchor] = section
         else:
-            sections.insert(0, new_entry)
-        section = "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections])
+            sections = {anchor: section, **sections}
+        section = "\n\n".join(f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections.items())
 
     draft_flag = " --draft=false" if publish else ""
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
