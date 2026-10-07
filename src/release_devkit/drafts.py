@@ -9,53 +9,10 @@ from bashrun.bash import bash, bash_check, bash_output
 
 from release_devkit.builds import stage_build_assets
 from release_devkit.context import VerbContext
-from release_devkit.rendering import PackageRow, collect_app_rows, render_release_body
 from release_devkit.tags import latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
-_ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
-
-
-def write_draft_section(
-    context: VerbContext,
-    tag: str,
-    heading_fragments: list[str],
-    packages: list[PackageRow] | None = None,
-) -> None:
-    app_last_versions = latest_app_versions(context)
-
-    body = ensure_draft_release(context, tag)
-
-    staged = stage_and_upload(context, tag, context.short)
-
-    # Split the body into anchor-keyed sections
-    anchor = f"sha-{context.short}"
-    parts = _ANCHOR_PATTERN.split(body)
-    sections: list[tuple[str, str]] = [
-        (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "") for index in range(1, len(parts), 2)
-    ]
-
-    # Build the section's app table rows
-    app_rows = collect_app_rows(staged, app_last_versions, context.settings.github_repository, tag)
-
-    # Render the new section body
-    body = render_release_body(f"### {' — '.join(heading_fragments)}", packages, app_rows, context.manifest, level=4)
-
-    # Replace this SHA's section or prepend a new one
-    new_entry = (anchor, body)
-    for index, (existing_anchor, _) in enumerate(sections):
-        if existing_anchor == anchor:
-            sections[index] = new_entry
-            break
-    else:
-        sections.insert(0, new_entry)
-
-    edit_release_notes(
-        context,
-        tag,
-        "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]),
-        publish=False,
-    )
+ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
 
 
 def latest_app_versions(context: VerbContext) -> dict[str, str | None]:

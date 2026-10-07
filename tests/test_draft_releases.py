@@ -13,10 +13,7 @@ from release_devkit.verbs import update_pr_draft as update_pr_draft_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig, Settings
 from release_devkit.builds import DigestEntry, pull_build_assets
 from release_devkit.context import VerbContext
-from release_devkit.drafts import (
-    delete_draft_release,
-    write_draft_section,
-)
+from release_devkit.drafts import delete_draft_release
 from release_devkit.verbs.update_pr_draft import update_pr_draft
 
 DRAFT_URL = "https://github.com/owner/repo/releases/untagged-abc"
@@ -243,36 +240,37 @@ def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.Monke
     assert not bash_log.commands
 
 
-def test_write_draft_section_writes_notes_file_without_recreating(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_pr_draft_writes_notes_file_without_recreating(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=True)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(PublishConfig())))
 
-    context = make_context(PublishConfig())
-    write_draft_section(context, "dev-builds", ["Heading"])
+    update_pr_draft()
 
-    assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
+    assert any("gh release edit pr-7" in command and "--notes-file" in command for command in bash_log.commands)
     assert not any("gh release create" in command for command in bash_log.commands)
 
 
-def test_write_draft_section_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_pr_draft_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=False)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(PublishConfig())))
 
-    context = make_context(PublishConfig())
-    write_draft_section(context, "dev-builds", ["Heading"])
+    update_pr_draft()
 
     assert any(
-        "gh release create dev-builds" in command and "--draft" in command and f"--target {context.head}" in command
+        "gh release create pr-7" in command and "--draft" in command and f"--target {CERTIFIED_SHA}" in command
         for command in bash_log.commands
     )
-    assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
+    assert any("gh release edit pr-7" in command and "--notes-file" in command for command in bash_log.commands)
 
 
-def test_write_draft_section_replaces_same_anchor_and_preserves_others(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_pr_draft_replaces_same_anchor_and_preserves_others(monkeypatch: pytest.MonkeyPatch) -> None:
     body = f'<a id="sha-old"></a>\n### Old\n\n<a id="sha-{SHORT_SHA}"></a>\n### New v1'
     view_json = json.dumps({"body": body, "url": DRAFT_URL})
     patch_bash(monkeypatch, check_returns=True)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
+    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(PublishConfig())))
 
     written: list[str] = []
 
@@ -283,17 +281,18 @@ def test_write_draft_section_replaces_same_anchor_and_preserves_others(monkeypat
 
     monkeypatch.setattr(drafts, "bash", capturing_bash)
 
-    write_draft_section(make_context(PublishConfig()), "dev-builds", ["New v2"])
+    update_pr_draft()
 
     assert written
     assert "### Old" in written[0]
-    assert "### New v2" in written[0]
+    assert f"### [{SHORT_SHA}]" in written[0]
     assert "### New v1" not in written[0]
 
 
-def test_write_draft_section_lists_one_row_per_staged_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_pr_draft_lists_one_row_per_staged_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_bash(monkeypatch, check_returns=False)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
     monkeypatch.setattr(
         builds_module,
@@ -321,7 +320,7 @@ def test_write_draft_section_lists_one_row_per_staged_artifact(monkeypatch: pyte
 
     monkeypatch.setattr(drafts, "bash", capturing_bash)
 
-    write_draft_section(make_context(make_build_config()), "dev-builds", ["Run"])
+    update_pr_draft()
 
     assert written
     assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk](" in written[0]
