@@ -136,7 +136,7 @@ def patch_common(
     monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
     pull_assets = CallRecorder([])
     monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
-    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Not a merge commit\n"))
+    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Merge PR #7: Add the thing\n"))
     return pull_assets
 
 

@@ -66,12 +66,11 @@ def main(
 
     merge_match = _MERGE_PR_PATTERN.search(bash_output(f"git log -1 --format=%B {head}").strip())
 
-    heading_fragments: list[str] = [f"[{short}]({context.commit_url})"]
-    if merge_match is not None:
-        pr_number = int(merge_match.group(1))
-        heading_fragments.append(
-            f"[PR #{pr_number}: {merge_match.group(2)}](https://github.com/{repository}/pull/{pr_number})"
-        )
+    pr_number = int(merge_match.group(1))
+    heading_fragments: list[str] = [
+        f"[{short}]({context.commit_url})",
+        f"[PR #{pr_number}: {merge_match.group(2)}](https://github.com/{repository}/pull/{pr_number})",
+    ]
 
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
