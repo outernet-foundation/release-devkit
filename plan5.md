@@ -21,7 +21,7 @@ One content identity: the SHA. Shelf tag = `sha-{full}`. Dev version = `{base}-d
 
 ## release-devkit changes (home repo)
 
-Pre-step: the working tree has uncommitted cosmetic diffs on `prerelease.py` / `release.py` / `update_pr_draft.py` (the prior refactor's tail — hoisting, `packages`→`publish_config.packages`). Commit or discard before starting.
+Status: implemented — commit list and deltas beyond the scripted changes are in Migration order, step 1.
 
 ### `builds.py`
 - **Delete** `matched_ci_run` (lines 31-47) and `MatchedRun` (lines 26-28). The `gh api …/actions/workflows/{ci_workflow}/runs?head_sha=…` query, the `actions: read` dependency, and the "No successful CI run found" path all go.
@@ -137,7 +137,7 @@ Rewrite every run-id reference: the `prerelease`/`release` verb rows (drop "reso
 Each consumer's atomic bump commit touches:
 
 ### `release-devkit.yaml`
-- Delete the `ci_workflow:` line (hard requirement — `extra="forbid"` fails load otherwise).
+- Delete the `ci_workflow:` line (hard requirement — `extra="forbid"` fails load otherwise). A yaml that reduces to empty (its only key was `ci_workflow`) still loads: `load_config` treats an empty document as the empty config (strictyaml parses empty/comment-only files as `''`).
 
 ### `.github/actions/setup-release-devkit/action.yml`
 - Bump `RELEASE_DEVKIT_COMMIT` to the release-devkit SHA that has the SHA-pull code (must exist on the remote first — release-devkit pushes before any consumer bumps).
@@ -154,12 +154,18 @@ Each consumer's atomic bump commit touches:
 ### `.github/workflows/release.yml`
 - `prerelease` and `release` jobs: drop `actions: read` from `permissions:` (no more `matched_ci_run` API query). The verb invocation lines are unchanged (already `--repository --sha --actor --workspace --step-summary`-less bare invocations on most consumers — they resolve to the explicit-flag contract via the pin bump; verify each consumer's step spells the full flag set the lint now requires).
 
-## Migration order (clean flip, devkits-first)
+## Migration order (clean flip, devkits-first, pins held to a final sweep)
 
-1. **release-devkit** — implement all changes above; push the branch to the remote (the SHA must exist before any consumer can pin it). This repo has no `release.yml` of its own (published nowhere), so its own `integrate.yml` self-test is the only local validation.
-2. **unity-devkit** — implement the SHA-push + `--version-code` changes; bump its own `setup-release-devkit` pin to step-1's SHA; drop `ci_workflow` from its `release-devkit.yaml`; update its workflows. Publish a new unity-devkit version to PyPI.
-3. **docker-devkit** — implement the `--sha` digest-push change; bump its release-devkit pin; drop `ci_workflow`; update workflows. Publish.
-4. **Each remaining consumer** (placeframe, placeframe-capture-tool, Make-it-Sing ×2, lbe-toolkit, bashrun, ci-devkit, logger-conf, Nessle, ObserveThing, pydantic-settings-pulumi, python-devkit) — one atomic commit: bump `uv.lock` (unity/docker where relevant) + bump release-devkit pin + drop `ci_workflow` + update `integrate.yml`/`release.yml`. lint-workflows (new contract) enforces the verb shapes.
+The original ordering — push release-devkit before any consumer bumps — is reshaped: release-devkit stays unpushed while iteration continues, and all downstream work proceeds now on branches, accepting that every touched repo's CI is red until release-devkit's final SHA reaches the remote (the wrapper clones the public remote and `git checkout`s the pin, so a pinned-but-unpushed SHA fails every integrate, including unity-devkit's and docker-devkit's own self-tests). Boundaries that hold regardless of ordering:
+
+- **Atomic consumer bump**: dropping `ci_workflow` (`extra="forbid"`) and bumping the wrapper pin are one commit; there is no landable half-state, so each repo gets exactly one bump commit whenever it happens.
+- **Publish cascade**: consumers' `uv.lock` bumps need unity-devkit/docker-devkit published to PyPI, which needs their release flows green, which needs release-devkit on the remote. Strictly ordered at the publishing level no matter when the code is written.
+- **Pin-sweep choice** (branch on it, don't forecast): if release-devkit is near-final, commit the full atomic bumps now against the interim SHA and re-pin once later (a one-line re-pin commit per repo); if iteration is open-ended, hold every pin-value edit and make each repo's single atomic bump only against the final pushed SHA.
+
+1. **release-devkit** — DONE, on local `dev`, unpushed: pre-step cosmetics `d6a95be`, this plan `3a03197`, the refactor `2c745a3`, AGENTS.md rewrite `f3bc720`, plan.md deletion `17c56f2`. `dev` is 33+ commits ahead of origin and exists nowhere else — back it up before piling on more iteration. Deltas beyond the scripted changes: `load_config` gained the empty-document guard (this repo's own `release-devkit.yaml` is now empty), and the lint fold-test fixtures already spell the future unity contract (`--version-code ${{ needs.validate-release-plan.outputs.version-code }}`).
+2. **unity-devkit** — implement the SHA-push + `--version-code` changes; bump its own `setup-release-devkit` pin; drop `ci_workflow` from its `release-devkit.yaml`; update its workflows. On a branch; own CI red until release-devkit is pushed. Publish a new unity-devkit version to PyPI only after the cascade unblocks.
+3. **docker-devkit** — implement the `--sha` digest-push change; bump its release-devkit pin; drop `ci_workflow`; update workflows. Same branch/red-CI shape. Publish after the cascade unblocks.
+4. **Each remaining consumer** (placeframe, placeframe-capture-tool, Make-it-Sing ×2, lbe-toolkit, bashrun, ci-devkit, logger-conf, Nessle, ObserveThing, pydantic-settings-pulumi, python-devkit) — one atomic commit: bump `uv.lock` (unity/docker where relevant) + bump release-devkit pin + drop `ci_workflow` + update `integrate.yml`/`release.yml`; held for the final pin sweep. lint-workflows (new contract) enforces the verb shapes.
 
 Within a consumer, the bump is self-consistent (new push-side deps + new release-devkit pin both use `sha-{…}`). An incomplete bump (new push dep, old release-devkit pin) 404s at the first dev prerelease — caught immediately, no silent corruption.
 
@@ -171,7 +177,12 @@ Within a consumer, the bump is self-consistent (new push-side deps + new release
 ## Orphans / cleanup
 
 - Old `run-{N}` shelf tags on ghcr (build outputs + digest manifests) become orphaned. ghcr Container-registry storage is separately free (does not count against the Actions+Packages quota), so leaving them is harmless. Optional: a one-off `oras delete` sweep per repo after migration. Not blocking.
-- `plan.md` is superseded by this file; delete on a separate prose commit once the refactor lands.
+- `plan.md` deletion: done (`17c56f2`).
+
+## Local verification notes (sandbox)
+
+- Run everything as `env -u VIRTUAL_ENV uv run …` — the sandbox exports a host `VIRTUAL_ENV` that skews uv's environment resolution; python-devkit's preflight clears it internally, but bare invocations don't.
+- `deptry .` fails locally with 43 DEP003 findings (every `release_devkit` self-import classified as a transitive dependency; deptry's verbose output shows `known_first_party: ()`). Pre-existing — verified identical on the pristine tree via stash, and bashrun/ci-devkit pass the identical invocation. Not introduced by this refactor; diagnose separately, don't suppress.
 
 ## Deterministic-builds precondition
 
