@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
 
 from bashrun.bash import bash, bash_check, bash_output
-from ci_devkit.builds import build_exists, pull_build
+from ci_devkit.builds import pull_build
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from release_devkit.builds import DIGEST_FILE_NAME, DIGEST_PLATFORM, DIGEST_PROJECT, DigestEntry
@@ -43,26 +43,20 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
     # Pull the digest manifest from the builds shelf
     manifest = None
-    if publish_config.builds_registry is not None and build_exists(
-        publish_config.builds_registry,
-        DIGEST_PROJECT,
-        DIGEST_PLATFORM,
-        f"sha-{sha}",
-        registry_username=settings.github_actor,
-        registry_token=settings.github_token,
-    ):
+    if publish_config.builds_registry is not None:
         digest_staging = Path(mkdtemp(prefix="digest-manifest-"))
-        pull_build(
+        if pull_build(
             publish_config.builds_registry,
             DIGEST_PROJECT,
             DIGEST_PLATFORM,
             f"sha-{sha}",
             digest_staging,
+            required=False,
             registry_username=settings.github_actor,
             registry_token=settings.github_token,
-        )
-        data = json.loads((digest_staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
-        manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
+        ):
+            data = json.loads((digest_staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
+            manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
 
     short_sha = sha[:12]
     commit_url = f"https://github.com/{settings.github_repository}/commit/{sha}"

@@ -43,16 +43,12 @@ wheels = [
 
 [[package]]
 name = "ci-devkit"
-version = "0.1.15.dev36756330648"
-source = { registry = "https://pypi.org/simple" }
+version = "0.0.0.dev0"
+source = { git = "https://github.com/outernet-foundation/ci-devkit.git?rev=ade27d3ed76136026e2509110ba4b89d7f4d7a23#ade27d3ed76136026e2509110ba4b89d7f4d7a23" }
 dependencies = [
     { name = "bashrun" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/5c/1e/fdad4f4fd539491f8ddeaf45e349801b274e9f7a8b00f768c6e83df1b97d/ci_devkit-0.1.15.dev36756330648.tar.gz", hash = "sha256:55b497b377a5e10e85c773b57897e4d1f883129b45567d1ecb581c02a18eabe4", size = 53675, upload-time = "2026-09-30T18:10:54.868Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2f/1e/9f81e475c3cc65febb1e9013caf13dd20b393275c785713a7a85498dfcbc/ci_devkit-0.1.15.dev36756330648-py3-none-any.whl", hash = "sha256:4189adc38d182591cabef7e06321ae1105cdb9fb915f38d90d352a3f277630aa", size = 28208, upload-time = "2026-09-30T18:10:54.044Z" },
 ]
 
 [[package]]
@@ -252,17 +248,16 @@ wheels = [
 
 [[package]]
 name = "python-devkit"
-version = "0.1.14"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bashrun" },
-    { name = "ci-devkit" },
     { name = "pydantic" },
-    { name = "typer" },
+    { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0a/3c/4b64ad57a191fc8f6c1cf7d45619a0cc27e05bc68a1d019f67e61a68a0be/python_devkit-0.1.14.tar.gz", hash = "sha256:0e2d4f4acee43ffb13eb52b03b4f25378d28869864f7e6f4825c936f441dff2f", size = 34183, upload-time = "2026-09-28T23:51:28.654Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/60/92/4198d55ba8c023a79e475c32e4fdd815b653458bff2eb19a84a5d701dcd8/python_devkit-0.1.0.tar.gz", hash = "sha256:57f2341e01f810756957aaaa7026c7019079db31630e40151cd2fc21bcc3ba7b", size = 26511, upload-time = "2026-09-21T22:41:54.536Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/27/7c/c0a7820892b8ba0c889b3ba20f1271f6fb2883b1fd3f846bd49607ad475d/python_devkit-0.1.14-py3-none-any.whl", hash = "sha256:309c7ed1cb6ca8ba831d961cc8725f177c71af2b57083da0a169398535b4dfb8", size = 14261, upload-time = "2026-09-28T23:51:27.769Z" },
+    { url = "https://files.pythonhosted.org/packages/52/eb/990ab1df11d383905e94b291e9f2d9fee6d1f3ec367479b8b5438438e8af/python_devkit-0.1.0-py3-none-any.whl", hash = "sha256:d5fbceac116de875e2f6a998177c1fdc1f284bbb40fe6aa893c2874784c56594", size = 24612, upload-time = "2026-09-21T22:41:53.645Z" },
 ]
 
 [[package]]
@@ -337,7 +332,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bashrun", specifier = ">=0.1.0" },
-    { name = "ci-devkit", specifier = "==0.1.15.dev36756330648" },
+    { name = "ci-devkit", git = "https://github.com/outernet-foundation/ci-devkit.git?rev=ade27d3ed76136026e2509110ba4b89d7f4d7a23" },
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pydantic-settings", specifier = ">=2.9.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },

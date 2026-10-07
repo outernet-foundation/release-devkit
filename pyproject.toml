@@ -5,13 +5,16 @@ description = "Publication machinery: per-package tag ledger, path-diff change d
 requires-python = ">=3.13"
 dependencies = [
     "bashrun>=0.1.0",
-    "ci-devkit==0.1.15.dev36756330648",
+    "ci-devkit",
     "pydantic>=2.11.7",
     "pydantic-settings>=2.9.1",
     "pyyaml>=6.0.3",
     "strictyaml>=1.7.3",
     "typer>=0.17.4",
 ]
+
+[tool.uv.sources]
+ci-devkit = { git = "https://github.com/outernet-foundation/ci-devkit.git", rev = "ade27d3ed76136026e2509110ba4b89d7f4d7a23" }
 
 [dependency-groups]
 dev = [
