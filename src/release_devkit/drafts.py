@@ -66,13 +66,13 @@ def write_draft_section(
         sections.insert(0, new_entry)
 
     # Write the merged body back to the release
-    run_with_notes_file(
+    gh_release_with_notes(
         f"gh release edit {tag} --repo {repository}",
         "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]) + "\n",
     )
 
 
-def run_with_notes_file(command: str, body: str) -> None:
+def gh_release_with_notes(command: str, body: str) -> None:
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
         file.write(body)
         notes_path = file.name
