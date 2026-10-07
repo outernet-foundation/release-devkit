@@ -17,14 +17,14 @@ _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
 
 def publish_draft_assets(
     config: PublishConfig,
-    run_id: str,
+    build_sha: str,
     registry_username: str,
     registry_token: str,
     tag: str,
     repository: str,
-    sha: str,
+    target_sha: str,
 ) -> list[tuple[str, Path]]:
-    pulled = pull_build_assets(config, run_id, registry_username, registry_token)
+    pulled = pull_build_assets(config, build_sha, registry_username, registry_token)
 
     staging = Path(mkdtemp(prefix="draft-assets-"))
     staged: list[tuple[str, Path]] = []
@@ -36,7 +36,7 @@ def publish_draft_assets(
         else:
             stem = source.stem
             suffix = source.suffix
-        name = f"{stem}-run-{run_id}{suffix}"
+        name = f"{stem}-{build_sha[:12]}{suffix}"
         target = staging / name
         shutil.copy2(source, target)
         staged.append((name, target))
@@ -46,7 +46,7 @@ def publish_draft_assets(
         if bash_check(f"gh release view {tag} --repo {repository}"):
             print(f"  Draft release {tag} already exists")
         else:
-            bash(f"gh release create {tag} --draft --target {sha} --title {tag} --notes '' --repo {repository}")
+            bash(f"gh release create {tag} --draft --target {target_sha} --title {tag} --notes '' --repo {repository}")
             print(f"  Draft release {tag} created")
 
     with ci_step(f"Upload assets to {tag}"):

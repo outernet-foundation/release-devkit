@@ -70,8 +70,7 @@ WRAPPER_STEP = """
 GET_APP_VERSION_RUN = (
     "      - id: version\n"
     '        run: uv run --project "$RUNNER_TEMP/release-devkit"'
-    " --locked --no-dev get-app-version --app capture-tool"
-    " --run-id ${{ github.run_id }}\n"
+    " --locked --no-dev get-app-version --app capture-tool\n"
 )
 
 LINT_WORKFLOWS_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
@@ -423,8 +422,9 @@ def test_folded_long_command_is_accepted(tmp_path: Path) -> None:
         "      - run: >-\n"
         "          uv run ci-build-unity --project ${{ matrix.project-name }}\n"
         "          --platform ${{ matrix.platform }} --cache-key ${{ matrix.cache-key }}\n"
-        '          --run-number ${{ github.run_number }} --branch "$BRANCH"\n'
-        "          --registry ghcr.io/${{ github.repository }}/cache\n"
+        "          --version-code ${{ needs.validate-release-plan.outputs.version-code }}\n"
+        '          --branch "$BRANCH"'
+        " --registry ghcr.io/${{ github.repository }}/cache\n"
         "          --builds-registry ghcr.io/${{ github.repository }}/builds\n"
     )
     jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{step}"
@@ -456,8 +456,9 @@ def test_folded_block_with_blank_line_is_rejected(tmp_path: Path) -> None:
         "          uv run ci-build-unity --project ${{ matrix.project-name }}\n"
         "\n"
         "          --platform ${{ matrix.platform }} --cache-key ${{ matrix.cache-key }}\n"
-        '          --run-number ${{ github.run_number }} --branch "$BRANCH"\n'
-        "          --registry ghcr.io/${{ github.repository }}/cache\n"
+        "          --version-code ${{ needs.validate-release-plan.outputs.version-code }}\n"
+        '          --branch "$BRANCH"'
+        " --registry ghcr.io/${{ github.repository }}/cache\n"
         "          --builds-registry ghcr.io/${{ github.repository }}/builds\n"
     )
     jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{step}"
@@ -470,8 +471,9 @@ def test_folded_block_with_uneven_indent_is_rejected(tmp_path: Path) -> None:
         "      - run: >-\n"
         "          uv run ci-build-unity --project ${{ matrix.project-name }}\n"
         "            --platform ${{ matrix.platform }} --cache-key ${{ matrix.cache-key }}\n"
-        '          --run-number ${{ github.run_number }} --branch "$BRANCH"\n'
-        "          --registry ghcr.io/${{ github.repository }}/cache\n"
+        "          --version-code ${{ needs.validate-release-plan.outputs.version-code }}\n"
+        '          --branch "$BRANCH"'
+        " --registry ghcr.io/${{ github.repository }}/cache\n"
         "          --builds-registry ghcr.io/${{ github.repository }}/builds\n"
     )
     jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{step}"

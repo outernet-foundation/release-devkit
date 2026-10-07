@@ -41,7 +41,6 @@ def base_payload() -> dict[str, object]:
                 "major_minor": "1.0",
             },
         },
-        "ci_workflow": "placeframe-ci.yml",
     }
 
 
@@ -58,14 +57,14 @@ def test_load_config_parses_packages(tmp_path: Path):
 
 
 def test_load_config_defaults_empty_collections(tmp_path: Path):
-    payload: dict[str, object] = {
-        "ci_workflow": "my-ci.yml",
-    }
+    config_path = tmp_path / "release-devkit.yaml"
+    config_path.write_text("", encoding="utf-8")
 
-    config = load_config(write_config(tmp_path, payload))
+    config = load_config(config_path)
 
     assert config.packages == {}
     assert config.apps == {}
+    assert config.builds_registry is None
 
 
 def test_load_config_rejects_the_old_feeds_key(tmp_path: Path):
@@ -80,8 +79,16 @@ def test_load_config_rejects_the_old_feeds_key(tmp_path: Path):
 
 def test_load_config_rejects_unknown_top_level_keys(tmp_path: Path):
     payload: dict[str, object] = {
-        "ci_workflow": "my-ci.yml",
         "mirror_prefix": "ghcr.io/my-org/mirror",
+    }
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        load_config(write_config(tmp_path, payload))
+
+
+def test_load_config_rejects_the_retired_ci_workflow_key(tmp_path: Path):
+    payload: dict[str, object] = {
+        "ci_workflow": "my-ci.yml",
     }
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
@@ -142,12 +149,11 @@ def test_repo_release_devkit_yaml_loads() -> None:
 
     assert config.packages == {}
     assert config.apps == {}
-    assert config.ci_workflow == "integrate.yml"
 
 
 def test_load_config_rejects_duplicate_keys(tmp_path: Path):
     config_path = tmp_path / "release-devkit.yaml"
-    config_path.write_text("ci_workflow: ci.yml\nci_workflow: other.yml\n", encoding="utf-8")
+    config_path.write_text("builds_registry: a\nbuilds_registry: b\n", encoding="utf-8")
 
     with pytest.raises(Exception, match=r"Duplicate key"):
         load_config(config_path)

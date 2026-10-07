@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from bashrun.bash import bash_output
 
 from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
 from release_devkit.builds import (
@@ -24,16 +25,17 @@ PR_DRAFT_TAG_PREFIX = "pr-"
 def update_pr_draft(
     pr_number: Annotated[int, typer.Option(help="PR number whose draft to update")],
     repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
-    sha: Annotated[str, typer.Option(help="Commit SHA being released")],
+    sha: Annotated[str, typer.Option(help="Commit SHA the draft release targets")],
     actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
-    run_id: Annotated[int, typer.Option(help="CI run id whose builds to surface")],
     step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
-    resolved_run_id = str(run_id)
-    manifest = pull_digest_manifest(publish_config.builds_registry, resolved_run_id, actor, settings.github_token)
+    certified = bash_output("git rev-parse HEAD").strip()
+    short = certified[:12]
+    commit_url = f"https://github.com/{repository}/commit/{certified}"
+    manifest = pull_digest_manifest(publish_config.builds_registry, certified, actor, settings.github_token)
 
     if not any(app.builds for app in publish_config.apps.values()):
         return
@@ -41,14 +43,13 @@ def update_pr_draft(
     tag = f"{PR_DRAFT_TAG_PREFIX}{pr_number}"
     staged = publish_draft_assets(
         publish_config,
-        resolved_run_id,
+        certified,
         actor,
         settings.github_token,
         tag,
         repository,
         sha,
     )
-    run_url = f"https://github.com/{repository}/actions/runs/{run_id}"
 
     pr_url = f"https://github.com/{repository}/pull/{pr_number}"
 
@@ -57,7 +58,7 @@ def update_pr_draft(
     section = render_draft_section(
         DraftSection(
             heading_fragments=[
-                f"[Run #{resolved_run_id}]({run_url})",
+                f"[{short}]({commit_url})",
                 f"[PR #{pr_number}]({pr_url})",
             ],
             assets=assets or None,
@@ -65,7 +66,7 @@ def update_pr_draft(
         )
     )
 
-    append_draft_section(tag, repository, f"run-{resolved_run_id}", section)
+    append_draft_section(tag, repository, f"sha-{short}", section)
 
     summary_lines = [f"### Draft release `{tag}`", ""]
     summary_lines.extend(render_asset_links(assets))

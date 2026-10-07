@@ -154,7 +154,6 @@ def test_resolve_dependency_versions_first_release_pair_co_publishes():
 RELEASE_CONFIG = PublishConfig(
     packages={"pkg": PackageConfig(path=Path("pkg"), major_minor="0.1")},
     apps={"app": AppConfig(path=Path("app"), major_minor="0.2")},
-    ci_workflow="release.yml",
 )
 
 

@@ -11,7 +11,7 @@ from ci_devkit.ci_step import ci_step
 from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
 from release_devkit.builds import (
     DigestEntry,
-    matched_ci_run,
+    certified_sha,
     pull_digest_manifest,
 )
 from release_devkit.drafts import (
@@ -41,8 +41,10 @@ def main(
 ) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
-    matched_run_id, html_url = matched_ci_run(repository, sha, publish_config.ci_workflow)
-    manifest = pull_digest_manifest(publish_config.builds_registry, matched_run_id, actor, settings.github_token)
+    certified = certified_sha(sha)
+    short = certified[:12]
+    commit_url = f"https://github.com/{repository}/commit/{certified}"
+    manifest = pull_digest_manifest(publish_config.builds_registry, certified, actor, settings.github_token)
 
     new_image_manifest: dict[str, DigestEntry] = {}
     if manifest is not None:
@@ -79,9 +81,7 @@ def main(
 
     published: list[tuple[str, str, str]] = []
     if release_plan.publishing:
-        published = publish_packages(
-            packages, release_plan, settings.nuget_api_key, DevStrategy(matched_run_id), workspace
-        )
+        published = publish_packages(packages, release_plan, settings.nuget_api_key, DevStrategy(short), workspace)
 
         if published:
             recap = "\n".join([
@@ -97,7 +97,7 @@ def main(
         draft_config = publish_config.model_copy(update={"apps": changed_apps})
         staged_assets = publish_draft_assets(
             draft_config,
-            matched_run_id,
+            certified,
             actor,
             settings.github_token,
             DEV_DRAFT_TAG,
@@ -109,7 +109,7 @@ def main(
     merge_match = _MERGE_PR_PATTERN.search(merge_message)
     pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
 
-    heading_fragments: list[str] = [f"[Integrate run #{matched_run_id}]({html_url})"]
+    heading_fragments: list[str] = [f"[{short}]({commit_url})"]
     if pr_info is not None:
         pr_number, pr_title = pr_info
         pr_url = f"https://github.com/{repository}/pull/{pr_number}"
@@ -146,7 +146,7 @@ def main(
             images=new_image_manifest or None,
         )
     )
-    anchor = f"run-{matched_run_id}"
+    anchor = f"sha-{short}"
     append_draft_section(DEV_DRAFT_TAG, repository, anchor, section)
 
     draft_url = bash_output(f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json url --jq .url").strip()

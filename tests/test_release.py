@@ -47,7 +47,6 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("GITHUB_TOKEN", "token")
 
     config = PublishConfig(
-        ci_workflow="integrate.yml",
         apps={"myapp": AppConfig(path=Path("apps/myapp"), major_minor="1.0")},
     )
     release_plan = ReleasePlan(
@@ -62,7 +61,7 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(release, "GitTags", FixedReturn(FakeTags()))
     monkeypatch.setattr(release, "ci_step", null_ci_step)
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
-    monkeypatch.setattr(release, "matched_ci_run", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99")))
+    monkeypatch.setattr(release, "certified_sha", FixedReturn("abcdef1234567890abcdef1234567890abcdef12"))
     monkeypatch.setattr(release, "pull_build_assets", FixedReturn([]))
     monkeypatch.setattr(release, "pull_digest_manifest", FixedReturn(None))
     monkeypatch.setattr(release, "bash", noop)

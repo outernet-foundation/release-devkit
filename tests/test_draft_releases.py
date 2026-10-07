@@ -39,7 +39,6 @@ class FixedReturn:
 
 def make_build_config() -> PublishConfig:
     return PublishConfig(
-        ci_workflow="integrate.yml",
         apps={
             "myapp": AppConfig(
                 path=Path("apps/myapp"),
@@ -53,7 +52,6 @@ def make_build_config() -> PublishConfig:
 
 def make_empty_config() -> PublishConfig:
     return PublishConfig(
-        ci_workflow="integrate.yml",
         apps={"myapp": AppConfig(path=Path("apps/myapp"), major_minor="1.0")},
     )
 
@@ -68,7 +66,8 @@ def make_source_file(name: str = "app.apk") -> Path:
 DRAFT_REPOSITORY = "owner/repo"
 DRAFT_SHA = "abc123def456"
 DRAFT_ACTOR = "bot"
-DRAFT_RUN_ID = 99
+CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
+SHORT_SHA = CERTIFIED_SHA[:12]
 
 
 def patch_bash(monkeypatch: pytest.MonkeyPatch, check_returns: object = False) -> BashLog:
@@ -80,7 +79,7 @@ def patch_bash(monkeypatch: pytest.MonkeyPatch, check_returns: object = False) -
 
 
 def test_pull_build_assets_returns_empty_when_no_builds() -> None:
-    result = pull_build_assets(make_empty_config(), "42", "", "")
+    result = pull_build_assets(make_empty_config(), CERTIFIED_SHA, "", "")
     assert result == []
 
 
@@ -110,6 +109,7 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_build_config()))
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
     monkeypatch.setattr(update_pr_draft_module, "pull_digest_manifest", FixedReturn(None))
+    monkeypatch.setattr(update_pr_draft_module, "bash_output", FixedReturn(f"{CERTIFIED_SHA}\n"))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
@@ -118,13 +118,12 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
         repository=DRAFT_REPOSITORY,
         sha=DRAFT_SHA,
         actor=DRAFT_ACTOR,
-        run_id=DRAFT_RUN_ID,
         step_summary="",
     )
 
     assert any("pr-7" in command for command in bash_log.commands)
     assert any("gh release upload pr-7" in command and "--clobber" in command for command in bash_log.commands)
-    assert any("MyApp-AndroidMobile-run-99.apk" in command for command in bash_log.commands)
+    assert any(f"MyApp-AndroidMobile-{SHORT_SHA}.apk" in command for command in bash_log.commands)
     assert any("gh release edit pr-7" in command and "--notes-file" in command for command in bash_log.commands)
 
 
@@ -136,6 +135,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_build_config()))
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
     monkeypatch.setattr(update_pr_draft_module, "pull_digest_manifest", FixedReturn(manifest))
+    monkeypatch.setattr(update_pr_draft_module, "bash_output", FixedReturn(f"{CERTIFIED_SHA}\n"))
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
@@ -154,19 +154,20 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
         repository=DRAFT_REPOSITORY,
         sha=DRAFT_SHA,
         actor=DRAFT_ACTOR,
-        run_id=DRAFT_RUN_ID,
         step_summary="",
     )
 
     assert written
     assert "zed-capture" in written[0]
     assert "sha256:abc" in written[0]
-    assert "https://github.com/owner/repo/actions/runs/99" in written[0]
+    assert f"https://github.com/owner/repo/commit/{CERTIFIED_SHA}" in written[0]
+    assert f"sha-{SHORT_SHA}" in written[0]
 
 
 def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GITHUB_TOKEN", "token")
     monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_empty_config()))
+    monkeypatch.setattr(update_pr_draft_module, "bash_output", FixedReturn(f"{CERTIFIED_SHA}\n"))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
     update_pr_draft(
@@ -174,7 +175,6 @@ def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -
         repository=DRAFT_REPOSITORY,
         sha=DRAFT_SHA,
         actor=DRAFT_ACTOR,
-        run_id=DRAFT_RUN_ID,
         step_summary="",
     )
 

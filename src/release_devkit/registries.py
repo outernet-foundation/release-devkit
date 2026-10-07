@@ -176,12 +176,12 @@ def registry_url(registry_name: str, identity: str, version: str) -> str | None:
     return template.format(identity, version)
 
 
-def semver_dev_version(base_version: str, run_id: str) -> str:
-    return f"{base_version}-dev.{run_id}"
+def semver_dev_version(base_version: str, short_sha: str) -> str:
+    return f"{base_version}-dev.{short_sha}"
 
 
-def pep440_dev_version(base_version: str, run_id: str) -> str:
-    return f"{base_version}.dev{run_id}"
+def pep440_dev_version(base_version: str, short_sha: str) -> str:
+    return f"{base_version}.dev{short_sha}"
 
 
 DEV_VERSION_FORMATS: dict[str, Callable[[str, str], str]] = {

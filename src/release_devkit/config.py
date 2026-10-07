@@ -45,7 +45,6 @@ class PublishConfig(BaseModel):
     packages: dict[str, PackageConfig] = Field(default_factory=dict)
     apps: dict[str, AppConfig] = Field(default_factory=dict)
     builds_registry: str | None = None
-    ci_workflow: str
 
     @model_validator(mode="after")
     def validate_registry_names(self) -> "PublishConfig":
@@ -59,7 +58,8 @@ class PublishConfig(BaseModel):
 
 
 def load_config(path: Path) -> PublishConfig:
-    return PublishConfig.model_validate(load_strict_yaml(path.read_text(encoding="utf-8")).data)
+    data = load_strict_yaml(path.read_text(encoding="utf-8")).data
+    return PublishConfig.model_validate(data if data else {})
 
 
 def write_step_summary(path: str | None, text: str) -> None:

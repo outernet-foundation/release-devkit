@@ -33,15 +33,15 @@ class StableStrategy:
 
 
 class DevStrategy:
-    def __init__(self, run_id: str) -> None:
-        self._run_id = run_id
+    def __init__(self, build_sha: str) -> None:
+        self._build_sha = build_sha
 
     def package_version(self, registry_name: str, plan: PackagePlan) -> str:
-        return DEV_VERSION_FORMATS[registry_name](plan.version, self._run_id)
+        return DEV_VERSION_FORMATS[registry_name](plan.version, self._build_sha)
 
     def dependency_version(self, resolved: ResolvedDependency, registry_name: str) -> str:
         if resolved.co_publishing:
-            return DEV_VERSION_FORMATS[registry_name](resolved.version, self._run_id)
+            return DEV_VERSION_FORMATS[registry_name](resolved.version, self._build_sha)
         return resolved.version
 
     def dist_tag(self, registry_name: str) -> str | None:

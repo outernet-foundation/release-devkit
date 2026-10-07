@@ -62,7 +62,6 @@ def make_config(
     apps: dict[str, AppConfig] | None = None,
 ) -> PublishConfig:
     return PublishConfig(
-        ci_workflow="integrate.yml",
         packages=packages or {},
         apps=apps or {},
         builds_registry="ghcr.io/owner/repo/builds" if apps else None,
@@ -84,6 +83,10 @@ def null_ci_step(label: str) -> object:
     return nullcontext()
 
 
+CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
+SHORT_SHA = CERTIFIED_SHA[:12]
+
+
 def noop(*args: object, **kwargs: object) -> None:
     pass
 
@@ -94,9 +97,7 @@ def patch_common(monkeypatch: pytest.MonkeyPatch) -> CallRecorder:
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())
-    monkeypatch.setattr(
-        prerelease, "matched_ci_run", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
-    )
+    monkeypatch.setattr(prerelease, "certified_sha", FixedReturn(CERTIFIED_SHA))
     monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(None))
     pull_assets = CallRecorder([])
     monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
@@ -147,12 +148,17 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
         apps={"myapp": make_app()},
     )
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
+    release_plan = make_plan({"pkg"})
 
-    publish_packages, pull_assets, append_section = run_prerelease(monkeypatch, config, make_plan({"pkg"}), tags)
+    publish_packages, pull_assets, append_section = run_prerelease(monkeypatch, config, release_plan, tags)
 
     assert publish_packages.calls != []
     assert pull_assets.calls == []
     assert append_section.calls != []
+    assert append_section.calls[0][2] == f"sha-{SHORT_SHA}"
+    strategy = publish_packages.calls[0][3]
+    assert isinstance(strategy, prerelease.DevStrategy)
+    assert strategy.package_version("npm", release_plan.plans["pkg"]) == f"1.0.0-dev.{SHORT_SHA}"
 
 
 def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -163,6 +169,7 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
 
     assert publish_packages.calls == []
     assert pull_assets.calls != []
+    assert pull_assets.calls[0][1] == CERTIFIED_SHA
     assert append_section.calls != []
 
 
@@ -202,9 +209,7 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
     monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
     monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
-    monkeypatch.setattr(
-        prerelease, "matched_ci_run", FixedReturn(("42", "https://github.com/owner/repo/actions/runs/99"))
-    )
+    monkeypatch.setattr(prerelease, "certified_sha", FixedReturn(CERTIFIED_SHA))
     monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(manifest))
     monkeypatch.setattr(prerelease, "bash_check", FixedReturn(True))
 
@@ -236,3 +241,4 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
     assert len(sections) == 1
     assert digest_new in sections[0]
     assert digest_existing not in sections[0]
+    assert f"[{SHORT_SHA}](https://github.com/owner/repo/commit/{CERTIFIED_SHA})" in sections[0]

@@ -2,12 +2,11 @@ import json
 from pathlib import Path
 
 import pytest
-import typer
 
 from release_devkit import builds
 from release_devkit.builds import (
     DigestEntry,
-    matched_ci_run,
+    certified_sha,
     pull_digest_manifest,
 )
 from release_devkit.rendering import render_images_table
@@ -31,52 +30,74 @@ class FixedReturn:
         return self._value
 
 
+class CallRecorder:
+    def __init__(self, return_value: object) -> None:
+        self._return_value = return_value
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        self.calls.append(args)
+        return self._return_value
+
+
 def patch_recorder(monkeypatch: pytest.MonkeyPatch, outputs: list[str]) -> SequentialOutputs:
     recorder = SequentialOutputs(outputs)
     monkeypatch.setattr("release_devkit.builds.bash_output", recorder)
     return recorder
 
 
-def run_result_json(run_id: int, html_url: str = "https://github.com/owner/repo/actions/runs/99") -> str:
-    return json.dumps({"id": run_id, "html_url": html_url})
+def test_certified_sha_resolves_the_second_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorder = patch_recorder(
+        monkeypatch,
+        ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"],
+    )
+
+    result = certified_sha("cccccccccccccccccccccccccccccccccccccccc")
+
+    assert result == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    assert recorder.commands == ["git log -1 --format=%P cccccccccccccccccccccccccccccccccccccccc"]
 
 
-def test_matched_ci_run_queries_resolved_parent(monkeypatch: pytest.MonkeyPatch) -> None:
-    recorder = patch_recorder(monkeypatch, ["def456\n", run_result_json(42) + "\n"])
+def test_certified_sha_falls_back_to_self_on_non_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_recorder(monkeypatch, ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"])
 
-    result = matched_ci_run("owner/repo", "abc1234", "integrate.yml")
-
-    assert result == ("42", "https://github.com/owner/repo/actions/runs/99")
-    assert ".parents[1].sha // .sha" in recorder.commands[0]
-    assert "head_sha=def456" in recorder.commands[1]
-    assert "workflows/integrate.yml/runs" in recorder.commands[1]
-
-
-def test_matched_ci_run_falls_back_to_promoted_sha(monkeypatch: pytest.MonkeyPatch) -> None:
-    recorder = patch_recorder(monkeypatch, ["abc1234\n", run_result_json(7) + "\n"])
-
-    result = matched_ci_run("owner/repo", "abc1234", "integrate.yml")
-
-    assert result == ("7", "https://github.com/owner/repo/actions/runs/99")
-    assert "head_sha=abc1234" in recorder.commands[1]
-
-
-def test_matched_ci_run_exits_when_no_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    patch_recorder(monkeypatch, ["abc1234\n", '{"id":null,"html_url":null}\n'])
-
-    with pytest.raises(typer.Exit) as exit_info:
-        matched_ci_run("owner/repo", "abc1234", "integrate.yml")
-    assert exit_info.value.exit_code == 1
+    assert certified_sha("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def test_pull_digest_manifest_returns_none_when_no_registry() -> None:
-    assert pull_digest_manifest(None, "42", "", "") is None
+    assert pull_digest_manifest(None, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "") is None
 
 
 def test_pull_digest_manifest_returns_none_when_build_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(builds, "build_exists", FixedReturn(False))
 
-    assert pull_digest_manifest("ghcr.io/owner/repo/builds", "42", "", "") is None
+    assert pull_digest_manifest("ghcr.io/owner/repo/builds", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "") is None
+
+
+def test_pull_digest_manifest_pulls_the_sha_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    manifest_data = {
+        "zed-capture": {
+            "ref": "ghcr.io/outernet-foundation/placeframe-capture-tool/zed-capture",
+            "digest": "sha256:abc",
+            "tags": ["tree-123", "latest"],
+        }
+    }
+
+    def fake_pull_build(
+        registry: str, project: str, platform: str, tag: str, target_directory: Path, **kwargs: object
+    ) -> None:
+        (target_directory / "images-digests.json").write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    build_exists_recorder = CallRecorder(True)
+    monkeypatch.setattr(builds, "build_exists", build_exists_recorder)
+    monkeypatch.setattr(builds, "pull_build", fake_pull_build)
+
+    sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    result = pull_digest_manifest("ghcr.io/owner/repo/builds", sha, "", "")
+
+    assert result is not None
+    assert "zed-capture" in result
+    assert build_exists_recorder.calls[0][3] == f"sha-{sha}"
 
 
 def test_pull_digest_manifest_parses_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,7 +117,7 @@ def test_pull_digest_manifest_parses_manifest(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(builds, "build_exists", FixedReturn(True))
     monkeypatch.setattr(builds, "pull_build", fake_pull_build)
 
-    result = pull_digest_manifest("ghcr.io/owner/repo/builds", "42", "", "")
+    result = pull_digest_manifest("ghcr.io/owner/repo/builds", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "")
 
     assert result is not None
     assert "zed-capture" in result

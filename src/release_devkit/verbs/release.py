@@ -18,7 +18,7 @@ from release_devkit.registries import registry_url
 from release_devkit.rendering import PackageRow, RegistryLink, render_release_body
 from release_devkit.tags import GitTags
 from release_devkit.builds import (
-    matched_ci_run,
+    certified_sha,
     pull_build_assets,
     pull_digest_manifest,
 )
@@ -37,8 +37,8 @@ def main(
 ) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
-    matched_run_id, _ = matched_ci_run(repository, sha, publish_config.ci_workflow)
-    manifest = pull_digest_manifest(publish_config.builds_registry, matched_run_id, actor, settings.github_token)
+    certified = certified_sha(sha)
+    manifest = pull_digest_manifest(publish_config.builds_registry, certified, actor, settings.github_token)
 
     tags = GitTags()
 
@@ -73,7 +73,7 @@ def main(
     count = int(existing) if existing else 0
     release_tag = f"{year_month}.{count + 1}"
 
-    pulled = pull_build_assets(publish_config, matched_run_id, actor, settings.github_token)
+    pulled = pull_build_assets(publish_config, certified, actor, settings.github_token)
     staging = Path(mkdtemp(prefix="release-assets-"))
     assets: list[Path] = []
     for artifact, source in pulled:
