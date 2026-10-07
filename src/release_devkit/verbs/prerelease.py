@@ -7,7 +7,7 @@ from typing import Annotated
 import typer
 from bashrun.bash import bash_output
 
-from release_devkit.config import DEFAULT_CONFIG_PATH, write_step_summary
+from release_devkit.config import DEFAULT_CONFIG_PATH
 from release_devkit.context import merge_push_context
 from release_devkit.drafts import (
     DEV_DRAFT_TAG,
@@ -76,9 +76,8 @@ def main(
             draft,
         )
 
-    anchor = f"sha-{short}"
     draft.upsert_section(
-        anchor,
+        f"sha-{short}",
         [
             f"[{short}]({context.commit_url})",
             f"[PR #{pr_number}: {groups[1]}](https://github.com/{repository}/pull/{pr_number})",
@@ -102,7 +101,3 @@ def main(
         )
         or None,
     )
-
-    backlink_text = f"### Draft release `{DEV_DRAFT_TAG}` updated\n- [Section `{anchor}`]({draft.url}#{anchor})"
-    print(backlink_text)
-    write_step_summary(settings.github_step_summary, backlink_text)
