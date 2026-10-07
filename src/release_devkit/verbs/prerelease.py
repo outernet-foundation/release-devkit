@@ -39,7 +39,6 @@ def main(
         )
 
     pr_number, pr_title = _MERGE_PR_PATTERN.findall(bash_output(f"git log -1 --format=%B {context.head}").strip())[0]
-    pr_number = int(pr_number)
 
     write_draft_section(
         context,

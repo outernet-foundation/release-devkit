@@ -24,6 +24,6 @@ def update_pr_draft(
 
     write_draft_section(
         context,
-        f"{PR_DRAFT_TAG_PREFIX}{int(PR_REF_PATTERN.findall(context.settings.github_ref)[0][0])}",
+        f"{PR_DRAFT_TAG_PREFIX}{PR_REF_PATTERN.findall(context.settings.github_ref)[0][0]}",
         [f"[{context.short}]({context.commit_url})"],
     )
