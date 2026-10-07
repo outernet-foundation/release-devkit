@@ -32,9 +32,7 @@ def main(
     settings = context.settings
     publish_config = context.publish_config
     head = context.head
-    certified = context.certified
     short = context.short
-    commit_url = context.commit_url
     repository = settings.github_repository
     manifest = context.manifest
 
@@ -48,9 +46,11 @@ def main(
 
     has_app_changes = bool(changed_apps)
 
-    has_image_changes = manifest is not None and draft.has_new_digests(manifest)
-
-    if not release_plan.publishing and not has_app_changes and not has_image_changes:
+    if (
+        not release_plan.publishing
+        and not has_app_changes
+        and not (manifest is not None and draft.has_new_digests(manifest))
+    ):
         print("Nothing to publish")
         return
 
@@ -64,48 +64,54 @@ def main(
             settings.github_workspace,
         )
 
-    merge_message = bash_output(f"git log -1 --format=%B {head}").strip()
-    merge_match = _MERGE_PR_PATTERN.search(merge_message)
-    pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
+    merge_match = _MERGE_PR_PATTERN.search(bash_output(f"git log -1 --format=%B {head}").strip())
 
-    heading_fragments: list[str] = [f"[{short}]({commit_url})"]
-    if pr_info is not None:
-        pr_number, pr_title = pr_info
-        pr_url = f"https://github.com/{repository}/pull/{pr_number}"
-        heading_fragments.append(f"[PR #{pr_number}: {pr_title}]({pr_url})")
+    heading_fragments: list[str] = [f"[{short}]({context.commit_url})"]
+    if merge_match is not None:
+        pr_number = int(merge_match.group(1))
+        heading_fragments.append(
+            f"[PR #{pr_number}: {merge_match.group(2)}](https://github.com/{repository}/pull/{pr_number})"
+        )
 
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
-        draft_config = publish_config.model_copy(update={"apps": changed_apps})
         staged_assets = publish_draft_assets(
-            draft_config,
-            certified,
+            publish_config.model_copy(update={"apps": changed_apps}),
+            context.certified,
             settings.github_actor,
             settings.github_token,
             draft,
         )
 
-    identity_to_name = {
-        identity: name for name, package in packages.items() for identity in package.registries.values()
-    }
-    dev_versions = {identity_to_name[identity]: version for _, identity, version in published}
-    rows = package_rows(packages, dev_versions)
-
-    fresh_assets = draft.asset_links(staged_assets)
-    replaced_stems = {stem for stem in (asset_stem(name) for name, _ in staged_assets) if stem is not None}
-    carried_assets = draft.carried_asset_links(replaced_stems)
-    assets = (fresh_assets + carried_assets) or None
-
-    section = render_draft_section(
-        DraftSection(
-            heading_fragments=heading_fragments,
-            packages=rows or None,
-            assets=assets,
-            images=manifest,
-        )
-    )
     anchor = f"sha-{short}"
-    draft.upsert_section(anchor, section)
+    draft.upsert_section(
+        anchor,
+        render_draft_section(
+            DraftSection(
+                heading_fragments=heading_fragments,
+                packages=package_rows(
+                    packages,
+                    {
+                        {
+                            identity: name
+                            for name, package in packages.items()
+                            for identity in package.registries.values()
+                        }[identity]: version
+                        for _, identity, version in published
+                    },
+                )
+                or None,
+                assets=(
+                    draft.asset_links(staged_assets)
+                    + draft.carried_asset_links({
+                        stem for stem in (asset_stem(name) for name, _ in staged_assets) if stem is not None
+                    })
+                )
+                or None,
+                images=manifest,
+            )
+        ),
+    )
 
     backlink_text = f"### Draft release `{DEV_DRAFT_TAG}` updated\n- [Section `{anchor}`]({draft.url}#{anchor})"
     print(backlink_text)
