@@ -44,10 +44,9 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             head = bash_output("git rev-parse HEAD").strip()
             parents = bash_output(f"git log -1 --format=%P {head}").strip().split()
             context = build_context(head, parents[1] if len(parents) >= 2 else head, config)
-            dev = channel == ReleaseChannel.DEV
 
             # Head the snapshot section with the merge's PR title
-            if dev:
+            if channel == ReleaseChannel.DEV:
                 pr_number, pr_title = re.findall(
                     r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
                 )[0]
@@ -75,10 +74,14 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                         published.append((
                             identity,
                             registries[registry_name].publish(
-                                package.path, plan.version, release_plan.resolved_versions[name], dev, context.short
+                                package.path,
+                                plan.version,
+                                release_plan.resolved_versions[name],
+                                channel == ReleaseChannel.DEV,
+                                context.short,
                             ),
                         ))
-                    if not dev:
+                    if channel == ReleaseChannel.STABLE:
                         create_and_push_tag(f"{name}-v{plan.version}")
 
             # List published packages with their registry links
