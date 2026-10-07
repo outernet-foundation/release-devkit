@@ -62,13 +62,11 @@ def write_draft_section(
             entry.digest not in set(DIGEST_PATTERN.findall(body)) for entry in (context.manifest or {}).values()
         )
     ):
-        print("Nothing to publish")
         return
 
     # Ensure the draft release exists
     if not draft_exists:
         bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
-        print(f"  Draft release {tag} created")
 
     # Stage app assets pulled from the builds shelf
     apps = changed_apps if stage_changed_only else context.publish_config.apps
@@ -121,7 +119,6 @@ def write_draft_section(
         f"gh release edit {tag} --repo {repository}",
         "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]) + "\n",
     )
-    print(f"  Section {anchor} written to draft {tag}")
 
 
 def asset_stem(name: str) -> str | None:
@@ -141,7 +138,5 @@ def run_with_notes_file(command: str, body: str) -> None:
 
 def delete_draft_release(tag: str, repository: str) -> None:
     if not bash_check(f"gh release view {tag} --repo {repository}"):
-        print(f"  Draft release {tag} not found — nothing to delete")
         return
     bash(f"gh release delete {tag} --cleanup-tag --yes --repo {repository}")
-    print(f"  Draft release {tag} deleted")

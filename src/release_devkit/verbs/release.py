@@ -33,7 +33,6 @@ def main(
     release_plan = compute_release_plan(publish_config)
 
     if not release_plan.anything_releases():
-        print("Nothing to publish")
         return
 
     if packages:
@@ -48,14 +47,10 @@ def main(
     for name in packages:
         plan = release_plan.plans[name]
         if plan.publish:
-            tag = f"{name}-v{plan.version}"
-            create_and_push_tag(tag)
-            print(f"  Tagged: {tag}")
+            create_and_push_tag(f"{name}-v{plan.version}")
 
     for app_name, app_version in release_plan.app_versions.items():
-        tag = f"{app_name}-v{app_version}"
-        create_and_push_tag(tag)
-        print(f"  Tagged: {tag}")
+        create_and_push_tag(f"{app_name}-v{app_version}")
 
     year_month = datetime.now(UTC).strftime("%Y.%m")
     existing = bash_output(
@@ -77,11 +72,9 @@ def main(
         app_rows.append(app_row(app_name, version, asset_by_app.get(app_name), repository, release_tag))
 
     notes = render_release_body(None, rows, app_rows, context.manifest, level=2) + "\n"
-    print(notes)
     run_with_notes_file(
         f"gh release create {release_tag} --title {release_tag} --repo {repository} {' '.join(f'{asset}' for asset in assets)}",
         notes,
     )
-    print(f"  Release created: {release_tag}")
 
     delete_draft_release(DEV_DRAFT_TAG, repository)
