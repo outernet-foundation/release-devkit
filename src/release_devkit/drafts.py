@@ -83,6 +83,13 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 if channel == ReleaseChannel.STABLE:
                     create_and_push_tag(f"{name}-v{plan.version}")
 
+        # Stop a stable run with nothing to ship, else tag its bumped app versions
+        if channel == ReleaseChannel.STABLE:
+            if not release_plan.publishing and not release_plan.app_versions:
+                return
+            for app_name, app_version in release_plan.app_versions.items():
+                create_and_push_tag(f"{app_name}-v{app_version}")
+
         # List published packages with their registry links
         table_rows: list[list[str]] = []
         for name, package in context.publish_config.packages.items():
@@ -108,13 +115,6 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
-    # Stop a stable run with nothing to ship, else tag its bumped app versions
-    if channel == ReleaseChannel.STABLE:
-        if not release_plan.publishing and not release_plan.app_versions:
-            return
-        for app_name, app_version in release_plan.app_versions.items():
-            create_and_push_tag(f"{app_name}-v{app_version}")
-
     # Compose the channel's release tag
     match channel:
         case ReleaseChannel.STABLE:
@@ -129,15 +129,6 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             tag = DEV_DRAFT_TAG
         case ReleaseChannel.PR:
             tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
-
-    # Compose the channel's app version table
-    match channel:
-        case ReleaseChannel.STABLE:
-            versions = {**release_plan.app_last_versions, **release_plan.app_versions}
-        case ReleaseChannel.DEV:
-            versions = release_plan.app_last_versions
-        case ReleaseChannel.PR:
-            versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
 
     repository = context.settings.github_repository
 
@@ -192,6 +183,15 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
         # Upload the staged assets
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
+
+        # Compose the channel's app version table
+        match channel:
+            case ReleaseChannel.STABLE:
+                versions = {**release_plan.app_last_versions, **release_plan.app_versions}
+            case ReleaseChannel.DEV:
+                versions = release_plan.app_last_versions
+            case ReleaseChannel.PR:
+                versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
 
         # List staged apps with their asset links
         table_rows = [
