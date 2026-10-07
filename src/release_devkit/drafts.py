@@ -19,19 +19,12 @@ _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
 
 class DraftRelease:
     def __init__(self, tag: str, repository: str, target_sha: str) -> None:
+        if not bash_check(f"gh release view {tag} --repo {repository}"):
+            bash(f"gh release create {tag} --draft --target {target_sha} --title {tag} --notes '' --repo {repository}")
+            print(f"  Draft release {tag} created")
+        payload = json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body,url"))
         self.tag = tag
         self.repository = repository
-        self.target_sha = target_sha
-        self.exists = False
-        self.body = ""
-        self.url = ""
-        self.sections: list[tuple[str, str]] = []
-        if bash_check(f"gh release view {tag} --repo {repository}"):
-            self._refresh_from_github()
-
-    def _refresh_from_github(self) -> None:
-        payload = json.loads(bash_output(f"gh release view {self.tag} --repo {self.repository} --json body,url"))
-        self.exists = True
         self.body = payload["body"]
         self.url = payload["url"]
         self.sections = parse_sections(self.body)
@@ -39,19 +32,7 @@ class DraftRelease:
     def existing_digests(self) -> set[str]:
         return set(DIGEST_PATTERN.findall(self.body))
 
-    def ensure_created(self) -> None:
-        if self.exists:
-            print(f"  Draft release {self.tag} already exists")
-            return
-        bash(
-            f"gh release create {self.tag} --draft --target {self.target_sha}"
-            f" --title {self.tag} --notes '' --repo {self.repository}"
-        )
-        print(f"  Draft release {self.tag} created")
-        self._refresh_from_github()
-
     def upsert_section(self, anchor: str, section: str) -> None:
-        self.ensure_created()
         new_entry = (anchor, section.strip())
         for index, (existing_anchor, _) in enumerate(self.sections):
             if existing_anchor == anchor:
@@ -92,9 +73,6 @@ def publish_draft_assets(
         shutil.copy2(source, target)
         staged.append((name, target))
         print(f"  Asset: {name}")
-
-    with ci_step(f"Ensure draft release {draft.tag}"):
-        draft.ensure_created()
 
     with ci_step(f"Upload assets to {draft.tag}"):
         files = " ".join(f'"{path}"' for _, path in staged)
