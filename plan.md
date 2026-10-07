@@ -49,9 +49,9 @@ class VerbSpec:
     name: str
     args: re.Pattern[str]
     env: dict[str, str]
-    checkout: str          # signature key into the checkout-signature table
-    delivery: bool         # nuget mint window applies
-    channels: Mapping[str, ChannelSpec] | None   # only the release verb
+    checkout: str  # signature key into the checkout-signature table
+    delivery: bool  # nuget mint window applies
+    channels: Mapping[str, ChannelSpec] | None  # only the release verb
 ```
 
 `DEVKIT_INVOCATION`'s alternation, the per-verb lookups, and the delivery/reservation checks all derive from it. A consistency guard (or derivation-by-construction) makes table drift structurally impossible. This is also exactly the seam the single-verb flip needs: the `release` entry gains `channels` and everything else generalizes.
