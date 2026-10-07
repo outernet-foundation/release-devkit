@@ -4,8 +4,8 @@ from subprocess import CalledProcessError
 
 import pytest
 
-from release_devkit.registries import NpmRegistry, NuGetRegistry, ResolvedDependency
-from release_devkit.registries import (
+from release_devkit.publishing import NpmRegistry, NuGetRegistry, ResolvedDependency
+from release_devkit.publishing import (
     ephemeral_manifest_patch,
     ephemeral_pyproject_patch,
 )
@@ -134,7 +134,7 @@ def test_ephemeral_pyproject_patch_rewrites_sentinel_specifiers(tmp_path: Path) 
 def test_npm_publish_rides_the_dev_dist_tag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     manifest_path = write_manifest(tmp_path)
     recorder = CommandRecorder()
-    monkeypatch.setattr("release_devkit.registries.bash_output", recorder)
+    monkeypatch.setattr("release_devkit.publishing.bash_output", recorder)
 
     NpmRegistry().publish(
         path=tmp_path,
@@ -151,7 +151,7 @@ def test_npm_publish_rides_the_dev_dist_tag(tmp_path: Path, monkeypatch: pytest.
 def test_npm_publish_without_dist_tag_leaves_latest_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write_manifest(tmp_path)
     recorder = CommandRecorder()
-    monkeypatch.setattr("release_devkit.registries.bash_output", recorder)
+    monkeypatch.setattr("release_devkit.publishing.bash_output", recorder)
 
     NpmRegistry().publish(tmp_path, "0.2.1", {}, False, "")
 
@@ -178,7 +178,7 @@ def test_npm_publish_swallows_version_conflict_from_current_npm(
 ) -> None:
     write_manifest(tmp_path)
     monkeypatch.setattr(
-        "release_devkit.registries.bash_output",
+        "release_devkit.publishing.bash_output",
         ConflictingCommand("npm error You cannot publish over the previously published versions: 0.2.1.\n"),
     )
 
@@ -188,7 +188,7 @@ def test_npm_publish_swallows_version_conflict_from_current_npm(
 def test_npm_publish_swallows_version_conflict_from_legacy_npm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write_manifest(tmp_path)
     monkeypatch.setattr(
-        "release_devkit.registries.bash_output",
+        "release_devkit.publishing.bash_output",
         ConflictingCommand("npm ERR! code EPUBLISHCONFLICT\nnpm ERR! cannot publish over existing version\n"),
     )
 
@@ -198,7 +198,7 @@ def test_npm_publish_swallows_version_conflict_from_legacy_npm(tmp_path: Path, m
 def test_npm_publish_rides_through_on_unrelated_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     write_manifest(tmp_path)
     monkeypatch.setattr(
-        "release_devkit.registries.bash_output",
+        "release_devkit.publishing.bash_output",
         ConflictingCommand("npm error code ENEEDAUTH\nnpm error need auth to publish\n"),
     )
 
@@ -228,7 +228,7 @@ def test_nuget_publish_injects_property_flags_beside_the_version(
 ) -> None:
     write_nuget_project(tmp_path)
     recorder = CommandRecorder()
-    monkeypatch.setattr("release_devkit.registries.bash", recorder)
+    monkeypatch.setattr("release_devkit.publishing.bash", recorder)
 
     NuGetRegistry("key").publish(
         path=tmp_path,
@@ -246,7 +246,7 @@ def test_nuget_publish_without_dependencies_omits_property_flags(
 ) -> None:
     write_nuget_project(tmp_path)
     recorder = CommandRecorder()
-    monkeypatch.setattr("release_devkit.registries.bash", recorder)
+    monkeypatch.setattr("release_devkit.publishing.bash", recorder)
 
     NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, "")
 
@@ -258,7 +258,7 @@ def test_nuget_publish_writes_the_nupkg_outside_the_package_root(
 ) -> None:
     write_nuget_project(tmp_path)
     recorder = CommandRecorder()
-    monkeypatch.setattr("release_devkit.registries.bash", recorder)
+    monkeypatch.setattr("release_devkit.publishing.bash", recorder)
 
     NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, "")
 
@@ -311,7 +311,7 @@ def test_nuget_push_failure_never_leaks_the_api_key(tmp_path: Path, monkeypatch:
             )
         return ""
 
-    monkeypatch.setattr("release_devkit.registries.bash", failing_push)
+    monkeypatch.setattr("release_devkit.publishing.bash", failing_push)
 
     with pytest.raises(SystemExit) as excinfo:
         NuGetRegistry("SECRET-KEY").publish(tmp_path, "1.0.6", {}, False, "")
@@ -339,7 +339,7 @@ def test_nuget_push_failure_without_stderr_still_names_the_exit_code(
             raise CalledProcessError(returncode=2, cmd=command, stderr=None)
         return ""
 
-    monkeypatch.setattr("release_devkit.registries.bash", failing_push)
+    monkeypatch.setattr("release_devkit.publishing.bash", failing_push)
 
     with pytest.raises(SystemExit, match=r"dotnet nuget push failed \(exit 2\): no stderr output"):
         NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, "")

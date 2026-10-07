@@ -14,7 +14,7 @@ from release_devkit.plan import (
     package_rows,
     resolve_dependency_versions,
 )
-from release_devkit.registries import SENTINEL_VERSION
+from release_devkit.manifests import SENTINEL_VERSION
 from release_devkit.tags import latest_version, latest_version_in_line, parse_major_minor, parse_version
 
 

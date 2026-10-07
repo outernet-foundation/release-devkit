@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 from release_devkit.config import PackageConfig, PublishConfig
 from release_devkit.manifests import DependencyEdge, resolve_edges
-from release_devkit.registries import ResolvedDependency, registry_url
 from release_devkit.rendering import PackageRow, RegistryLink
 from release_devkit.tags import (
     has_changes_since,
@@ -14,6 +13,12 @@ from release_devkit.tags import (
 
 UNCHANGED_FALLBACK_VERSION = "0.0.0"
 
+REGISTRY_URL_TEMPLATES: dict[str, str] = {
+    "nuget": "https://www.nuget.org/packages/{0}/{1}",
+    "npm": "https://www.npmjs.com/package/{0}/v/{1}",
+    "pypi": "https://pypi.org/project/{0}/{1}",
+}
+
 
 @dataclass(frozen=True)
 class PackagePlan:
@@ -21,6 +26,12 @@ class PackagePlan:
     publish: bool
     version: str
     last_version: str | None
+
+
+@dataclass(frozen=True)
+class ResolvedDependency:
+    version: str
+    co_publishing: bool
 
 
 @dataclass(frozen=True)
@@ -154,3 +165,10 @@ def package_rows(
         ]
         rows.append(PackageRow(name, version, registries))
     return rows
+
+
+def registry_url(registry_name: str, identity: str, version: str) -> str | None:
+    template = REGISTRY_URL_TEMPLATES.get(registry_name)
+    if template is None:
+        return None
+    return template.format(identity, version)

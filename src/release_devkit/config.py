@@ -4,9 +4,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings
 from strictyaml import load as load_strict_yaml
 
-from release_devkit.registries import KNOWN_REGISTRIES
-
 DEFAULT_CONFIG_PATH = Path("release-devkit.yaml")
+KNOWN_REGISTRIES = frozenset({"nuget", "npm", "pypi"})
 
 
 class Settings(BaseSettings):

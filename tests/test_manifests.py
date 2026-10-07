@@ -5,8 +5,7 @@ import pytest
 from bashrun.bash import bash
 
 from release_devkit.config import PackageConfig
-from release_devkit.manifests import resolve_edges
-from release_devkit.registries import SENTINEL_VERSION
+from release_devkit.manifests import SENTINEL_VERSION, resolve_edges
 
 
 def npm_package(name: str, identity: str) -> PackageConfig:

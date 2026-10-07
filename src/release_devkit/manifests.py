@@ -5,11 +5,27 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from release_devkit.config import PackageConfig
 from release_devkit.csproj import load_project_roots, read_package_references
-from release_devkit.registries import NpmManifest, PyprojectProjectTable, SENTINEL_VERSION
 
 DEPENDENCY_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*")
+# Same-unit dependency sentinel: authored in manifests, injected with the event version at publish.
+SENTINEL_VERSION = "0.0.0+local"
+
+
+class NpmManifest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    version: str = ""
+    dependencies: dict[str, str] = Field(default_factory=dict)
+
+
+class PyprojectProjectTable(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    dependencies: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
