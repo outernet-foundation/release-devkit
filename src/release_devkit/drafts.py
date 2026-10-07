@@ -69,9 +69,10 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         table_rows: list[list[str]] = []
         for name, package in context.publish_config.packages.items():
             plan = release_plan.plans[name]
-            version: str | None = None
             if plan.publish:
-                for registry_name in package.registries:
+                version: str | None = None
+                registry_names: list[str] = []
+                for registry_name, identity in package.registries.items():
                     version = registries[registry_name].publish(
                         package.path,
                         plan.version,
@@ -79,17 +80,19 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                         channel == ReleaseChannel.DEV,
                         context.short,
                     )
+                    registry_names.append(f"[{registry_name}]({registries[registry_name].url(identity, version)})")
                 if channel == ReleaseChannel.STABLE:
                     create_and_push_tag(f"{name}-v{plan.version}")
-            version = version or latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
-            if version != UNCHANGED_FALLBACK_VERSION:
-                registry_names = ", ".join(
-                    f"[{registry_name}]({registries[registry_name].url(identity, version)})"
-                    for registry_name, identity in package.registries.items()
-                )
             else:
-                registry_names = ", ".join(package.registries)
-            table_rows.append([name, version, registry_names or "—"])
+                version = latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
+                if version != UNCHANGED_FALLBACK_VERSION:
+                    registry_names = [
+                        f"[{registry_name}]({registries[registry_name].url(identity, version)})"
+                        for registry_name, identity in package.registries.items()
+                    ]
+                else:
+                    registry_names = list(package.registries)
+            table_rows.append([name, version or UNCHANGED_FALLBACK_VERSION, ", ".join(registry_names) or "—"])
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
