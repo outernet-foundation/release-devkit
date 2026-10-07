@@ -10,7 +10,7 @@ from bashrun.bash import bash_output
 from release_devkit.config import DEFAULT_CONFIG_PATH
 from release_devkit.context import merge_push_context
 from release_devkit.drafts import DEV_DRAFT_TAG, write_draft_section
-from release_devkit.plan import compute_release_plan, package_rows
+from release_devkit.plan import compute_release_plan, package_rows, package_version_overrides
 from release_devkit.publishing import DevStrategy, publish_packages
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -47,13 +47,5 @@ def main(
             f"[{context.short}]({context.commit_url})",
             f"[PR #{pr_number}: {pr_title}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
         ],
-        packages=package_rows(
-            packages,
-            {
-                {identity: name for name, package in packages.items() for identity in package.registries.values()}[
-                    identity
-                ]: version
-                for _, identity, version in published
-            },
-        ),
+        packages=package_rows(packages, package_version_overrides(packages, published)),
     )
