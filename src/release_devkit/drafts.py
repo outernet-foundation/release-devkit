@@ -30,39 +30,31 @@ class ReleaseChannel(StrEnum):
 def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     publish_config = load_config(config)
 
-    # Assemble the release notes from the heading and the artifact tables
-    prefix = "#" * (2 if channel == ReleaseChannel.STABLE else 4)
-    blocks: list[str] = []
+    # Publish every changed package to its registry and tag the stable versions
+    release_plan = compute_release_plan(publish_config)
+
+    # Stop a stable run with nothing to ship
+    if channel == ReleaseChannel.STABLE and not release_plan.publishing and not release_plan.app_versions:
+        return
+
     head = bash_output("git rev-parse HEAD").strip()
 
-    # Head the snapshot section with the merge's PR title
     if channel == ReleaseChannel.PR:
         context = build_context(head, head, publish_config)
-        tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
-        versions = {name: get_latest_version(f"{name}-v") for name in publish_config.apps}
-        blocks.append(f"### [{context.short}]({context.commit_url})")
     else:
         parents = bash_output(f"git log -1 --format=%P {head}").strip().split()
         context = build_context(head, parents[1] if len(parents) >= 2 else head, publish_config)
 
-        # Publish every changed package to its registry and tag the stable versions
-        release_plan = compute_release_plan(publish_config)
+    # Assemble the release notes from the heading and the artifact tables
+    prefix = "#" * (2 if channel == ReleaseChannel.STABLE else 4)
+    blocks: list[str] = []
 
-        # Stop a stable run with nothing to ship
-        if channel == ReleaseChannel.STABLE and not release_plan.publishing and not release_plan.app_versions:
-            return
-
-        if channel == ReleaseChannel.STABLE:
-            # Compose this month's next CalVer tag
-            year_month = datetime.now(UTC).strftime("%Y.%m")
-            existing = bash_output(
-                f"gh release list --repo {context.settings.github_repository} --json tagName"
-                f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
-            ).strip()
-            tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
-
-            versions = {**release_plan.app_last_versions, **release_plan.app_versions}
-        else:
+    match channel:
+        case ReleaseChannel.PR:
+            tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
+            versions = {name: get_latest_version(f"{name}-v") for name in publish_config.apps}
+            blocks.append(f"### [{context.short}]({context.commit_url})")
+        case ReleaseChannel.DEV:
             tag = DEV_DRAFT_TAG
             versions = release_plan.app_last_versions
 
@@ -74,7 +66,27 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 f" — [PR #{pr_number}: {pr_title}]"
                 f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
             )
+        case ReleaseChannel.STABLE:
+            year_month = datetime.now(UTC).strftime("%Y.%m")
+            existing = bash_output(
+                f"gh release list --repo {context.settings.github_repository} --json tagName"
+                f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
+            ).strip()
+            tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
 
+            versions = {**release_plan.app_last_versions, **release_plan.app_versions}
+
+    repository = context.settings.github_repository
+
+    # Ensure a draft release exists and read its current body
+    view_command = f"gh release view {tag} --repo {repository}"
+    body = ""
+    if bash_check(view_command):
+        body = json.loads(bash_output(f"{view_command} --json body"))["body"]
+    else:
+        bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
+
+    if channel in (ReleaseChannel.DEV, ReleaseChannel.STABLE):
         configure_git(context.settings.github_workspace)
         install_dotnet("8.0")
         install_node("24", "https://registry.npmjs.org")
@@ -128,16 +140,6 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         if channel == ReleaseChannel.STABLE:
             for app_name, app_version in release_plan.app_versions.items():
                 create_and_push_tag(f"{app_name}-v{app_version}")
-
-    repository = context.settings.github_repository
-
-    # Ensure a draft release exists and read its current body
-    view_command = f"gh release view {tag} --repo {repository}"
-    body = ""
-    if bash_check(view_command):
-        body = json.loads(bash_output(f"{view_command} --json body"))["body"]
-    else:
-        bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
 
     # Stage every app's build artifacts as release assets
     apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds}
