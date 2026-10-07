@@ -32,19 +32,16 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     blocks: list[str] = []
     head = bash_output("git rev-parse HEAD").strip()
 
-    # Resolve the run's identity and publish packages on the delivery channels
-    if channel == ReleaseChannel.PR:
-        context = build_context(head, head, config)
-    else:
-        parents = bash_output(f"git log -1 --format=%P {head}").strip().split()
-        context = build_context(head, parents[1] if len(parents) >= 2 else head, config)
-
     # Head the snapshot section with the merge's PR title
     if channel == ReleaseChannel.PR:
+        context = build_context(head, head, config)
         tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
         versions = {name: get_latest_version(f"{name}-v") for name in context.publish_config.apps}
         blocks.append(f"### [{context.short}]({context.commit_url})")
     else:
+        parents = bash_output(f"git log -1 --format=%P {head}").strip().split()
+        context = build_context(head, parents[1] if len(parents) >= 2 else head, config)
+
         # Publish every changed package to its registry and tag the stable versions
         release_plan = compute_release_plan(context.publish_config)
 
