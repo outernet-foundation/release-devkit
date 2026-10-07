@@ -11,7 +11,6 @@ from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 
 from release_devkit.builds import DigestEntry, pull_build_assets
-from release_devkit.config import AppConfig
 from release_devkit.context import VerbContext
 from release_devkit.plan import apps_with_changes
 from release_devkit.rendering import DIGEST_PATTERN, AssetLink, PackageRow, parse_asset_links, render_draft_section
@@ -31,13 +30,16 @@ class DraftRelease:
         self.repository = repository
         self.body = payload["body"]
         self.url = payload["url"]
-        self.sections = parse_sections(self.body)
-
-    def existing_digests(self) -> set[str]:
-        return set(DIGEST_PATTERN.findall(self.body))
+        parts = _ANCHOR_PATTERN.split(self.body)
+        sections: list[tuple[str, str]] = []
+        for index in range(1, len(parts), 2):
+            anchor_id = parts[index]
+            content = parts[index + 1].strip() if index + 1 < len(parts) else ""
+            sections.append((anchor_id, content))
+        self.sections = sections
 
     def has_new_digests(self, manifest: dict[str, DigestEntry]) -> bool:
-        existing = self.existing_digests()
+        existing = set(DIGEST_PATTERN.findall(self.body))
         return any(entry.digest not in existing for entry in manifest.values())
 
     def upsert_section(
@@ -97,51 +99,31 @@ def write_draft_section(
     apps = changed_apps if stage_changed_only else context.publish_config.apps
     staged: list[tuple[str, Path]] = []
     if apps:
-        staged = publish_draft_assets(context, apps, draft)
+        pulled = pull_build_assets(
+            context.publish_config.model_copy(update={"apps": apps}),
+            context.certified,
+            context.settings.github_actor,
+            context.settings.github_token,
+        )
+        staging = Path(mkdtemp(prefix="draft-assets-"))
+        for artifact, source in pulled:
+            if artifact.name is not None:
+                configured = Path(artifact.name)
+                stem = configured.stem
+                suffix = configured.suffix
+            else:
+                stem = source.stem
+                suffix = source.suffix
+            name = f"{stem}-{context.short}{suffix}"
+            target = staging / name
+            shutil.copy2(source, target)
+            staged.append((name, target))
+            print(f"  Asset: {name}")
+    if staged:
+        with ci_step(f"Upload assets to {draft.tag}"):
+            files = " ".join(f'"{path}"' for _, path in staged)
+            bash(f"gh release upload {draft.tag} {files} --clobber --repo {draft.repository}")
     draft.upsert_section(f"sha-{context.short}", heading_fragments, staged, context.manifest, packages)
-
-
-def publish_draft_assets(
-    context: VerbContext, apps: dict[str, AppConfig], draft: DraftRelease
-) -> list[tuple[str, Path]]:
-    pulled = pull_build_assets(
-        context.publish_config.model_copy(update={"apps": apps}),
-        context.certified,
-        context.settings.github_actor,
-        context.settings.github_token,
-    )
-
-    staging = Path(mkdtemp(prefix="draft-assets-"))
-    staged: list[tuple[str, Path]] = []
-    for artifact, source in pulled:
-        if artifact.name is not None:
-            configured = Path(artifact.name)
-            stem = configured.stem
-            suffix = configured.suffix
-        else:
-            stem = source.stem
-            suffix = source.suffix
-        name = f"{stem}-{context.short}{suffix}"
-        target = staging / name
-        shutil.copy2(source, target)
-        staged.append((name, target))
-        print(f"  Asset: {name}")
-
-    with ci_step(f"Upload assets to {draft.tag}"):
-        files = " ".join(f'"{path}"' for _, path in staged)
-        bash(f"gh release upload {draft.tag} {files} --clobber --repo {draft.repository}")
-
-    return staged
-
-
-def parse_sections(body: str) -> list[tuple[str, str]]:
-    parts = _ANCHOR_PATTERN.split(body)
-    sections: list[tuple[str, str]] = []
-    for index in range(1, len(parts), 2):
-        anchor_id = parts[index]
-        content = parts[index + 1].strip() if index + 1 < len(parts) else ""
-        sections.append((anchor_id, content))
-    return sections
 
 
 def asset_stem(name: str) -> str | None:
