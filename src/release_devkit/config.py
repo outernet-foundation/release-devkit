@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     github_repository: str = ""
     github_actor: str = ""
     github_workspace: str = ""
-    github_step_summary: str | None = None
     github_ref: str = ""
 
 
@@ -65,9 +64,3 @@ class PublishConfig(BaseModel):
 def load_config(path: Path) -> PublishConfig:
     data = load_strict_yaml(path.read_text(encoding="utf-8")).data
     return PublishConfig.model_validate(data if data else {})
-
-
-def write_step_summary(path: str | None, text: str) -> None:
-    if path:
-        with Path(path).open("a", encoding="utf-8") as file:
-            file.write(text + "\n")
