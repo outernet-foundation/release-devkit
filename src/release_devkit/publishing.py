@@ -1,11 +1,9 @@
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
 
 from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
-from release_devkit.config import PackageConfig
 from release_devkit.context import VerbContext, merge_push_context
 from release_devkit.plan import PackagePlan, ReleasePlan, ResolvedDependency, compute_release_plan
 from release_devkit.registries import (
@@ -19,14 +17,6 @@ from release_devkit.registries import (
 class Channel(Enum):
     STABLE = "stable"
     DEV = "dev"
-
-
-class VersionStrategy(Protocol):
-    def package_version(self, registry_name: str, plan: PackagePlan) -> str: ...
-
-    def dependency_version(self, resolved: ResolvedDependency, registry_name: str) -> str: ...
-
-    def dist_tag(self, registry_name: str) -> str | None: ...
 
 
 class StableStrategy:
@@ -64,37 +54,22 @@ def deliver_changed_packages(
     strategy = DevStrategy(context.short) if channel is Channel.DEV else StableStrategy()
     packages = context.publish_config.packages
     release_plan = compute_release_plan(context.publish_config)
+
     published: list[tuple[str, str, str]] = []
-    if release_plan.publishing:
-        published = publish_packages(
-            packages,
-            release_plan,
-            context.settings.nuget_api_key,
-            strategy,
-            context.settings.github_workspace,
-        )
-    return context, release_plan, published
+    if not release_plan.publishing:
+        return context, release_plan, published
 
-
-def publish_packages(
-    packages: dict[str, PackageConfig],
-    release_plan: ReleasePlan,
-    nuget_api_key: str,
-    strategy: VersionStrategy,
-    workspace: str,
-) -> list[tuple[str, str, str]]:
     registries_to_publish = {
         registry_name for name in release_plan.publishing for registry_name in packages[name].registries
     }
     with ci_step("Setup"):
-        configure_git(workspace)
+        configure_git(context.settings.github_workspace)
         if "nuget" in registries_to_publish:
             install_dotnet("8.0")
         if "npm" in registries_to_publish:
             install_node("24", "https://registry.npmjs.org")
 
-    registries = build_registries(nuget_api_key)
-    published: list[tuple[str, str, str]] = []
+    registries = build_registries(context.settings.nuget_api_key)
     for name, package in packages.items():
         plan = release_plan.plans[name]
         if not plan.publish:
@@ -116,4 +91,4 @@ def publish_packages(
                     )
                 )
             published.append((registry_name, identity, version))
-    return published
+    return context, release_plan, published
