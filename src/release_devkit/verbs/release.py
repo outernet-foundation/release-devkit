@@ -15,7 +15,7 @@ from release_devkit.context import merge_push_context
 from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release
 from release_devkit.plan import compute_release_plan, package_rows
 from release_devkit.publishing import StableStrategy, publish_packages
-from release_devkit.rendering import PackageRow, render_release_body
+from release_devkit.rendering import PackageRow, render_images_table, render_packages_table
 from release_devkit.tags import create_and_push_tag, latest_version
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -86,7 +86,12 @@ def main(
         if version:
             rows.append(PackageRow(app_name, version))
 
-    notes = render_release_body(rows, context.manifest)
+    notes = "\n".join(
+        ["## Packages", ""]
+        + render_packages_table(rows)
+        + (["", "## Built images"] + render_images_table(context.manifest) if context.manifest else [])
+        + [""]
+    )
     print(notes)
 
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:

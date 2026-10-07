@@ -4,12 +4,11 @@ from pathlib import Path
 import pytest
 
 from release_devkit import plan as plan_module
-from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig
+from release_devkit.config import AppConfig, PackageConfig, PublishConfig
 from release_devkit.manifests import DependencyEdge
 from release_devkit.plan import (
     PackagePlan,
     ResolvedDependency,
-    apps_with_changes,
     compute_release_plan,
     next_version,
     package_rows,
@@ -213,34 +212,6 @@ def test_release_plan_bumps_app_on_its_own_path_change(monkeypatch: pytest.Monke
 
     assert release_plan.publishing == set()
     assert release_plan.app_versions == {"app": "0.2.4"}
-
-
-def test_apps_with_changes_lists_only_apps_with_builds_and_changes(monkeypatch: pytest.MonkeyPatch) -> None:
-    config = PublishConfig(
-        builds_registry="ghcr.io/owner/repo/builds",
-        apps={
-            "changed": AppConfig(
-                path=Path("apps/changed"),
-                major_minor="1.0",
-                builds=[BuildArtifactConfig(project="Changed", platform="AndroidMobile")],
-            ),
-            "unchanged": AppConfig(
-                path=Path("apps/unchanged"),
-                major_minor="1.0",
-                builds=[BuildArtifactConfig(project="Unchanged", platform="AndroidMobile")],
-            ),
-            "changed-no-builds": AppConfig(path=Path("apps/changed-no-builds"), major_minor="1.0"),
-        },
-    )
-    patch_plan_tags(
-        monkeypatch,
-        FakeTagSource(
-            versions={"changed-v": ["1.0.0"], "unchanged-v": ["1.0.0"]},
-            changed={"apps/changed": True, "apps/unchanged": False, "apps/changed-no-builds": True},
-        ),
-    )
-
-    assert set(apps_with_changes(config)) == {"changed"}
 
 
 def test_package_rows_use_override_then_tag_then_fallback(monkeypatch: pytest.MonkeyPatch) -> None:

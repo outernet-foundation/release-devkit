@@ -99,6 +99,8 @@ def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
     monkeypatch.setattr(plan_module, "latest_version", tags.latest_version)
     monkeypatch.setattr(plan_module, "latest_version_in_line", tags.latest_version_in_line)
     monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
+    monkeypatch.setattr(drafts, "latest_version", tags.latest_version)
+    monkeypatch.setattr(drafts, "has_changes_since", tags.has_changes_since)
 
 
 def make_context(

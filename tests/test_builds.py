@@ -3,23 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from release_devkit import builds
-from release_devkit.builds import (
-    DigestEntry,
-    certified_sha,
-    pull_digest_manifest,
-)
+from release_devkit import context as context_module
+from release_devkit.builds import DigestEntry
+from release_devkit.context import build_context, merge_push_context
 from release_devkit.rendering import render_images_table
-
-
-class SequentialOutputs:
-    def __init__(self, outputs: list[str]) -> None:
-        self.outputs = outputs
-        self.commands: list[str] = []
-
-    def __call__(self, command: str) -> str:
-        self.commands.append(command)
-        return self.outputs.pop(0)
 
 
 class FixedReturn:
@@ -31,7 +18,7 @@ class FixedReturn:
 
 
 class CallRecorder:
-    def __init__(self, return_value: object) -> None:
+    def __init__(self, return_value: object = None) -> None:
         self._return_value = return_value
         self.calls: list[tuple[object, ...]] = []
 
@@ -40,41 +27,77 @@ class CallRecorder:
         return self._return_value
 
 
-def patch_recorder(monkeypatch: pytest.MonkeyPatch, outputs: list[str]) -> SequentialOutputs:
-    recorder = SequentialOutputs(outputs)
-    monkeypatch.setattr("release_devkit.builds.bash_output", recorder)
-    return recorder
+def make_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_ACTOR", "bot")
+    monkeypatch.setenv("GITHUB_WORKSPACE", "/workspace")
 
 
-def test_certified_sha_resolves_the_second_parent(monkeypatch: pytest.MonkeyPatch) -> None:
-    recorder = patch_recorder(
-        monkeypatch,
-        ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"],
+def write_config(tmp_path: Path, content: str = "") -> Path:
+    config = tmp_path / "release-devkit.yaml"
+    config.write_text(content, encoding="utf-8")
+    return config
+
+
+def dispatching_bash_output(command: str) -> str:
+    if "rev-parse" in command:
+        return "cccccccccccccccccccccccccccccccccccccccc\n"
+    if "%P" in command:
+        return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+    return ""
+
+
+def single_parent_bash_output(command: str) -> str:
+    if "rev-parse" in command:
+        return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+    return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+
+
+def test_merge_push_context_resolves_the_second_parent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    make_env(monkeypatch)
+    monkeypatch.setattr(context_module, "bash_output", dispatching_bash_output)
+
+    result = merge_push_context(write_config(tmp_path))
+
+    assert result.head == "cccccccccccccccccccccccccccccccccccccccc"
+    assert result.certified == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    assert result.manifest is None
+
+
+def test_merge_push_context_falls_back_to_head_on_non_merge(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    make_env(monkeypatch)
+    monkeypatch.setattr(context_module, "bash_output", single_parent_bash_output)
+
+    result = merge_push_context(write_config(tmp_path))
+
+    assert result.certified == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+
+def test_build_context_manifest_is_none_when_no_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    make_env(monkeypatch)
+
+    result = build_context(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", write_config(tmp_path)
     )
 
-    result = certified_sha("cccccccccccccccccccccccccccccccccccccccc")
-
-    assert result == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    assert recorder.commands == ["git log -1 --format=%P cccccccccccccccccccccccccccccccccccccccc"]
+    assert result.manifest is None
 
 
-def test_certified_sha_falls_back_to_self_on_non_merge(monkeypatch: pytest.MonkeyPatch) -> None:
-    patch_recorder(monkeypatch, ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"])
+def test_build_context_manifest_is_none_when_build_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    make_env(monkeypatch)
+    monkeypatch.setattr(context_module, "build_exists", FixedReturn(False))
 
-    assert certified_sha("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    result = build_context(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        write_config(tmp_path, "builds_registry: ghcr.io/owner/repo/builds\n"),
+    )
 
-
-def test_pull_digest_manifest_returns_none_when_no_registry() -> None:
-    assert pull_digest_manifest(None, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "") is None
-
-
-def test_pull_digest_manifest_returns_none_when_build_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(builds, "build_exists", FixedReturn(False))
-
-    assert pull_digest_manifest("ghcr.io/owner/repo/builds", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "") is None
+    assert result.manifest is None
 
 
-def test_pull_digest_manifest_pulls_the_sha_tag_and_parses_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_context_pulls_the_sha_tag_and_parses_entries(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    make_env(monkeypatch)
     manifest_data = {
         "zed-capture": {
             "ref": "ghcr.io/outernet-foundation/placeframe-capture-tool/zed-capture",
@@ -89,17 +112,21 @@ def test_pull_digest_manifest_pulls_the_sha_tag_and_parses_entries(monkeypatch: 
         (target_directory / "images-digests.json").write_text(json.dumps(manifest_data), encoding="utf-8")
 
     build_exists_recorder = CallRecorder(True)
-    monkeypatch.setattr(builds, "build_exists", build_exists_recorder)
-    monkeypatch.setattr(builds, "pull_build", fake_pull_build)
+    monkeypatch.setattr(context_module, "build_exists", build_exists_recorder)
+    monkeypatch.setattr(context_module, "pull_build", fake_pull_build)
 
-    sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    result = pull_digest_manifest("ghcr.io/owner/repo/builds", sha, "", "")
+    certified = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    result = build_context(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        certified,
+        write_config(tmp_path, "builds_registry: ghcr.io/owner/repo/builds\n"),
+    )
 
-    assert result is not None
-    assert build_exists_recorder.calls[0][3] == f"sha-{sha}"
-    assert result["zed-capture"].ref == "ghcr.io/outernet-foundation/placeframe-capture-tool/zed-capture"
-    assert result["zed-capture"].digest == "sha256:abc"
-    assert result["zed-capture"].tags == ["tree-123", "latest"]
+    assert result.manifest is not None
+    assert build_exists_recorder.calls[0][3] == f"sha-{certified}"
+    assert result.manifest["zed-capture"].ref == "ghcr.io/outernet-foundation/placeframe-capture-tool/zed-capture"
+    assert result.manifest["zed-capture"].digest == "sha256:abc"
+    assert result.manifest["zed-capture"].tags == ["tree-123", "latest"]
 
 
 def test_render_images_table_links_tree_tag_to_ghcr_url() -> None:

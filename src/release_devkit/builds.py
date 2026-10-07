@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from tempfile import mkdtemp
 
-from bashrun.bash import bash_output
-from pydantic import BaseModel
-from ci_devkit.builds import build_exists, pull_build
+from ci_devkit.builds import pull_build
 from ci_devkit.ci_step import ci_step
+from pydantic import BaseModel
 
 from release_devkit.config import AppConfig, BuildArtifactConfig
 
@@ -20,11 +18,6 @@ class DigestEntry(BaseModel):
     ref: str
     digest: str
     tags: list[str]
-
-
-def certified_sha(sha: str) -> str:
-    parents = bash_output(f"git log -1 --format=%P {sha}").strip().split()
-    return parents[1] if len(parents) >= 2 else sha
 
 
 def pull_build_assets(
@@ -74,35 +67,3 @@ def pull_build_assets(
                 print(f"  Asset: {source.name}")
 
     return assets
-
-
-def pull_digest_manifest(
-    builds_registry: str | None,
-    sha: str,
-    registry_username: str,
-    registry_token: str,
-) -> dict[str, DigestEntry] | None:
-    if builds_registry is None:
-        return None
-    tag = f"sha-{sha}"
-    if not build_exists(
-        builds_registry,
-        DIGEST_PROJECT,
-        DIGEST_PLATFORM,
-        tag,
-        registry_username=registry_username,
-        registry_token=registry_token,
-    ):
-        return None
-    staging = Path(mkdtemp(prefix="digest-manifest-"))
-    pull_build(
-        builds_registry,
-        DIGEST_PROJECT,
-        DIGEST_PLATFORM,
-        tag,
-        staging,
-        registry_username=registry_username,
-        registry_token=registry_token,
-    )
-    data = json.loads((staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
-    return {target: DigestEntry.model_validate(entry) for target, entry in data.items()}

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from release_devkit.config import AppConfig, PackageConfig, PublishConfig
+from release_devkit.config import PackageConfig, PublishConfig
 from release_devkit.manifests import DependencyEdge, resolve_edges
 from release_devkit.registries import registry_url
 from release_devkit.rendering import PackageRow, RegistryLink
@@ -130,18 +130,6 @@ def next_version(major_minor: str, last_in_line: str | None, last_overall: str |
         return f"{line[0]}.{line[1]}.0"
     major, minor, patch = parse_version(last_in_line)
     return f"{major}.{minor}.{patch + 1}"
-
-
-def apps_with_changes(publish_config: PublishConfig) -> dict[str, AppConfig]:
-    return {
-        name: app
-        for name, app in publish_config.apps.items()
-        if app.builds is not None
-        and has_changes_since(
-            f"{name}-v{version}" if (version := latest_version(f"{name}-v")) else None,
-            app.path,
-        )
-    }
 
 
 def package_rows(

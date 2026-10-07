@@ -11,20 +11,19 @@ from ci_devkit.ci_step import ci_step
 
 from release_devkit.builds import pull_build_assets
 from release_devkit.context import VerbContext
-from release_devkit.plan import apps_with_changes
 from release_devkit.rendering import (
     DIGEST_PATTERN,
     AssetLink,
     PackageRow,
-    parse_asset_links,
-    render_asset_links,
     render_images_table,
     render_packages_table,
 )
+from release_devkit.tags import has_changes_since, latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
 _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
 _ASSET_NAME_PATTERN = re.compile(r"^(.+)-[0-9a-f]{12}\.[^.]+$")
+_ASSET_LINK_PATTERN = re.compile(r"^- \[([^\]]+)\]\(([^)]+)\)$", re.MULTILINE)
 
 
 def write_draft_section(
@@ -36,7 +35,15 @@ def write_draft_section(
     packages: list[PackageRow] | None = None,
 ) -> None:
     repository = context.settings.github_repository
-    changed_apps = apps_with_changes(context.publish_config)
+    changed_apps = {
+        name: app
+        for name, app in context.publish_config.apps.items()
+        if app.builds is not None
+        and has_changes_since(
+            f"{name}-v{version}" if (version := latest_version(f"{name}-v")) else None,
+            app.path,
+        )
+    }
     if not bash_check(f"gh release view {tag} --repo {repository}"):
         bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
         print(f"  Draft release {tag} created")
@@ -79,9 +86,9 @@ def write_draft_section(
         AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}") for name, _ in staged
     ] + (
         [
-            link
-            for link in parse_asset_links(sections[0][1])
-            if asset_stem(link.name) not in {stem for name, _ in staged if (stem := asset_stem(name)) is not None}
+            AssetLink(link_name, link_url)
+            for link_name, link_url in _ASSET_LINK_PATTERN.findall(sections[0][1])
+            if asset_stem(link_name) not in {stem for name, _ in staged if (stem := asset_stem(name)) is not None}
         ]
         if sections
         else []
@@ -92,7 +99,7 @@ def write_draft_section(
         section_lines.extend(render_packages_table(packages))
     if assets:
         section_lines.append("")
-        section_lines.extend(render_asset_links(assets))
+        section_lines.extend(f"- [{link.name}]({link.url})" for link in assets)
     if context.manifest:
         section_lines.append("")
         section_lines.append("#### Built images")
