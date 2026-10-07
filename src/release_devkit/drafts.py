@@ -91,7 +91,6 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
             versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
 
-    publish = channel == ReleaseChannel.STABLE
     repository = context.settings.github_repository
 
     # Ensure a draft release exists and read its current body
@@ -137,7 +136,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
             # Copy the asset under its release name and record it
             named = Path(artifact.name) if artifact.name else source
-            name = named.name if publish else f"{named.stem}-{context.short}{named.suffix}"
+            name = named.name if channel == ReleaseChannel.STABLE else f"{named.stem}-{context.short}{named.suffix}"
             target = staging / name
             shutil.copy2(source, target)
             staged.append((app_name, name, target))
@@ -147,7 +146,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
 
     # Assemble the notes section from the heading and the artifact tables
-    prefix = "#" * (2 if publish else 4)
+    prefix = "#" * (2 if channel == ReleaseChannel.STABLE else 4)
     blocks: list[str] = []
     if channel == ReleaseChannel.DEV:
         # Head the snapshot section with the merge's PR title
@@ -226,7 +225,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     section = "\n\n".join(blocks)
 
     # Splice the section into the draft body at its SHA anchor
-    if not publish:
+    if channel != ReleaseChannel.STABLE:
         anchor = f"sha-{context.short}"
         parts = re.split(r'<a id="([^"]+)"></a>', body)
         sections = {parts[index]: parts[index + 1].strip() for index in range(1, len(parts), 2)}
@@ -241,7 +240,8 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
     try:
         bash(
-            f"gh release edit {tag}{' --draft=false' if publish else ''} --repo {repository} --notes-file {notes_path}"
+            f"gh release edit {tag}{' --draft=false' if channel == ReleaseChannel.STABLE else ''}"
+            f" --repo {repository} --notes-file {notes_path}"
         )
     finally:
         Path(notes_path).unlink()
