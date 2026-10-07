@@ -91,25 +91,34 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 create_and_push_tag(f"{app_name}-v{app_version}")
 
         # List published packages with their registry links
-        table_rows: list[list[str]] = [
-            [
-                name,
-                version := next(
-                    (published[identity] for identity in package.registries.values() if identity in published),
-                    latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION,
-                ),
-                ", ".join(
-                    f"[{registry_name}]({build_registries('')[registry_name].url(identity, version)})"
-                    if version != UNCHANGED_FALLBACK_VERSION
-                    else registry_name
-                    for registry_name, identity in package.registries.items()
+        if context.publish_config.packages:
+            blocks.append(
+                f"{prefix} Packages\n"
+                + markdown_table(
+                    ["Package", "Version", "Registry"],
+                    [
+                        [
+                            name,
+                            version := next(
+                                (
+                                    published[identity]
+                                    for identity in package.registries.values()
+                                    if identity in published
+                                ),
+                                latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION,
+                            ),
+                            ", ".join(
+                                f"[{registry_name}]({build_registries('')[registry_name].url(identity, version)})"
+                                if version != UNCHANGED_FALLBACK_VERSION
+                                else registry_name
+                                for registry_name, identity in package.registries.items()
+                            )
+                            or "—",
+                        ]
+                        for name, package in context.publish_config.packages.items()
+                    ],
                 )
-                or "—",
-            ]
-            for name, package in context.publish_config.packages.items()
-        ]
-        if table_rows:
-            blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
+            )
 
     # Compose the channel's release tag
     match channel:
@@ -202,7 +211,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
     # List built images from the digest manifest
     if context.manifest:
-        table_rows = []
+        table_rows: list[list[str]] = []
         for image_name, entry in context.manifest.items():
             tree_tag = next(
                 (tag_name for tag_name in entry.tags if tag_name.startswith("tree-")),
