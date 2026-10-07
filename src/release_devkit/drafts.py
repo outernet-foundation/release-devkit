@@ -37,6 +37,7 @@ class DigestEntry(BaseModel):
 
 
 def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
+    # Read the runner settings and the publish config
     settings = Settings.model_validate({})
     publish_config = load_config(config)
 
@@ -47,33 +48,17 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     if channel == ReleaseChannel.STABLE and not release_plan.publishing and not release_plan.app_versions:
         return
 
+    # Resolve the certified SHA for the channel
     head = bash_output("git rev-parse HEAD").strip()
     sha = head if channel == ReleaseChannel.PR else bash_output(f"git log -1 --format=%P {head}").strip().split()[1]
-
-    # Pull the digest manifest from the builds shelf
-    manifest = None
-    if publish_config.builds_registry is not None:
-        digest_staging = Path(mkdtemp(prefix="digest-manifest-"))
-        if pull_artifact(
-            publish_config.builds_registry,
-            DIGEST_PROJECT,
-            DIGEST_PLATFORM,
-            f"sha-{sha}",
-            digest_staging,
-            required=False,
-            registry_username=settings.github_actor,
-            registry_token=settings.github_token,
-        ):
-            data = json.loads((digest_staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
-            manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
-
     short_sha = sha[:12]
-    heading = f"### [{short_sha}](https://github.com/{settings.github_repository}/commit/{sha})"
 
-    # Assemble the release notes from the heading and the artifact tables
+    # Lay out the release notes scaffolding
+    heading = f"### [{short_sha}](https://github.com/{settings.github_repository}/commit/{sha})"
     prefix = "#" * (2 if channel == ReleaseChannel.STABLE else 4)
     blocks: list[str] = []
 
+    # Compose the channel's tag, versions, and header
     match channel:
         case ReleaseChannel.PR:
             tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', settings.github_ref)[0][0]}"
@@ -110,6 +95,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     else:
         bash(f"gh release create {tag} --draft --target {head} --title {tag} --notes '' --repo {repository}")
 
+    # Provision the runner and the registries for publishing
     if channel in (ReleaseChannel.DEV, ReleaseChannel.STABLE):
         configure_git(settings.github_workspace)
         install_dotnet("8.0")
@@ -157,6 +143,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 f"[{package.registry}]({registry.url(package.identity, version)})",
             ])
 
+        # Render the packages table
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
@@ -174,6 +161,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             (app_name, artifact) for app_name, artifacts in apps_with_builds.items() for artifact in artifacts
         ]:
             layer = staging / f"{artifact.project}-{artifact.platform}"
+            # Pull the artifact layer from the builds shelf
             pull_artifact(
                 publish_config.builds_registry or "",
                 artifact.project,
@@ -220,26 +208,41 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         ]
         blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], table_rows)}")
 
-    # List built images from the digest manifest
-    if manifest:
-        table_rows = []
-        for image_name, entry in manifest.items():
-            tree_tag = next(
-                (tag_name for tag_name in entry.tags if tag_name.startswith("tree-")),
-                entry.tags[0] if entry.tags else "",
-            )
-            url = (
-                f"https://github.com/orgs/{ref_parts[0]}/packages/container/{ref_parts[1].replace('/', '%2F')}"
-                if entry.ref.startswith("ghcr.io/")
-                and len(ref_parts := entry.ref[len("ghcr.io/") :].split("/", 1)) >= 2
-                else None
-            )
-            table_rows.append([
-                image_name,
-                f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—"),
-                f"`{entry.digest}`",
-            ])
-        blocks.append(f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], table_rows)}")
+    # Pull the digest manifest from the builds shelf
+    if publish_config.builds_registry is not None:
+        digest_staging = Path(mkdtemp(prefix="digest-manifest-"))
+        if pull_artifact(
+            publish_config.builds_registry,
+            DIGEST_PROJECT,
+            DIGEST_PLATFORM,
+            f"sha-{sha}",
+            digest_staging,
+            required=False,
+            registry_username=settings.github_actor,
+            registry_token=settings.github_token,
+        ):
+            data = json.loads((digest_staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
+            manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
+
+            # List built images from the digest manifest
+            table_rows = []
+            for image_name, entry in manifest.items():
+                tree_tag = next(
+                    (tag_name for tag_name in entry.tags if tag_name.startswith("tree-")),
+                    entry.tags[0] if entry.tags else "",
+                )
+                url = (
+                    f"https://github.com/orgs/{ref_parts[0]}/packages/container/{ref_parts[1].replace('/', '%2F')}"
+                    if entry.ref.startswith("ghcr.io/")
+                    and len(ref_parts := entry.ref[len("ghcr.io/") :].split("/", 1)) >= 2
+                    else None
+                )
+                table_rows.append([
+                    image_name,
+                    f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—"),
+                    f"`{entry.digest}`",
+                ])
+            blocks.append(f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], table_rows)}")
 
     # Join the blocks into one section
     section = "\n\n".join(blocks)
