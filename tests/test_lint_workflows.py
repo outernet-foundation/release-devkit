@@ -77,14 +77,14 @@ LINT_WORKFLOWS_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit
 
 PRERELEASE_RUN = (
     '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
-    " prerelease --repository ${{ github.repository }} --sha ${{ github.sha }}"
+    " prerelease --repository ${{ github.repository }}"
     " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
     " --step-summary $GITHUB_STEP_SUMMARY\n"
 )
 
 RELEASE_RUN = (
     '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
-    " release --repository ${{ github.repository }} --sha ${{ github.sha }}"
+    " release --repository ${{ github.repository }}"
     " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
     " --step-summary $GITHUB_STEP_SUMMARY\n"
 )

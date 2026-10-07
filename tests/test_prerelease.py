@@ -85,10 +85,17 @@ def null_ci_step(label: str) -> object:
 
 CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
 SHORT_SHA = CERTIFIED_SHA[:12]
+MERGE_SHA = "654321abcdef0987654321abcdef0987654321"
 
 
 def noop(*args: object, **kwargs: object) -> None:
     pass
+
+
+def merge_checkout_bash_output(command: str) -> str:
+    if "git rev-parse" in command:
+        return MERGE_SHA
+    return "Not a merge commit\n"
 
 
 def patch_common(monkeypatch: pytest.MonkeyPatch) -> CallRecorder:
@@ -101,7 +108,7 @@ def patch_common(monkeypatch: pytest.MonkeyPatch) -> CallRecorder:
     monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(None))
     pull_assets = CallRecorder([])
     monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
-    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Not a merge commit\n"))
+    monkeypatch.setattr(prerelease, "bash_output", merge_checkout_bash_output)
     return pull_assets
 
 
@@ -122,7 +129,6 @@ def run_prerelease(
 
     prerelease.main(
         repository="owner/repo",
-        sha="abc123def456",
         actor="bot",
         workspace="/workspace",
         step_summary="",
@@ -214,6 +220,8 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
     monkeypatch.setattr(prerelease, "bash_check", FixedReturn(True))
 
     def mock_bash_output(command: str) -> str:
+        if "git rev-parse" in command:
+            return MERGE_SHA
         if "git log" in command:
             return "Not a merge commit\n"
         return f"`{digest_existing}`"
@@ -231,7 +239,6 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
 
     prerelease.main(
         repository="owner/repo",
-        sha="abc123def456",
         actor="bot",
         workspace="/workspace",
         step_summary="",

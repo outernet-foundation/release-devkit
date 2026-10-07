@@ -25,7 +25,6 @@ PR_DRAFT_TAG_PREFIX = "pr-"
 def update_pr_draft(
     pr_number: Annotated[int, typer.Option(help="PR number whose draft to update")],
     repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
-    sha: Annotated[str, typer.Option(help="Commit SHA the draft release targets")],
     actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
     step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
@@ -48,7 +47,7 @@ def update_pr_draft(
         settings.github_token,
         tag,
         repository,
-        sha,
+        certified,
     )
 
     pr_url = f"https://github.com/{repository}/pull/{pr_number}"

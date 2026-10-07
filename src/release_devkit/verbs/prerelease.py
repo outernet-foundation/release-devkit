@@ -33,7 +33,6 @@ _MERGE_PR_PATTERN = re.compile(r"Merge PR #(\d+): (.+)")
 @app.command()
 def main(
     repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
-    sha: Annotated[str, typer.Option(help="Commit SHA being released")],
     actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
     workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
     step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
@@ -41,7 +40,8 @@ def main(
 ) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
-    certified = certified_sha(sha)
+    head = bash_output("git rev-parse HEAD").strip()
+    certified = certified_sha(head)
     short = certified[:12]
     commit_url = f"https://github.com/{repository}/commit/{certified}"
     manifest = pull_digest_manifest(publish_config.builds_registry, certified, actor, settings.github_token)
@@ -102,10 +102,10 @@ def main(
             settings.github_token,
             DEV_DRAFT_TAG,
             repository,
-            sha,
+            head,
         )
 
-    merge_message = bash_output(f"git log -1 --format=%B {sha}").strip()
+    merge_message = bash_output(f"git log -1 --format=%B {head}").strip()
     merge_match = _MERGE_PR_PATTERN.search(merge_message)
     pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
 

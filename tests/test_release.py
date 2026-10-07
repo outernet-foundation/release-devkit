@@ -70,7 +70,6 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
 
     release.main(
         repository="owner/repo",
-        sha="abc123def456",
         actor="bot",
         workspace="/workspace",
         step_summary="",

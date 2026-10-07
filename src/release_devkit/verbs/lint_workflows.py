@@ -85,12 +85,12 @@ DEVKIT_INVOCATION = re.compile(
 )
 VERB_ARGS: dict[str, re.Pattern[str]] = {
     "get-app-version": re.compile(r"^ --app \S+$"),
-    "release": re.compile(r"^ --repository .+ --sha .+ --actor .+ --workspace .+ --step-summary .+$"),
-    "prerelease": re.compile(r"^ --repository .+ --sha .+ --actor .+ --workspace .+ --step-summary .+$"),
+    "release": re.compile(r"^ --repository .+ --actor .+ --workspace .+ --step-summary .+$"),
+    "prerelease": re.compile(r"^ --repository .+ --actor .+ --workspace .+ --step-summary .+$"),
     "lint-workflows": re.compile(r"^$"),
     "merge-gate": re.compile(r"^ --head-sha .+ --repository .+$"),
     "validate-release-plan": re.compile(r"^ --step-summary .+$"),
-    "update-pr-draft-release": re.compile(r"^ --pr-number .+ --repository .+ --sha .+ --actor .+ --step-summary .+$"),
+    "update-pr-draft-release": re.compile(r"^ --pr-number .+ --repository .+ --actor .+ --step-summary .+$"),
 }
 VERB_ENV: dict[str, dict[str, str]] = {
     "release": {"GITHUB_TOKEN": "${{ github.token }}"},

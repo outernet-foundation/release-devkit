@@ -64,7 +64,6 @@ def make_source_file(name: str = "app.apk") -> Path:
 
 
 DRAFT_REPOSITORY = "owner/repo"
-DRAFT_SHA = "abc123def456"
 DRAFT_ACTOR = "bot"
 CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
 SHORT_SHA = CERTIFIED_SHA[:12]
@@ -116,7 +115,6 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     update_pr_draft(
         pr_number=7,
         repository=DRAFT_REPOSITORY,
-        sha=DRAFT_SHA,
         actor=DRAFT_ACTOR,
         step_summary="",
     )
@@ -152,7 +150,6 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     update_pr_draft(
         pr_number=7,
         repository=DRAFT_REPOSITORY,
-        sha=DRAFT_SHA,
         actor=DRAFT_ACTOR,
         step_summary="",
     )
@@ -173,7 +170,6 @@ def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -
     update_pr_draft(
         pr_number=7,
         repository=DRAFT_REPOSITORY,
-        sha=DRAFT_SHA,
         actor=DRAFT_ACTOR,
         step_summary="",
     )

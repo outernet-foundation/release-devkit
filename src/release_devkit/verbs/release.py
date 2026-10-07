@@ -29,7 +29,6 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 @app.command()
 def main(
     repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
-    sha: Annotated[str, typer.Option(help="Commit SHA being released")],
     actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
     workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
     step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
@@ -37,7 +36,8 @@ def main(
 ) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
-    certified = certified_sha(sha)
+    head = bash_output("git rev-parse HEAD").strip()
+    certified = certified_sha(head)
     manifest = pull_digest_manifest(publish_config.builds_registry, certified, actor, settings.github_token)
 
     tags = GitTags()
