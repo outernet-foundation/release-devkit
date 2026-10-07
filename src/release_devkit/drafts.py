@@ -43,15 +43,12 @@ def write_release(
     staged: list[tuple[str, str, Path]] = []
     apps_with_builds = {name: app.builds for name, app in context.publish_config.apps.items() if app.builds}
     if apps_with_builds:
-        builds_registry = context.publish_config.builds_registry
-        if builds_registry is None:
-            raise ValueError("builds_registry is required when any app declares builds")
         staging = Path(mkdtemp(prefix="release-builds-"))
         for app_name, artifacts in apps_with_builds.items():
             for artifact in artifacts:
                 layer = staging / f"{artifact.project}-{artifact.platform}"
                 pull_build(
-                    builds_registry,
+                    context.publish_config.builds_registry or "",
                     artifact.project,
                     artifact.platform,
                     f"sha-{context.certified}",
@@ -105,9 +102,10 @@ def write_release(
             )
             registry_cells: list[str] = []
             for registry_name, identity in package.registries.items():
-                registry = build_registries("").get(registry_name)
-                if registry is not None and version != UNCHANGED_FALLBACK_VERSION:
-                    registry_cells.append(f"[{registry_name}]({registry.url(identity, version)})")
+                if version != UNCHANGED_FALLBACK_VERSION:
+                    registry_cells.append(
+                        f"[{registry_name}]({build_registries('')[registry_name].url(identity, version)})"
+                    )
                 else:
                     registry_cells.append(registry_name)
             table_rows.append([name, version, ", ".join(registry_cells) if registry_cells else "—"])
