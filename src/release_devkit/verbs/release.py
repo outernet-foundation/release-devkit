@@ -220,25 +220,13 @@ def publish_packages(
         # List an unchanged package at its latest stable tag
         if not plan.publish and latest_version is not None:
             rows.append(
-                PackageRow(
-                    name=name,
-                    version=latest_version,
-                    registry=package.registry,
-                    url=registry.url(package.identity, latest_version),
-                )
+                PackageRow(name, latest_version, package.registry, registry.url(package.identity, latest_version))
             )
             continue
 
         # List a never-published package with the fallback version
         if not plan.publish:
-            rows.append(
-                PackageRow(
-                    name=name,
-                    version=UNCHANGED_FALLBACK_VERSION,
-                    registry=package.registry,
-                    url=None,
-                )
-            )
+            rows.append(PackageRow(name, UNCHANGED_FALLBACK_VERSION, package.registry, None))
             continue
 
         # Publish the changed package and list the version it returned
@@ -253,14 +241,7 @@ def publish_packages(
         if channel == ReleaseChannel.STABLE:
             create_and_push_tag(f"{name}-v{plan.version}")
 
-        rows.append(
-            PackageRow(
-                name=name,
-                version=version,
-                registry=package.registry,
-                url=registry.url(package.identity, version),
-            )
-        )
+        rows.append(PackageRow(name, version, package.registry, registry.url(package.identity, version)))
 
     return rows
 
@@ -311,7 +292,7 @@ def stage_apps(
     # Upload the staged assets
     bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, path in staged)} --clobber --repo {repository}")
 
-    return [StagedAsset(app=app_name, asset=path.name) for app_name, path in staged]
+    return [StagedAsset(app_name, path.name) for app_name, path in staged]
 
 
 def render_built_images(settings: Settings, publish_config: PublishConfig, sha: str) -> list[ImageRow]:
@@ -343,7 +324,7 @@ def render_built_images(settings: Settings, publish_config: PublishConfig, sha: 
             if entry.ref.startswith("ghcr.io/") and len(ref_parts := entry.ref[len("ghcr.io/") :].split("/", 1)) >= 2
             else None
         )
-        rows.append(ImageRow(image=image_name, tag=tree_tag, digest=entry.digest, url=url))
+        rows.append(ImageRow(image_name, tree_tag, entry.digest, url))
     return rows
 
 
