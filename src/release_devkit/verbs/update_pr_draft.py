@@ -28,7 +28,12 @@ def update_pr_draft(
     context = pr_head_context(config)
     settings = context.settings
     publish_config = context.publish_config
-    pr_number = pr_number_from_ref(settings.github_ref)
+    match = PR_REF_PATTERN.fullmatch(settings.github_ref)
+    if match is None:
+        raise SystemExit(
+            f"GITHUB_REF {settings.github_ref!r} is not a pull_request ref — this verb runs on pull_request events"
+        )
+    pr_number = int(match.group(1))
     repository = settings.github_repository
     manifest = context.manifest
 
@@ -70,10 +75,3 @@ def update_pr_draft(
     summary = "\n".join(summary_lines)
     print(summary)
     write_step_summary(settings.github_step_summary, summary)
-
-
-def pr_number_from_ref(ref: str) -> int:
-    match = PR_REF_PATTERN.fullmatch(ref)
-    if match is None:
-        raise SystemExit(f"GITHUB_REF {ref!r} is not a pull_request ref — this verb runs on pull_request events")
-    return int(match.group(1))
