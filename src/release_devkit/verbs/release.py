@@ -112,24 +112,22 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     # Publish the changed packages and tag the stable versions
     if channel in (ReleaseChannel.DEV, ReleaseChannel.STABLE):
         with ci_step("Publish packages"):
-            packages_table = publish_packages(settings, publish_config, release_plan, channel, short_sha, prefix)
-        if packages_table is not None:
-            blocks.append(packages_table)
+            packages_rows = publish_packages(settings, publish_config, release_plan, channel, short_sha)
+        if packages_rows:
+            blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], packages_rows)}")
 
     # Stage every app's build artifacts as release assets
     if any(app.builds for app in publish_config.apps.values()):
         with ci_step("Upload app builds"):
-            apps_table = stage_app_builds(
-                settings, publish_config, channel, sha, short_sha, versions, tag, repository, prefix
-            )
-        blocks.append(apps_table)
+            apps_rows = stage_app_builds(settings, publish_config, channel, sha, short_sha, versions, tag, repository)
+        blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], apps_rows)}")
 
     # List the images built at this SHA from the builds shelf
     if publish_config.builds_registry is not None:
         with ci_step("List built images"):
-            images_table = render_built_images(settings, publish_config, sha, prefix)
-        if images_table is not None:
-            blocks.append(images_table)
+            images_rows = render_built_images(settings, publish_config, sha)
+        if images_rows:
+            blocks.append(f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], images_rows)}")
 
     # Join the blocks into one section
     section = "\n\n".join(blocks)
@@ -167,8 +165,7 @@ def publish_packages(
     release_plan: ReleasePlan,
     channel: ReleaseChannel,
     short_sha: str,
-    prefix: str,
-) -> str | None:
+) -> list[list[str]]:
     # Provision the runner and the registries for publishing
     configure_git(settings.github_workspace)
     install_dotnet("8.0")
@@ -221,10 +218,7 @@ def publish_packages(
         for app_name, app_version in release_plan.app_versions.items():
             create_and_push_tag(f"{app_name}-v{app_version}")
 
-    # Render the packages table
-    if not table_rows:
-        return None
-    return f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}"
+    return table_rows
 
 
 def stage_app_builds(
@@ -236,8 +230,7 @@ def stage_app_builds(
     versions: dict[str, str | None],
     tag: str,
     repository: str,
-    prefix: str,
-) -> str:
+) -> list[list[str]]:
     apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds}
 
     staging = Path(mkdtemp(prefix="release-builds-"))
@@ -283,7 +276,7 @@ def stage_app_builds(
     bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
 
     # List staged apps with their asset links
-    table_rows = [
+    return [
         [
             app_name,
             versions.get(app_name) or "—",
@@ -291,10 +284,9 @@ def stage_app_builds(
         ]
         for app_name, asset_name, _ in staged
     ]
-    return f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], table_rows)}"
 
 
-def render_built_images(settings: Settings, publish_config: PublishConfig, sha: str, prefix: str) -> str | None:
+def render_built_images(settings: Settings, publish_config: PublishConfig, sha: str) -> list[list[str]]:
     # Pull the digest manifest from the builds shelf
     digest_staging = Path(mkdtemp(prefix="digest-manifest-"))
     if not pull_artifact(
@@ -307,7 +299,7 @@ def render_built_images(settings: Settings, publish_config: PublishConfig, sha: 
         registry_username=settings.github_actor,
         registry_token=settings.github_token,
     ):
-        return None
+        return []
     data = json.loads((digest_staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
     manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
 
@@ -328,7 +320,7 @@ def render_built_images(settings: Settings, publish_config: PublishConfig, sha: 
             f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—"),
             f"`{entry.digest}`",
         ])
-    return f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], table_rows)}"
+    return table_rows
 
 
 def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
