@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-ci-devkit = { git = "https://github.com/outernet-foundation/ci-devkit.git", rev = "ade27d3ed76136026e2509110ba4b89d7f4d7a23" }
+ci-devkit = { git = "https://github.com/outernet-foundation/ci-devkit.git", rev = "bf9011df20c481f7ae6ffaed9581cd134f0512f2" }
 
 [dependency-groups]
 dev = [

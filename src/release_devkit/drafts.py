@@ -9,7 +9,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
 
 from bashrun.bash import bash, bash_check, bash_output
-from ci_devkit.builds import pull_build
+from ci_devkit.builds import pull_artifact
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from release_devkit.builds import DIGEST_FILE_NAME, DIGEST_PLATFORM, DIGEST_PROJECT, DigestEntry
@@ -45,7 +45,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     manifest = None
     if publish_config.builds_registry is not None:
         digest_staging = Path(mkdtemp(prefix="digest-manifest-"))
-        if pull_build(
+        if pull_artifact(
             publish_config.builds_registry,
             DIGEST_PROJECT,
             DIGEST_PLATFORM,
@@ -166,7 +166,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             (app_name, artifact) for app_name, artifacts in apps_with_builds.items() for artifact in artifacts
         ]:
             layer = staging / f"{artifact.project}-{artifact.platform}"
-            pull_build(
+            pull_artifact(
                 publish_config.builds_registry or "",
                 artifact.project,
                 artifact.platform,

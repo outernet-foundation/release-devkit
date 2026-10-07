@@ -44,7 +44,7 @@ wheels = [
 [[package]]
 name = "ci-devkit"
 version = "0.0.0.dev0"
-source = { git = "https://github.com/outernet-foundation/ci-devkit.git?rev=ade27d3ed76136026e2509110ba4b89d7f4d7a23#ade27d3ed76136026e2509110ba4b89d7f4d7a23" }
+source = { git = "https://github.com/outernet-foundation/ci-devkit.git?rev=bf9011df20c481f7ae6ffaed9581cd134f0512f2#bf9011df20c481f7ae6ffaed9581cd134f0512f2" }
 dependencies = [
     { name = "bashrun" },
     { name = "pydantic" },
@@ -332,7 +332,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bashrun", specifier = ">=0.1.0" },
-    { name = "ci-devkit", git = "https://github.com/outernet-foundation/ci-devkit.git?rev=ade27d3ed76136026e2509110ba4b89d7f4d7a23" },
+    { name = "ci-devkit", git = "https://github.com/outernet-foundation/ci-devkit.git?rev=bf9011df20c481f7ae6ffaed9581cd134f0512f2" },
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pydantic-settings", specifier = ">=2.9.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
