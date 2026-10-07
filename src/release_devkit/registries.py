@@ -1,7 +1,7 @@
 import json
 import re
 import tempfile
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from subprocess import CalledProcessError
@@ -34,6 +34,8 @@ class PyprojectProjectTable(BaseModel):
 
 
 class Registry(Protocol):
+    def dev_version(self, base_version: str, short_sha: str) -> str: ...
+
     def publish(
         self,
         path: Path,
@@ -46,6 +48,9 @@ class Registry(Protocol):
 class NuGetRegistry:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
+
+    def dev_version(self, base_version: str, short_sha: str) -> str:
+        return semver_dev_version(base_version, short_sha)
 
     def publish(
         self,
@@ -96,6 +101,9 @@ class NuGetRegistry:
 
 
 class NpmRegistry:
+    def dev_version(self, base_version: str, short_sha: str) -> str:
+        return semver_dev_version(base_version, short_sha)
+
     def publish(
         self,
         path: Path,
@@ -118,6 +126,9 @@ class NpmRegistry:
 
 
 class PyPIRegistry:
+    def dev_version(self, base_version: str, short_sha: str) -> str:
+        return pep440_dev_version(base_version, short_sha)
+
     def publish(
         self,
         path: Path,
@@ -196,13 +207,6 @@ def semver_dev_version(base_version: str, short_sha: str) -> str:
 
 def pep440_dev_version(base_version: str, short_sha: str) -> str:
     return f"{base_version}.dev{short_sha}"
-
-
-DEV_VERSION_FORMATS: dict[str, Callable[[str, str], str]] = {
-    "nuget": semver_dev_version,
-    "npm": semver_dev_version,
-    "pypi": pep440_dev_version,
-}
 
 
 def build_registries(nuget_api_key: str) -> dict[str, Registry]:

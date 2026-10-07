@@ -4,10 +4,7 @@ from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from release_devkit.context import VerbContext, merge_push_context
 from release_devkit.plan import ReleasePlan, compute_release_plan
-from release_devkit.registries import (
-    DEV_VERSION_FORMATS,
-    build_registries,
-)
+from release_devkit.registries import build_registries
 from release_devkit.tags import create_and_push_tag
 
 
@@ -35,10 +32,10 @@ def deliver_changed_packages(
         if not plan.publish:
             continue
         for registry_name, identity in package.registries.items():
-            version = DEV_VERSION_FORMATS[registry_name](plan.version, context.short) if dev else plan.version
+            version = registries[registry_name].dev_version(plan.version, context.short) if dev else plan.version
             dependency_versions = {
                 dep_identity: (
-                    DEV_VERSION_FORMATS[registry_name](resolved.version, context.short)
+                    registries[registry_name].dev_version(resolved.version, context.short)
                     if dev and resolved.co_publishing
                     else resolved.version
                 )

@@ -58,6 +58,9 @@ class FakePublishRegistry:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
+    def dev_version(self, base_version: object, short_sha: object) -> object:
+        return f"{base_version}-dev.{short_sha}"
+
     def publish(
         self,
         path: object,
