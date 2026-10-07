@@ -21,10 +21,9 @@ def update_pr_draft(
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
     context = pr_head_context(config)
-    pr_number = int(PR_REF_PATTERN.findall(context.settings.github_ref)[0][0])
 
     write_draft_section(
         context,
-        f"{PR_DRAFT_TAG_PREFIX}{pr_number}",
+        f"{PR_DRAFT_TAG_PREFIX}{int(PR_REF_PATTERN.findall(context.settings.github_ref)[0][0])}",
         [f"[{context.short}]({context.commit_url})"],
     )
