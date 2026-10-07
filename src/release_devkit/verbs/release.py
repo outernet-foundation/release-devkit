@@ -236,45 +236,47 @@ def stage_apps(
 ) -> list[list[str]]:
     staging = Path(mkdtemp(prefix="release-builds-"))
     staged: list[tuple[str, str, Path]] = []
-    for app_name, app in publish_config.apps.items():
-        for artifact in app.builds:
-            layer = staging / f"{artifact.project}-{artifact.platform}"
-            # Pull the artifact layer from the builds shelf
-            pull_artifact(
-                publish_config.builds_registry or "",
-                artifact.project,
-                artifact.platform,
-                f"sha-{sha}",
-                layer,
-                registry_username=settings.github_actor,
-                registry_token=settings.github_token,
+    for app_name, artifact in [
+        (app_name, artifact) for app_name, app in publish_config.apps.items() for artifact in app.builds
+    ]:
+        layer = staging / f"{artifact.project}-{artifact.platform}"
+        # Pull the artifact layer from the builds shelf
+        pull_artifact(
+            publish_config.builds_registry or "",
+            artifact.project,
+            artifact.platform,
+            f"sha-{sha}",
+            layer,
+            registry_username=settings.github_actor,
+            registry_token=settings.github_token,
+        )
+
+        # Select the file inside the pulled layer that becomes the asset
+        files = sorted(path for path in layer.rglob("*") if path.is_file())
+        if artifact.file is not None:
+            source = next((path for path in files if path.name == artifact.file), None)
+            if source is None:
+                raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {layer}")
+        elif len(files) == 1:
+            source = files[0]
+        else:
+            raise SystemExit(
+                f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
+                f"({', '.join(path.name for path in files)}); declare which one with 'file'"
             )
 
-            # Select the file inside the pulled layer that becomes the asset
-            files = sorted(path for path in layer.rglob("*") if path.is_file())
-            if artifact.file is not None:
-                source = next((path for path in files if path.name == artifact.file), None)
-                if source is None:
-                    raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {layer}")
-            elif len(files) == 1:
-                source = files[0]
-            else:
-                raise SystemExit(
-                    f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
-                    f"({', '.join(path.name for path in files)}); declare which one with 'file'"
-                )
+        # Copy the asset under its release name and record it
+        named = Path(artifact.name) if artifact.name else source
+        name = named.name if channel == ReleaseChannel.STABLE else f"{named.stem}-{short_sha}{named.suffix}"
+        target = staging / name
+        shutil.copy2(source, target)
+        staged.append((app_name, name, target))
+        print(f"  Asset: {name}")
 
-            # Copy the asset under its release name and record it
-            named = Path(artifact.name) if artifact.name else source
-            name = named.name if channel == ReleaseChannel.STABLE else f"{named.stem}-{short_sha}{named.suffix}"
-            target = staging / name
-            shutil.copy2(source, target)
-            staged.append((app_name, name, target))
-            print(f"  Asset: {name}")
-
-        # Tag the app's bumped version alongside its staged assets
-        if channel == ReleaseChannel.STABLE:
-            create_and_push_tag(f"{app_name}-v{release_plan.app_versions[app_name]}")
+    # Tag the bumped app versions alongside their staged assets
+    if channel == ReleaseChannel.STABLE:
+        for app_name, app_version in release_plan.app_versions.items():
+            create_and_push_tag(f"{app_name}-v{app_version}")
 
     # Upload the staged assets
     bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
