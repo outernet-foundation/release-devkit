@@ -11,15 +11,10 @@ from ci_devkit.builds import pull_build
 
 from release_devkit.context import VerbContext
 from release_devkit.plan import UNCHANGED_FALLBACK_VERSION
+from release_devkit.publishing import build_registries
 from release_devkit.tags import latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
-
-REGISTRY_URL_TEMPLATES: dict[str, str] = {
-    "nuget": "https://www.nuget.org/packages/{0}/{1}",
-    "npm": "https://www.npmjs.com/package/{0}/v/{1}",
-    "pypi": "https://pypi.org/project/{0}/{1}",
-}
 
 
 def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
@@ -99,14 +94,15 @@ def write_release(
             identity: name for name, package in configured.items() for identity in package.registries.values()
         }
         overrides = {names_by_identity[identity]: version for identity, version in published}
+        registries = build_registries("")
         table_rows: list[list[str]] = []
         for name, package in configured.items():
             version = overrides.get(name) or latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
             registry_cells: list[str] = []
             for registry_name, identity in package.registries.items():
-                template = REGISTRY_URL_TEMPLATES.get(registry_name)
-                if template is not None and version != UNCHANGED_FALLBACK_VERSION:
-                    registry_cells.append(f"[{registry_name}]({template.format(identity, version)})")
+                registry = registries.get(registry_name)
+                if registry is not None and version != UNCHANGED_FALLBACK_VERSION:
+                    registry_cells.append(f"[{registry_name}]({registry.url(identity, version)})")
                 else:
                     registry_cells.append(registry_name)
             table_rows.append([name, version, ", ".join(registry_cells) if registry_cells else "—"])

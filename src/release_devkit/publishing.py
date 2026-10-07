@@ -57,6 +57,8 @@ def publish_packages(context: VerbContext, dev: bool) -> tuple[ReleasePlan, list
 class Registry(Protocol):
     def dev_version(self, base_version: str, short_sha: str) -> str: ...
 
+    def url(self, identity: str, version: str) -> str: ...
+
     def publish(
         self,
         path: Path,
@@ -73,6 +75,9 @@ class NuGetRegistry:
 
     def dev_version(self, base_version: str, short_sha: str) -> str:
         return semver_dev_version(base_version, short_sha)
+
+    def url(self, identity: str, version: str) -> str:
+        return f"https://www.nuget.org/packages/{identity}/{version}"
 
     def publish(
         self,
@@ -131,6 +136,9 @@ class NpmRegistry:
     def dev_version(self, base_version: str, short_sha: str) -> str:
         return semver_dev_version(base_version, short_sha)
 
+    def url(self, identity: str, version: str) -> str:
+        return f"https://www.npmjs.com/package/{identity}/v/{version}"
+
     def publish(
         self,
         path: Path,
@@ -160,6 +168,9 @@ class NpmRegistry:
 class PyPIRegistry:
     def dev_version(self, base_version: str, short_sha: str) -> str:
         return pep440_dev_version(base_version, short_sha)
+
+    def url(self, identity: str, version: str) -> str:
+        return f"https://pypi.org/project/{identity}/{version}"
 
     def publish(
         self,
