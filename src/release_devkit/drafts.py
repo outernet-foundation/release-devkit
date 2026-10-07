@@ -46,7 +46,6 @@ def write_release(
         builds_registry = context.publish_config.builds_registry
         if builds_registry is None:
             raise ValueError("builds_registry is required when any app declares builds")
-        short = None if publish else context.short
         staging = Path(mkdtemp(prefix="release-builds-"))
         for app_name, artifacts in apps_with_builds.items():
             for artifact in artifacts:
@@ -73,7 +72,7 @@ def write_release(
                         f"({', '.join(path.name for path in files)}); declare which one with 'file'"
                     )
                 named = Path(artifact.name) if artifact.name else source
-                name = f"{named.stem}-{short}{named.suffix}" if short is not None else named.name
+                name = f"{named.stem}-{context.short}{named.suffix}" if not publish else named.name
                 target = staging / name
                 shutil.copy2(source, target)
                 staged.append((app_name, name, target))
@@ -90,17 +89,23 @@ def write_release(
 
     if published is not None:
         configured = context.publish_config.packages
-        names_by_identity = {
-            identity: name for name, package in configured.items() for identity in package.registries.values()
-        }
-        overrides = {names_by_identity[identity]: version for identity, version in published}
-        registries = build_registries("")
         table_rows: list[list[str]] = []
         for name, package in configured.items():
-            version = overrides.get(name) or latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
+            version = (
+                next(
+                    (
+                        published_version
+                        for identity, published_version in reversed(published)
+                        if identity in package.registries.values()
+                    ),
+                    None,
+                )
+                or latest_version(f"{name}-v")
+                or UNCHANGED_FALLBACK_VERSION
+            )
             registry_cells: list[str] = []
             for registry_name, identity in package.registries.items():
-                registry = registries.get(registry_name)
+                registry = build_registries("").get(registry_name)
                 if registry is not None and version != UNCHANGED_FALLBACK_VERSION:
                     registry_cells.append(f"[{registry_name}]({registry.url(identity, version)})")
                 else:
@@ -113,9 +118,11 @@ def write_release(
         table_rows = []
         for app_name, asset_name, _ in staged:
             version = versions.get(app_name)
-            version_cell = version if version is not None else "—"
-            asset_url = f"https://github.com/{repository}/releases/download/{tag}/{asset_name}"
-            table_rows.append([app_name, version_cell, f"[{asset_name}]({asset_url})"])
+            table_rows.append([
+                app_name,
+                version if version is not None else "—",
+                f"[{asset_name}](https://github.com/{repository}/releases/download/{tag}/{asset_name})",
+            ])
         blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], table_rows)}")
 
     if context.manifest:
@@ -127,14 +134,16 @@ def write_release(
             )
             url = None
             if entry.ref.startswith("ghcr.io/"):
-                remainder = entry.ref[len("ghcr.io/") :]
-                ref_parts = remainder.split("/", 1)
+                ref_parts = entry.ref[len("ghcr.io/") :].split("/", 1)
                 if len(ref_parts) >= 2:
                     url = (
                         f"https://github.com/orgs/{ref_parts[0]}/packages/container/{ref_parts[1].replace('/', '%2F')}"
                     )
-            tag_cell = f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—")
-            table_rows.append([image_name, tag_cell, f"`{entry.digest}`"])
+            table_rows.append([
+                image_name,
+                f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—"),
+                f"`{entry.digest}`",
+            ])
         blocks.append(f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], table_rows)}")
 
     section = "\n\n".join(blocks)
@@ -149,12 +158,13 @@ def write_release(
             sections = {anchor: section, **sections}
         section = "\n\n".join(f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections.items())
 
-    draft_flag = " --draft=false" if publish else ""
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
         file.write(section + "\n")
         notes_path = file.name
     try:
-        bash(f"gh release edit {tag}{draft_flag} --repo {repository} --notes-file {notes_path}")
+        bash(
+            f"gh release edit {tag}{' --draft=false' if publish else ''} --repo {repository} --notes-file {notes_path}"
+        )
     finally:
         Path(notes_path).unlink()
 
