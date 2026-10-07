@@ -108,7 +108,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
-    # Prepare the channel's release surface
+    # Compose the channel's release tag
     match channel:
         case ReleaseChannel.STABLE:
             # Stop when the stable run has nothing to ship
@@ -126,12 +126,18 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
             ).strip()
             tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
-            versions = {**release_plan.app_last_versions, **release_plan.app_versions}
         case ReleaseChannel.DEV:
             tag = DEV_DRAFT_TAG
-            versions = release_plan.app_last_versions
         case ReleaseChannel.PR:
             tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
+
+    # Compose the channel's app version table
+    match channel:
+        case ReleaseChannel.STABLE:
+            versions = {**release_plan.app_last_versions, **release_plan.app_versions}
+        case ReleaseChannel.DEV:
+            versions = release_plan.app_last_versions
+        case ReleaseChannel.PR:
             versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
 
     repository = context.settings.github_repository
