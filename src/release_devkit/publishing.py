@@ -32,10 +32,13 @@ def deliver_changed_packages(
         if not plan.publish:
             continue
         for registry_name, identity in package.registries.items():
-            version = registries[registry_name].publish(
-                package.path, plan.version, release_plan.resolved_versions[name], dev, context.short
-            )
-            published.append((registry_name, identity, version))
+            published.append((
+                registry_name,
+                identity,
+                registries[registry_name].publish(
+                    package.path, plan.version, release_plan.resolved_versions[name], dev, context.short
+                ),
+            ))
         if not dev:
             create_and_push_tag(f"{name}-v{plan.version}")
 
