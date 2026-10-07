@@ -1,6 +1,5 @@
 from pathlib import Path
 
-from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from release_devkit.context import VerbContext, merge_push_context
@@ -29,12 +28,11 @@ def deliver_changed_packages(
     registries_to_publish = {
         registry_name for name in release_plan.publishing for registry_name in packages[name].registries
     }
-    with ci_step("Setup"):
-        configure_git(context.settings.github_workspace)
-        if "nuget" in registries_to_publish:
-            install_dotnet("8.0")
-        if "npm" in registries_to_publish:
-            install_node("24", "https://registry.npmjs.org")
+    configure_git(context.settings.github_workspace)
+    if "nuget" in registries_to_publish:
+        install_dotnet("8.0")
+    if "npm" in registries_to_publish:
+        install_node("24", "https://registry.npmjs.org")
 
     registries = build_registries(context.settings.nuget_api_key)
     for name, package in packages.items():
@@ -43,30 +41,25 @@ def deliver_changed_packages(
             continue
         for registry_name, identity in package.registries.items():
             version = DEV_VERSION_FORMATS[registry_name](plan.version, context.short) if dev else plan.version
-            with ci_step(f"Publish {registry_name} ({name}) {version}"):
-                dependency_versions = {
-                    dep_identity: (
-                        DEV_VERSION_FORMATS[registry_name](resolved.version, context.short)
-                        if dev and resolved.co_publishing
-                        else resolved.version
-                    )
-                    for dep_identity, resolved in release_plan.resolved_versions[name].items()
-                }
-                registries[registry_name].publish(
-                    PublishRequest(
-                        path=package.path,
-                        identity=identity,
-                        version=version,
-                        dependency_versions=dependency_versions,
-                        dist_tag=NPM_DEV_DIST_TAG if dev and registry_name == "npm" else None,
-                    )
+            dependency_versions = {
+                dep_identity: (
+                    DEV_VERSION_FORMATS[registry_name](resolved.version, context.short)
+                    if dev and resolved.co_publishing
+                    else resolved.version
                 )
+                for dep_identity, resolved in release_plan.resolved_versions[name].items()
+            }
+            registries[registry_name].publish(
+                PublishRequest(
+                    path=package.path,
+                    identity=identity,
+                    version=version,
+                    dependency_versions=dependency_versions,
+                    dist_tag=NPM_DEV_DIST_TAG if dev and registry_name == "npm" else None,
+                )
+            )
             published.append((registry_name, identity, version))
-
-    if not dev:
-        for name in packages:
-            plan = release_plan.plans[name]
-            if plan.publish:
-                create_and_push_tag(f"{name}-v{plan.version}")
+        if not dev:
+            create_and_push_tag(f"{name}-v{plan.version}")
 
     return context, release_plan, published

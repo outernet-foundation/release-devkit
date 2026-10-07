@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
 from pathlib import Path
 from tempfile import mkdtemp
 
@@ -161,7 +160,6 @@ def patch_common(
 def patch_publish_internals(monkeypatch: pytest.MonkeyPatch) -> tuple[FakePublishRegistry, CallRecorder]:
     npm_registry = FakePublishRegistry()
     create_and_push_tag = CallRecorder()
-    monkeypatch.setattr(publishing_module, "ci_step", FixedReturn(nullcontext(None)))
     monkeypatch.setattr(publishing_module, "configure_git", noop)
     monkeypatch.setattr(publishing_module, "install_dotnet", noop)
     monkeypatch.setattr(publishing_module, "install_node", noop)
