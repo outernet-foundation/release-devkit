@@ -64,12 +64,11 @@ def main(
             settings.github_workspace,
         )
 
-    merge_match = _MERGE_PR_PATTERN.search(bash_output(f"git log -1 --format=%B {head}").strip())
-
-    pr_number = int(merge_match.group(1))
+    groups = _MERGE_PR_PATTERN.findall(bash_output(f"git log -1 --format=%B {head}").strip())[0]
+    pr_number = int(groups[0])
     heading_fragments: list[str] = [
         f"[{short}]({context.commit_url})",
-        f"[PR #{pr_number}: {merge_match.group(2)}](https://github.com/{repository}/pull/{pr_number})",
+        f"[PR #{pr_number}: {groups[1]}](https://github.com/{repository}/pull/{pr_number})",
     ]
 
     staged_assets: list[tuple[str, Path]] = []
