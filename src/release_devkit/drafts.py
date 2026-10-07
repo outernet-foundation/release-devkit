@@ -108,31 +108,38 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
-    # Prepare the channel's release surface
+    # Stop when the stable run has nothing to ship
+    if channel == ReleaseChannel.STABLE and not release_plan.publishing and not release_plan.app_versions:
+        return
+
+    # Tag the bumped app versions before cutting the release
+    if channel == ReleaseChannel.STABLE:
+        for app_name, app_version in release_plan.app_versions.items():
+            create_and_push_tag(f"{app_name}-v{app_version}")
+
+    # Compose the channel's release tag and app version table
     match channel:
         case ReleaseChannel.STABLE:
-            # Stop when the stable run has nothing to ship
-            if not release_plan.publishing and not release_plan.app_versions:
-                return
-
-            # Tag the bumped app versions before cutting the release
-            for app_name, app_version in release_plan.app_versions.items():
-                create_and_push_tag(f"{app_name}-v{app_version}")
-
             # Compose this month's next CalVer tag
             year_month = datetime.now(UTC).strftime("%Y.%m")
             existing = bash_output(
                 f"gh release list --repo {context.settings.github_repository} --json tagName"
                 f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
             ).strip()
-            tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
-            versions = {**release_plan.app_last_versions, **release_plan.app_versions}
+            tag, versions = (
+                f"{year_month}.{(int(existing) if existing else 0) + 1}",
+                {
+                    **release_plan.app_last_versions,
+                    **release_plan.app_versions,
+                },
+            )
         case ReleaseChannel.DEV:
-            tag = DEV_DRAFT_TAG
-            versions = release_plan.app_last_versions
+            tag, versions = DEV_DRAFT_TAG, release_plan.app_last_versions
         case ReleaseChannel.PR:
-            tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
-            versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
+            tag, versions = (
+                f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}",
+                {name: latest_version(f"{name}-v") for name in context.publish_config.apps},
+            )
 
     repository = context.settings.github_repository
 
