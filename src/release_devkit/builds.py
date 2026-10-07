@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from ci_devkit.builds import build_exists, pull_build
 from ci_devkit.ci_step import ci_step
 
-from release_devkit.config import BuildArtifactConfig, PublishConfig
+from release_devkit.config import AppConfig, BuildArtifactConfig
 
 DIGEST_PROJECT = "images-digests"
 DIGEST_PLATFORM = "all"
@@ -28,14 +28,17 @@ def certified_sha(sha: str) -> str:
 
 
 def pull_build_assets(
-    publish_config: PublishConfig, sha: str, registry_username: str, registry_token: str
+    apps: dict[str, AppConfig],
+    builds_registry: str | None,
+    sha: str,
+    registry_username: str,
+    registry_token: str,
 ) -> list[tuple[BuildArtifactConfig, Path]]:
-    apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds}
+    apps_with_builds = {name: app.builds for name, app in apps.items() if app.builds}
     if not apps_with_builds:
         return []
 
-    registry = publish_config.builds_registry
-    if registry is None:
+    if builds_registry is None:
         raise ValueError("builds_registry is required when any app declares builds")
 
     build_tag = f"sha-{sha}"
@@ -47,7 +50,7 @@ def pull_build_assets(
             for artifact in artifacts:
                 target = staging / f"{artifact.project}-{artifact.platform}"
                 pull_build(
-                    registry,
+                    builds_registry,
                     artifact.project,
                     artifact.platform,
                     build_tag,

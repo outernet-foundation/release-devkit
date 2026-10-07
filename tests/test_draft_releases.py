@@ -131,7 +131,7 @@ def patch_bash(monkeypatch: pytest.MonkeyPatch, check_returns: object = False) -
 
 
 def test_pull_build_assets_returns_empty_when_no_builds() -> None:
-    result = pull_build_assets(make_empty_config(), CERTIFIED_SHA, "", "")
+    result = pull_build_assets(make_empty_config().apps, None, CERTIFIED_SHA, "", "")
     assert result == []
 
 

@@ -203,7 +203,7 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
 
     assert publish_packages.calls == []
     assert pull_assets.calls != []
-    assert pull_assets.calls[0][1] == CERTIFIED_SHA
+    assert pull_assets.calls[0][2] == CERTIFIED_SHA
     assert written != []
 
 
@@ -222,9 +222,7 @@ def test_dev_draft_surfaces_only_changed_apps(monkeypatch: pytest.MonkeyPatch) -
     _, pull_assets, _ = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert len(pull_assets.calls) == 1
-    draft_config = pull_assets.calls[0][0]
-    assert isinstance(draft_config, PublishConfig)
-    assert set(draft_config.apps) == {"changed-app"}
+    assert pull_assets.calls[0][0] == {"changed-app": make_app("changed-app")}
 
 
 def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: pytest.MonkeyPatch) -> None:

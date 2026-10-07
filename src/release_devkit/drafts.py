@@ -45,21 +45,16 @@ def write_draft_section(
     staged: list[tuple[str, Path]] = []
     if apps:
         pulled = pull_build_assets(
-            context.publish_config.model_copy(update={"apps": apps}),
+            apps,
+            context.publish_config.builds_registry,
             context.certified,
             context.settings.github_actor,
             context.settings.github_token,
         )
         staging = Path(mkdtemp(prefix="draft-assets-"))
         for artifact, source in pulled:
-            if artifact.name is not None:
-                configured = Path(artifact.name)
-                stem = configured.stem
-                suffix = configured.suffix
-            else:
-                stem = source.stem
-                suffix = source.suffix
-            name = f"{stem}-{context.short}{suffix}"
+            named = Path(artifact.name) if artifact.name is not None else source
+            name = f"{named.stem}-{context.short}{named.suffix}"
             target = staging / name
             shutil.copy2(source, target)
             staged.append((name, target))
@@ -70,13 +65,11 @@ def write_draft_section(
             bash(f"gh release upload {tag} {files} --clobber --repo {repository}")
     anchor = f"sha-{context.short}"
     fresh = [AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}") for name, _ in staged]
-    staged_stems = {stem for stem in (asset_stem(name) for name, _ in staged) if stem is not None}
+    staged_stems = {stem for name, _ in staged if (stem := asset_stem(name)) is not None}
     parts = _ANCHOR_PATTERN.split(body)
-    sections: list[tuple[str, str]] = []
-    for index in range(1, len(parts), 2):
-        anchor_id = parts[index]
-        content = parts[index + 1].strip() if index + 1 < len(parts) else ""
-        sections.append((anchor_id, content))
+    sections: list[tuple[str, str]] = [
+        (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "") for index in range(1, len(parts), 2)
+    ]
     carried = (
         [link for link in parse_asset_links(sections[0][1]) if asset_stem(link.name) not in staged_stems]
         if sections
@@ -84,7 +77,7 @@ def write_draft_section(
     )
     new_entry = (
         anchor,
-        render_draft_section(heading_fragments, fresh + carried or None, context.manifest, packages or None).strip(),
+        render_draft_section(heading_fragments, (fresh + carried) or None, context.manifest, packages or None).strip(),
     )
     for index, (existing_anchor, _) in enumerate(sections):
         if existing_anchor == anchor:

@@ -69,7 +69,11 @@ def main(
     staging = Path(mkdtemp(prefix="release-assets-"))
     assets: list[Path] = []
     for artifact, source in pull_build_assets(
-        publish_config, context.certified, settings.github_actor, settings.github_token
+        publish_config.apps,
+        publish_config.builds_registry,
+        context.certified,
+        settings.github_actor,
+        settings.github_token,
     ):
         asset = staging / (artifact.name or source.name)
         shutil.copy2(source, asset)
