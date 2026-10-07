@@ -57,6 +57,11 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
         # Publish every changed package to its registries and tag the stable versions
         release_plan = compute_release_plan(context.publish_config)
+
+        # Stop a stable run with nothing to ship
+        if channel == ReleaseChannel.STABLE and not release_plan.publishing and not release_plan.app_versions:
+            return
+
         published: list[tuple[str, str]] = []
         if release_plan.publishing:
             configure_git(context.settings.github_workspace)
@@ -83,10 +88,8 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 if channel == ReleaseChannel.STABLE:
                     create_and_push_tag(f"{name}-v{plan.version}")
 
-        # Stop a stable run with nothing to ship, else tag its bumped app versions
+        # Tag the bumped app versions before cutting the stable release
         if channel == ReleaseChannel.STABLE:
-            if not release_plan.publishing and not release_plan.app_versions:
-                return
             for app_name, app_version in release_plan.app_versions.items():
                 create_and_push_tag(f"{app_name}-v{app_version}")
 
