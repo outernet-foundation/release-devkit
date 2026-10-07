@@ -43,7 +43,6 @@ NUGET_LOGIN_USES = "NuGet/login@v1"
 NUGET_LOGIN_INPUTS = {"user": "${{ secrets.NUGET_USER }}"}
 NUGET_API_KEY_ENV = "NUGET_API_KEY"
 NUGET_API_KEY_SOURCE = "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
-NUGET_DELIVERY_VERBS = ("prerelease", "release")
 INTEGRATE_WORKFLOW = Path(".github/workflows/integrate.yml")
 RELEASE_WORKFLOW = Path(".github/workflows/release.yml")
 RELEASE_WORKFLOW_NAME = "Release"
@@ -62,16 +61,6 @@ CHECKOUT_WITH_TAGS = "checkout-with-tags"
 CHECKOUT_WITH_TAGS_PUSH = "checkout-with-tags-push"
 MERGE_BOT = "merge-bot"
 
-VERB_CHECKOUTS: dict[str, str] = {
-    "get-app-version": CHECKOUT_WITH_TAGS,
-    "release": CHECKOUT_WITH_TAGS_PUSH,
-    "prerelease": CHECKOUT_WITH_TAGS,
-    "lint-workflows": CHECKOUT,
-    "merge-gate": MERGE_BOT,
-    "validate-release-plan": CHECKOUT_WITH_TAGS,
-    "update-pr-draft-release": CHECKOUT_WITH_TAGS,
-}
-
 SETUP_UV_RESTORE_INPUTS = {"enable-cache": True, "save-cache": "false"}
 SETUP_UV_SAVE_INPUTS = {"enable-cache": True, "save-cache": "true"}
 
@@ -82,28 +71,73 @@ WRAPPER_CLONE = re.compile(
     r' "\$RUNNER_TEMP/release-devkit"'
     rf'\ngit -C "\$RUNNER_TEMP/release-devkit" checkout "\${WRAPPER_COMMIT_ENV_VAR}"$'
 )
+
+
+@dataclass(frozen=True)
+class VerbSpec:
+    name: str
+    args: re.Pattern[str]
+    env: dict[str, str]
+    checkout: str
+    delivery: bool
+
+
+VERB_SPECS: dict[str, VerbSpec] = {
+    "get-app-version": VerbSpec(
+        name="get-app-version",
+        args=re.compile(r"^ --app \S+$"),
+        env={},
+        checkout=CHECKOUT_WITH_TAGS,
+        delivery=False,
+    ),
+    "release": VerbSpec(
+        name="release",
+        args=re.compile(r"^$"),
+        env={"GITHUB_TOKEN": "${{ github.token }}"},
+        checkout=CHECKOUT_WITH_TAGS_PUSH,
+        delivery=True,
+    ),
+    "prerelease": VerbSpec(
+        name="prerelease",
+        args=re.compile(r"^$"),
+        env={"GITHUB_TOKEN": "${{ github.token }}"},
+        checkout=CHECKOUT_WITH_TAGS,
+        delivery=True,
+    ),
+    "lint-workflows": VerbSpec(
+        name="lint-workflows",
+        args=re.compile(r"^$"),
+        env={},
+        checkout=CHECKOUT,
+        delivery=False,
+    ),
+    "merge-gate": VerbSpec(
+        name="merge-gate",
+        args=re.compile(r"^ --head-sha .+$"),
+        env={"GITHUB_TOKEN": "${{ steps.mint.outputs.token }}"},
+        checkout=MERGE_BOT,
+        delivery=False,
+    ),
+    "validate-release-plan": VerbSpec(
+        name="validate-release-plan",
+        args=re.compile(r"^$"),
+        env={},
+        checkout=CHECKOUT_WITH_TAGS,
+        delivery=False,
+    ),
+    "update-pr-draft-release": VerbSpec(
+        name="update-pr-draft-release",
+        args=re.compile(r"^$"),
+        env={"GITHUB_TOKEN": "${{ github.token }}"},
+        checkout=CHECKOUT_WITH_TAGS,
+        delivery=False,
+    ),
+}
+
+# the invocation grammar derives from the spec table, so the regex can never drift from the verbs it validates
 DEVKIT_INVOCATION = re.compile(
-    re.escape(DEVKIT_INVOCATION_PREFIX) + r"(?P<verb>get-app-version|release|prerelease|lint-workflows|merge-gate"
-    r"|validate-release-plan|update-pr-draft-release)" + r'(?P<args>(?: [^)"]*)?)'
+    re.escape(DEVKIT_INVOCATION_PREFIX) + r"(?P<verb>" + "|".join(sorted(VERB_SPECS)) + r")" + r'(?P<args>(?: [^)"]*)?)'
 )
-VERB_ARGS: dict[str, re.Pattern[str]] = {
-    "get-app-version": re.compile(r"^ --app \S+$"),
-    "release": re.compile(r"^$"),
-    "prerelease": re.compile(r"^$"),
-    "lint-workflows": re.compile(r"^$"),
-    "merge-gate": re.compile(r"^ --head-sha .+$"),
-    "validate-release-plan": re.compile(r"^$"),
-    "update-pr-draft-release": re.compile(r"^$"),
-}
-VERB_ENV: dict[str, dict[str, str]] = {
-    "release": {"GITHUB_TOKEN": "${{ github.token }}"},
-    "prerelease": {"GITHUB_TOKEN": "${{ github.token }}"},
-    "merge-gate": {
-        "GITHUB_TOKEN": "${{ steps.mint.outputs.token }}",
-    },
-    "validate-release-plan": {},
-    "update-pr-draft-release": {"GITHUB_TOKEN": "${{ github.token }}"},
-}
 
 RUN_STEP_LINE = re.compile(r"^(?P<prefix>\s*(?:- )?)run:(?:\s*(?P<value>.*))?$")
 BLOCK_SCALAR_HEAD = re.compile(r"^[|>](?:[+-]\d?|\d[+-]?)$")
@@ -450,7 +484,8 @@ def validate_job(job_name: str, job: JobView, path: Path, context: RepoContext) 
     if job.has_environment:
         problems.append(job_problem(path, job_name, "environment: key is forbidden (the fleet runs environment-less)"))
     steps = job.steps
-    checkout_steps, checkout_problems = collect_checkout_steps(job_name, steps, path)
+    signatures = signatures_for(path)
+    checkout_steps, checkout_problems = collect_checkout_steps(job_name, steps, signatures, path)
     problems.extend(checkout_problems)
     verb_steps, verb_problems = collect_verb_steps(job_name, steps, path, context)
     problems.extend(verb_problems)
@@ -490,10 +525,20 @@ def validate_wrapper_precedes_verb(
     job_name: str, steps: list[StepView], first_verb_index: int, path: Path
 ) -> tuple[int | None, list[Problem]]:
     wrapper_indexes = [step.index for step in steps if step.uses == DEVKIT_WRAPPER_USES]
+    problems: list[Problem] = []
+    if len(wrapper_indexes) != 1:
+        problems.append(
+            job_problem(
+                path,
+                job_name,
+                f"a verb-carrying job takes exactly one {DEVKIT_WRAPPER_USES} step, got {len(wrapper_indexes)}",
+            )
+        )
     wrappers_before = [index for index in wrapper_indexes if index < first_verb_index]
     if not wrappers_before:
-        return None, [job_problem(path, job_name, f"no {DEVKIT_WRAPPER_USES} step precedes the release-devkit verb")]
-    return min(wrappers_before), []
+        problems.append(job_problem(path, job_name, f"no {DEVKIT_WRAPPER_USES} step precedes the release-devkit verb"))
+        return None, problems
+    return min(wrappers_before), problems
 
 
 def validate_checkouts_precede_wrapper(
@@ -504,7 +549,7 @@ def validate_checkouts_precede_wrapper(
     path: Path,
 ) -> list[Problem]:
     problems: list[Problem] = []
-    required_checkouts = {VERB_CHECKOUTS[verb.name] for verb in verb_steps}
+    required_checkouts = {VERB_SPECS[verb.name].checkout for verb in verb_steps}
     for required in sorted(required_checkouts):
         if not any(step.signature == required and step.step_index < earliest_wrapper_index for step in checkout_steps):
             problems.append(
@@ -539,7 +584,7 @@ def validate_mint_window(
 ) -> list[Problem]:
     problems: list[Problem] = []
     is_merge_gate_job = any(verb.name == "merge-gate" for verb in verb_steps)
-    is_delivery_job = any(verb.name in NUGET_DELIVERY_VERBS for verb in verb_steps)
+    is_delivery_job = any(VERB_SPECS[verb.name].delivery for verb in verb_steps)
     mint_indexes, mint_problems = canonical_mint_steps(
         job_name,
         steps,
@@ -749,7 +794,7 @@ def collect_verb_steps(
         for match in matches:
             verb = match.group("verb")
             args = match.group("args")
-            if not VERB_ARGS[verb].fullmatch(args):
+            if not VERB_SPECS[verb].args.fullmatch(args):
                 problems.append(
                     step_problem(path, job_name, step.index, f"{verb} carries rejected arguments ({args.strip()})")
                 )
@@ -764,10 +809,10 @@ def validate_verb_env(
 ) -> list[Problem]:
     problems: list[Problem] = []
     env = step.env if step.env is not None else {}
-    for key, value in VERB_ENV.get(verb, {}).items():
+    for key, value in VERB_SPECS[verb].env.items():
         if env.get(key) != value:
             problems.append(step_problem(path, job_name, step_index, f"{verb} requires env {key}: {value}"))
-    if verb in NUGET_DELIVERY_VERBS:
+    if VERB_SPECS[verb].delivery:
         api_key_value = env.get(NUGET_API_KEY_ENV)
         if context.nuget and api_key_value != NUGET_API_KEY_SOURCE:
             problems.append(
@@ -792,7 +837,7 @@ def validate_verb_env(
 
 
 def collect_checkout_steps(
-    job_name: str, steps: list[StepView], path: Path
+    job_name: str, steps: list[StepView], signatures: dict[str, dict[str, object]], path: Path
 ) -> tuple[list[CheckoutStep], list[Problem]]:
     checkout_steps: list[CheckoutStep] = []
     problems: list[Problem] = []
@@ -806,7 +851,7 @@ def collect_checkout_steps(
             )
             continue
         with_block = step.with_block if step.with_block is not None else {}
-        signature = next((name for name, expected in signatures_for(path).items() if with_block == expected), None)
+        signature = next((name for name, expected in signatures.items() if with_block == expected), None)
         if signature is None:
             with_json = json.dumps(with_block, sort_keys=True)
             problems.append(

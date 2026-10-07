@@ -1,8 +1,10 @@
+import tomllib
 from pathlib import Path
 
 import pytest
 
 from release_devkit.verbs.lint_workflows import (
+    VERB_SPECS,
     WRAPPER_COMMIT_ENV_VAR,
     default_workflows,
     validate_devkit_wrapper,
@@ -125,6 +127,12 @@ RELEASE_NUGET_ENV = (
 
 def workflow(jobs: str) -> str:
     return f"jobs:\n{jobs}"
+
+
+def test_verb_spec_table_matches_the_console_scripts() -> None:
+    pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    scripts: dict[str, str] = pyproject["project"]["scripts"]
+    assert sorted(VERB_SPECS) == sorted(scripts)
 
 
 def test_valid_verb_job_has_no_problems(tmp_path: Path) -> None:
@@ -279,6 +287,15 @@ def test_verb_job_requires_wrapper_before_the_verb(tmp_path: Path) -> None:
     jobs = f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{PRERELEASE_RUN}{WRAPPER_STEP}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("no ./.github/actions/setup-release-devkit step precedes" in problem for problem in problems)
+
+
+def test_duplicate_wrapper_steps_are_rejected(tmp_path: Path) -> None:
+    jobs = (
+        f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{WRAPPER_STEP}"
+        f"{PRERELEASE_RUN}{RELEASE_ENV}"
+    )
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("exactly one ./.github/actions/setup-release-devkit step" in problem for problem in problems)
 
 
 def test_consumer_checkout_must_precede_wrapper(tmp_path: Path) -> None:
