@@ -108,17 +108,16 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
+    # Stop a stable run with nothing to ship, else tag its bumped app versions
+    if channel == ReleaseChannel.STABLE:
+        if not release_plan.publishing and not release_plan.app_versions:
+            return
+        for app_name, app_version in release_plan.app_versions.items():
+            create_and_push_tag(f"{app_name}-v{app_version}")
+
     # Compose the channel's release tag
     match channel:
         case ReleaseChannel.STABLE:
-            # Stop when the stable run has nothing to ship
-            if not release_plan.publishing and not release_plan.app_versions:
-                return
-
-            # Tag the bumped app versions before cutting the release
-            for app_name, app_version in release_plan.app_versions.items():
-                create_and_push_tag(f"{app_name}-v{app_version}")
-
             # Compose this month's next CalVer tag
             year_month = datetime.now(UTC).strftime("%Y.%m")
             existing = bash_output(
