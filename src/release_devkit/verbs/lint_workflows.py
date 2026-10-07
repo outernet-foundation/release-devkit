@@ -457,53 +457,101 @@ def validate_job(job_name: str, job: JobView, path: Path, context: RepoContext) 
     problems.extend(collect_dead_uses(job_name, steps, path))
     if not verb_steps:
         return problems, verb_steps
-    is_merge_gate_job = any(verb.name == "merge-gate" for verb in verb_steps)
+    problems.extend(validate_reserved_checkouts(job_name, checkout_steps, verb_steps, path))
+    first_verb_index = min(verb.step_index for verb in verb_steps)
+    earliest_wrapper_index, wrapper_problems = validate_wrapper_precedes_verb(job_name, steps, first_verb_index, path)
+    problems.extend(wrapper_problems)
+    if earliest_wrapper_index is None:
+        return problems, verb_steps
+    problems.extend(
+        validate_checkouts_precede_wrapper(job_name, checkout_steps, verb_steps, earliest_wrapper_index, path)
+    )
+    problems.extend(validate_setup_uv_precedes_wrapper(job_name, steps, earliest_wrapper_index, path))
+    problems.extend(
+        validate_mint_window(job_name, steps, verb_steps, first_verb_index, earliest_wrapper_index, path, context)
+    )
+    return problems, verb_steps
+
+
+def validate_reserved_checkouts(
+    job_name: str, checkout_steps: list[CheckoutStep], verb_steps: list[VerbStep], path: Path
+) -> list[Problem]:
+    problems: list[Problem] = []
     is_release_job = any(verb.name == "release" for verb in verb_steps)
-    is_delivery_job = any(verb.name in NUGET_DELIVERY_VERBS for verb in verb_steps)
+    is_merge_gate_job = any(verb.name == "merge-gate" for verb in verb_steps)
     if not is_release_job and any(step.signature == CHECKOUT_WITH_TAGS_PUSH for step in checkout_steps):
         problems.append(job_problem(path, job_name, "checkout-with-tags-push is reserved for release jobs"))
     if not is_merge_gate_job and any(step.signature == MERGE_BOT for step in checkout_steps):
         problems.append(job_problem(path, job_name, "merge-bot checkout is reserved for merge-gate jobs"))
-    first_verb_index = min(verb.step_index for verb in verb_steps)
+    return problems
+
+
+def validate_wrapper_precedes_verb(
+    job_name: str, steps: list[StepView], first_verb_index: int, path: Path
+) -> tuple[int | None, list[Problem]]:
     wrapper_indexes = [step.index for step in steps if step.uses == DEVKIT_WRAPPER_USES]
     wrappers_before = [index for index in wrapper_indexes if index < first_verb_index]
     if not wrappers_before:
-        problems.append(job_problem(path, job_name, f"no {DEVKIT_WRAPPER_USES} step precedes the release-devkit verb"))
-        return problems, verb_steps
-    earliest_wrapper_index = min(wrappers_before)
+        return None, [job_problem(path, job_name, f"no {DEVKIT_WRAPPER_USES} step precedes the release-devkit verb")]
+    return min(wrappers_before), []
+
+
+def validate_checkouts_precede_wrapper(
+    job_name: str,
+    checkout_steps: list[CheckoutStep],
+    verb_steps: list[VerbStep],
+    earliest_wrapper_index: int,
+    path: Path,
+) -> list[Problem]:
+    problems: list[Problem] = []
     required_checkouts = {VERB_CHECKOUTS[verb.name] for verb in verb_steps}
     for required in sorted(required_checkouts):
         if not any(step.signature == required and step.step_index < earliest_wrapper_index for step in checkout_steps):
             problems.append(
                 job_problem(path, job_name, f"no {required} checkout precedes the setup-release-devkit step")
             )
-    if not any(is_canonical_setup_uv(step) and step.index < earliest_wrapper_index for step in steps):
-        problems.append(
-            job_problem(
-                path,
-                job_name,
-                f"no canonical {SETUP_UV_USES} step"
-                " (enable-cache: true with an explicit save-cache) precedes the setup-release-devkit step",
-            )
+    return problems
+
+
+def validate_setup_uv_precedes_wrapper(
+    job_name: str, steps: list[StepView], earliest_wrapper_index: int, path: Path
+) -> list[Problem]:
+    if any(is_canonical_setup_uv(step) and step.index < earliest_wrapper_index for step in steps):
+        return []
+    return [
+        job_problem(
+            path,
+            job_name,
+            f"no canonical {SETUP_UV_USES} step"
+            " (enable-cache: true with an explicit save-cache) precedes the setup-release-devkit step",
         )
-    mint_indexes: list[int] = []
-    for step in steps:
-        if step.uses != MINT_STEP_USES:
-            continue
-        if step.step_id != "mint" or step.with_block != MINT_STEP_INPUTS:
-            problems.append(
-                step_problem(
-                    path,
-                    job_name,
-                    step.index,
-                    "create-github-app-token must be the canonical mint step"
-                    " (id: mint, app-id from the MERGE_BOT_APP_ID var, private-key from the MERGE_BOT_APP_PRIVATE_KEY"
-                    " secret)",
-                )
-            )
-            continue
-        mint_indexes.append(step.index)
-    if is_merge_gate_job and not any(earliest_wrapper_index < index < first_verb_index for index in mint_indexes):
+    ]
+
+
+def validate_mint_window(
+    job_name: str,
+    steps: list[StepView],
+    verb_steps: list[VerbStep],
+    first_verb_index: int,
+    earliest_wrapper_index: int,
+    path: Path,
+    context: RepoContext,
+) -> list[Problem]:
+    problems: list[Problem] = []
+    is_merge_gate_job = any(verb.name == "merge-gate" for verb in verb_steps)
+    is_delivery_job = any(verb.name in NUGET_DELIVERY_VERBS for verb in verb_steps)
+    mint_indexes, mint_problems = canonical_mint_steps(
+        job_name,
+        steps,
+        MINT_STEP_USES,
+        "mint",
+        MINT_STEP_INPUTS,
+        path,
+        "create-github-app-token must be the canonical mint step"
+        " (id: mint, app-id from the MERGE_BOT_APP_ID var, private-key from the MERGE_BOT_APP_PRIVATE_KEY secret)",
+    )
+    problems.extend(mint_problems)
+    if is_merge_gate_job and not steps_in_window(mint_indexes, earliest_wrapper_index, first_verb_index):
         problems.append(
             job_problem(
                 path,
@@ -511,26 +559,20 @@ def validate_job(job_name: str, job: JobView, path: Path, context: RepoContext) 
                 f"merge-gate requires a canonical {MINT_STEP_USES} mint step between the wrapper and the verb",
             )
         )
-    nuget_login_indexes: list[int] = []
-    for step in steps:
-        if step.uses != NUGET_LOGIN_USES:
-            continue
-        if step.step_id != "nuget-login" or step.with_block != NUGET_LOGIN_INPUTS:
-            problems.append(
-                step_problem(
-                    path,
-                    job_name,
-                    step.index,
-                    "NuGet/login must be the canonical mint step"
-                    " (id: nuget-login, user from the NUGET_USER org secret)",
-                )
-            )
-            continue
-        nuget_login_indexes.append(step.index)
+    nuget_login_indexes, nuget_login_problems = canonical_mint_steps(
+        job_name,
+        steps,
+        NUGET_LOGIN_USES,
+        "nuget-login",
+        NUGET_LOGIN_INPUTS,
+        path,
+        "NuGet/login must be the canonical mint step (id: nuget-login, user from the NUGET_USER org secret)",
+    )
+    problems.extend(nuget_login_problems)
     if (
         is_delivery_job
         and context.nuget
-        and not any(earliest_wrapper_index < index < first_verb_index for index in nuget_login_indexes)
+        and not steps_in_window(nuget_login_indexes, earliest_wrapper_index, first_verb_index)
     ):
         problems.append(
             job_problem(
@@ -550,7 +592,26 @@ def validate_job(job_name: str, job: JobView, path: Path, context: RepoContext) 
                     " of repos whose release-devkit.yaml declares a nuget registry",
                 )
             )
-    return problems, verb_steps
+    return problems
+
+
+def canonical_mint_steps(
+    job_name: str, steps: list[StepView], uses: str, step_id: str, inputs: dict[str, str], path: Path, message: str
+) -> tuple[list[int], list[Problem]]:
+    indexes: list[int] = []
+    problems: list[Problem] = []
+    for step in steps:
+        if step.uses != uses:
+            continue
+        if step.step_id != step_id or step.with_block != inputs:
+            problems.append(step_problem(path, job_name, step.index, message))
+            continue
+        indexes.append(step.index)
+    return indexes, problems
+
+
+def steps_in_window(indexes: list[int], earliest_wrapper_index: int, first_verb_index: int) -> bool:
+    return any(earliest_wrapper_index < index < first_verb_index for index in indexes)
 
 
 def job_has_cache_writing_setup_uv(job: JobView) -> bool:
