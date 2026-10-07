@@ -62,7 +62,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         if channel == ReleaseChannel.STABLE and not release_plan.publishing and not release_plan.app_versions:
             return
 
-        published: list[tuple[str, str]] = []
+        published: dict[str, str] = {}
         if release_plan.publishing:
             configure_git(context.settings.github_workspace)
             if "nuget" in release_plan.publishing_registries:
@@ -75,16 +75,13 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 if not plan.publish:
                     continue
                 for registry_name, identity in package.registries.items():
-                    published.append((
-                        identity,
-                        registries[registry_name].publish(
-                            package.path,
-                            plan.version,
-                            release_plan.resolved_versions[name],
-                            channel == ReleaseChannel.DEV,
-                            context.short,
-                        ),
-                    ))
+                    published[identity] = registries[registry_name].publish(
+                        package.path,
+                        plan.version,
+                        release_plan.resolved_versions[name],
+                        channel == ReleaseChannel.DEV,
+                        context.short,
+                    )
                 if channel == ReleaseChannel.STABLE:
                     create_and_push_tag(f"{name}-v{plan.version}")
 
@@ -94,27 +91,23 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 create_and_push_tag(f"{app_name}-v{app_version}")
 
         # List published packages with their registry links
-        table_rows: list[list[str]] = []
-        for name, package in context.publish_config.packages.items():
-            version = (
-                next(
-                    (
-                        published_version
-                        for identity, published_version in reversed(published)
-                        if identity in package.registries.values()
-                    ),
-                    None,
+        table_rows: list[list[str]] = [
+            [
+                name,
+                version := next(
+                    (published[identity] for identity in package.registries.values() if identity in published),
+                    latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION,
+                ),
+                ", ".join(
+                    f"[{registry_name}]({build_registries('')[registry_name].url(identity, version)})"
+                    if version != UNCHANGED_FALLBACK_VERSION
+                    else registry_name
+                    for registry_name, identity in package.registries.items()
                 )
-                or latest_version(f"{name}-v")
-                or UNCHANGED_FALLBACK_VERSION
-            )
-            registry_cells = [
-                f"[{registry_name}]({build_registries('')[registry_name].url(identity, version)})"
-                if version != UNCHANGED_FALLBACK_VERSION
-                else registry_name
-                for registry_name, identity in package.registries.items()
+                or "—",
             ]
-            table_rows.append([name, version, ", ".join(registry_cells) or "—"])
+            for name, package in context.publish_config.packages.items()
+        ]
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
