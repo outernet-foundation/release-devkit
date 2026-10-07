@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -166,7 +165,6 @@ class FakePullBuild:
 def patch_pull_build(monkeypatch: pytest.MonkeyPatch, layers: dict[tuple[str, str], list[str]]) -> FakePullBuild:
     pull_build = FakePullBuild(layers)
     monkeypatch.setattr(drafts, "pull_build", pull_build)
-    monkeypatch.setattr(drafts, "ci_step", nullcontext)
     return pull_build
 
 

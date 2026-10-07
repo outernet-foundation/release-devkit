@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -97,7 +96,6 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(release, "create_and_push_tag", noop)
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
     monkeypatch.setattr(drafts, "pull_build", FakePullBuild({("MyApp", "AndroidMobile"): ["MyApp-AndroidMobile.apk"]}))
-    monkeypatch.setattr(drafts, "ci_step", nullcontext)
     written: list[str] = []
 
     def capturing_bash(command: str) -> None:
