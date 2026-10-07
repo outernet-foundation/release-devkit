@@ -45,9 +45,7 @@ class ReleasePlan:
         return bool(self.publishing) or bool(self.app_versions)
 
 
-def compute_and_print_plan(config: PublishConfig, tags: TagSource, step_summary: str | None) -> ReleasePlan:
-    release_plan = compute_release_plan(config, tags)
-
+def print_plan(release_plan: ReleasePlan, step_summary: str | None) -> None:
     lines = [
         "### Publish Plan",
         "| Package | Publish | Version |",
@@ -65,7 +63,6 @@ def compute_and_print_plan(config: PublishConfig, tags: TagSource, step_summary:
 
     print(summary)
     write_step_summary(step_summary, summary)
-    return release_plan
 
 
 def compute_release_plan(publish_config: PublishConfig, tags: TagSource) -> ReleasePlan:
