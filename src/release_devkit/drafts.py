@@ -101,50 +101,6 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     else:
         bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
 
-    # Stage every app's build artifacts as release assets
-    staged: list[tuple[str, str, Path]] = []
-    apps_with_builds = {name: app.builds for name, app in context.publish_config.apps.items() if app.builds}
-    if apps_with_builds:
-        staging = Path(mkdtemp(prefix="release-builds-"))
-        for app_name, artifact in [
-            (app_name, artifact) for app_name, artifacts in apps_with_builds.items() for artifact in artifacts
-        ]:
-            layer = staging / f"{artifact.project}-{artifact.platform}"
-            pull_build(
-                context.publish_config.builds_registry or "",
-                artifact.project,
-                artifact.platform,
-                f"sha-{context.certified}",
-                layer,
-                registry_username=context.settings.github_actor,
-                registry_token=context.settings.github_token,
-            )
-
-            # Select the file inside the pulled layer that becomes the asset
-            files = sorted(path for path in layer.rglob("*") if path.is_file())
-            if artifact.file is not None:
-                source = next((path for path in files if path.name == artifact.file), None)
-                if source is None:
-                    raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {layer}")
-            elif len(files) == 1:
-                source = files[0]
-            else:
-                raise SystemExit(
-                    f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
-                    f"({', '.join(path.name for path in files)}); declare which one with 'file'"
-                )
-
-            # Copy the asset under its release name and record it
-            named = Path(artifact.name) if artifact.name else source
-            name = named.name if channel == ReleaseChannel.STABLE else f"{named.stem}-{context.short}{named.suffix}"
-            target = staging / name
-            shutil.copy2(source, target)
-            staged.append((app_name, name, target))
-            print(f"  Asset: {name}")
-
-        # Upload the staged assets
-        bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
-
     # Assemble the notes section from the heading and the artifact tables
     prefix = "#" * (2 if channel == ReleaseChannel.STABLE else 4)
     blocks: list[str] = []
@@ -188,8 +144,51 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
-    # List staged apps with their asset links
-    if staged:
+    # Stage every app's build artifacts as release assets
+    apps_with_builds = {name: app.builds for name, app in context.publish_config.apps.items() if app.builds}
+    if apps_with_builds:
+        staging = Path(mkdtemp(prefix="release-builds-"))
+        staged: list[tuple[str, str, Path]] = []
+        for app_name, artifact in [
+            (app_name, artifact) for app_name, artifacts in apps_with_builds.items() for artifact in artifacts
+        ]:
+            layer = staging / f"{artifact.project}-{artifact.platform}"
+            pull_build(
+                context.publish_config.builds_registry or "",
+                artifact.project,
+                artifact.platform,
+                f"sha-{context.certified}",
+                layer,
+                registry_username=context.settings.github_actor,
+                registry_token=context.settings.github_token,
+            )
+
+            # Select the file inside the pulled layer that becomes the asset
+            files = sorted(path for path in layer.rglob("*") if path.is_file())
+            if artifact.file is not None:
+                source = next((path for path in files if path.name == artifact.file), None)
+                if source is None:
+                    raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {layer}")
+            elif len(files) == 1:
+                source = files[0]
+            else:
+                raise SystemExit(
+                    f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
+                    f"({', '.join(path.name for path in files)}); declare which one with 'file'"
+                )
+
+            # Copy the asset under its release name and record it
+            named = Path(artifact.name) if artifact.name else source
+            name = named.name if channel == ReleaseChannel.STABLE else f"{named.stem}-{context.short}{named.suffix}"
+            target = staging / name
+            shutil.copy2(source, target)
+            staged.append((app_name, name, target))
+            print(f"  Asset: {name}")
+
+        # Upload the staged assets
+        bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
+
+        # List staged apps with their asset links
         table_rows = [
             [
                 app_name,
