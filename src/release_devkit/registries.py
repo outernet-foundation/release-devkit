@@ -3,7 +3,6 @@ import re
 import tempfile
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Protocol
@@ -34,55 +33,58 @@ class PyprojectProjectTable(BaseModel):
     dependencies: list[str] = Field(default_factory=list)
 
 
-@dataclass(frozen=True)
-class PublishRequest:
-    path: Path
-    identity: str
-    version: str
-    dependency_versions: dict[str, str]
-    dist_tag: str | None = None
-
-
 class Registry(Protocol):
-    def publish(self, request: PublishRequest) -> None: ...
+    def publish(
+        self,
+        path: Path,
+        version: str,
+        dependency_versions: dict[str, str],
+        dist_tag: str | None = None,
+    ) -> None: ...
 
 
 class NuGetRegistry:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
 
-    def publish(self, request: PublishRequest) -> None:
+    def publish(
+        self,
+        path: Path,
+        version: str,
+        dependency_versions: dict[str, str],
+        dist_tag: str | None = None,
+    ) -> None:
         properties: dict[str, str] = {}
         found: set[str] = set()
-        for root in load_project_roots(request.path):
+        for root in load_project_roots(path):
             for reference in read_package_references(root):
-                if reference.identity not in request.dependency_versions:
+                if reference.identity not in dependency_versions:
                     continue
                 if reference.property_name is None:
                     raise ValueError(
                         f"package reference '{reference.identity}' carries literal version "
                         f"'{reference.version}'; same-unit references must use a '$(Property)' version"
                     )
-                properties[reference.property_name] = request.dependency_versions[reference.identity]
+                properties[reference.property_name] = dependency_versions[reference.identity]
                 found.add(reference.identity)
-        missing = set(request.dependency_versions) - found
+        missing = set(dependency_versions) - found
         if missing:
-            raise ValueError(f"no PackageReference found for {sorted(missing)} under '{request.path}'")
+            raise ValueError(f"no PackageReference found for {sorted(missing)} under '{path}'")
 
-        command = f"dotnet pack -c Release -p:Version={request.version}"
+        command = f"dotnet pack -c Release -p:Version={version}"
         if properties:
             property_flags = " ".join(f"-p:{name}={version}" for name, version in properties.items())
             command += f" {property_flags}"
-        # Pack outside the package root — NpmRegistry.publish packs request.path next, and a
+        # Pack outside the package root — NpmRegistry.publish packs path next, and a
         # .nupkg written there rides the npm tarball (bin/obj are relocated out for the same reason).
         with tempfile.TemporaryDirectory() as outdir:
             command += f" -o {outdir}"
-            bash(command, cwd=request.path)
+            bash(command, cwd=path)
             try:
                 bash(
                     f"dotnet nuget push {outdir}/*.nupkg --api-key {self.api_key}"
                     f" --source {NUGET_SOURCE} --skip-duplicate",
-                    cwd=request.path,
+                    cwd=path,
                 )
             except CalledProcessError as error:
                 # The push command interpolates the api key; a raised CalledProcessError renders
@@ -94,13 +96,19 @@ class NuGetRegistry:
 
 
 class NpmRegistry:
-    def publish(self, request: PublishRequest) -> None:
+    def publish(
+        self,
+        path: Path,
+        version: str,
+        dependency_versions: dict[str, str],
+        dist_tag: str | None = None,
+    ) -> None:
         command = "npm publish --access public --provenance --loglevel verbose"
-        if request.dist_tag:
-            command += f" --tag {request.dist_tag}"
-        with ephemeral_manifest_patch(request.path, request.version, request.dependency_versions):
+        if dist_tag:
+            command += f" --tag {dist_tag}"
+        with ephemeral_manifest_patch(path, version, dependency_versions):
             try:
-                bash_output(command, cwd=request.path)
+                bash_output(command, cwd=path)
             except CalledProcessError as e:
                 stderr = e.stderr or ""
                 if "EPUBLISHCONFLICT" in stderr or "cannot publish over" in stderr:
@@ -110,10 +118,16 @@ class NpmRegistry:
 
 
 class PyPIRegistry:
-    def publish(self, request: PublishRequest) -> None:
-        with ephemeral_pyproject_patch(request.path, request.version, request.dependency_versions):
-            bash("uv build --out-dir dist", cwd=request.path)
-        bash(f"uv publish --check-url {PYPI_SIMPLE_INDEX}", cwd=request.path)
+    def publish(
+        self,
+        path: Path,
+        version: str,
+        dependency_versions: dict[str, str],
+        dist_tag: str | None = None,
+    ) -> None:
+        with ephemeral_pyproject_patch(path, version, dependency_versions):
+            bash("uv build --out-dir dist", cwd=path)
+        bash(f"uv publish --check-url {PYPI_SIMPLE_INDEX}", cwd=path)
 
 
 @contextmanager

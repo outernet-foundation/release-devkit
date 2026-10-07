@@ -14,7 +14,6 @@ from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig,
 from release_devkit.builds import DigestEntry
 from release_devkit.context import VerbContext
 from release_devkit.plan import PackagePlan, ReleasePlan
-from release_devkit.registries import PublishRequest
 from release_devkit.verbs import prerelease
 
 
@@ -57,10 +56,21 @@ class CallRecorder:
 
 class FakePublishRegistry:
     def __init__(self) -> None:
-        self.calls: list[PublishRequest] = []
+        self.calls: list[dict[str, object]] = []
 
-    def publish(self, request: PublishRequest) -> None:
-        self.calls.append(request)
+    def publish(
+        self,
+        path: object,
+        version: object,
+        dependency_versions: object,
+        dist_tag: object = None,
+    ) -> None:
+        self.calls.append({
+            "path": path,
+            "version": version,
+            "dependency_versions": dependency_versions,
+            "dist_tag": dist_tag,
+        })
 
 
 def make_builds() -> list[BuildArtifactConfig]:
@@ -215,9 +225,8 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
     npm_registry, create_and_push_tag, pull_assets, written = run_prerelease(monkeypatch, config, release_plan, tags)
 
     assert len(npm_registry.calls) == 1
-    assert npm_registry.calls[0].identity == "pkg-id"
-    assert npm_registry.calls[0].version == f"1.0.0-dev.{SHORT_SHA}"
-    assert npm_registry.calls[0].dist_tag == "dev"
+    assert npm_registry.calls[0]["version"] == f"1.0.0-dev.{SHORT_SHA}"
+    assert npm_registry.calls[0]["dist_tag"] == "dev"
     assert create_and_push_tag.calls == []
     assert pull_assets.calls != []
     assert written != []

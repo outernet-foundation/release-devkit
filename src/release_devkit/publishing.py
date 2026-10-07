@@ -7,7 +7,6 @@ from release_devkit.plan import ReleasePlan, compute_release_plan
 from release_devkit.registries import (
     DEV_VERSION_FORMATS,
     NPM_DEV_DIST_TAG,
-    PublishRequest,
     build_registries,
 )
 from release_devkit.tags import create_and_push_tag
@@ -47,13 +46,10 @@ def deliver_changed_packages(
                 for dep_identity, resolved in release_plan.resolved_versions[name].items()
             }
             registries[registry_name].publish(
-                PublishRequest(
-                    path=package.path,
-                    identity=identity,
-                    version=version,
-                    dependency_versions=dependency_versions,
-                    dist_tag=NPM_DEV_DIST_TAG if dev and registry_name == "npm" else None,
-                )
+                package.path,
+                version,
+                dependency_versions,
+                NPM_DEV_DIST_TAG if dev and registry_name == "npm" else None,
             )
             published.append((registry_name, identity, version))
         if not dev:
