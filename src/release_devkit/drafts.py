@@ -33,26 +33,26 @@ def write_draft_section(
         bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
         print(f"  Draft release {tag} created")
     body = json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body"))["body"]
-    known_digests = set(DIGEST_PATTERN.findall(body))
     if (
         not publishing
         and not changed_apps
-        and not any(entry.digest not in known_digests for entry in (context.manifest or {}).values())
+        and not any(
+            entry.digest not in set(DIGEST_PATTERN.findall(body)) for entry in (context.manifest or {}).values()
+        )
     ):
         print("Nothing to publish")
         return
     apps = changed_apps if stage_changed_only else context.publish_config.apps
     staged: list[tuple[str, Path]] = []
     if apps:
-        pulled = pull_build_assets(
+        staging = Path(mkdtemp(prefix="draft-assets-"))
+        for artifact, source in pull_build_assets(
             apps,
             context.publish_config.builds_registry,
             context.certified,
             context.settings.github_actor,
             context.settings.github_token,
-        )
-        staging = Path(mkdtemp(prefix="draft-assets-"))
-        for artifact, source in pulled:
+        ):
             named = Path(artifact.name) if artifact.name is not None else source
             name = f"{named.stem}-{context.short}{named.suffix}"
             target = staging / name
@@ -61,23 +61,36 @@ def write_draft_section(
             print(f"  Asset: {name}")
     if staged:
         with ci_step(f"Upload assets to {tag}"):
-            files = " ".join(f'"{path}"' for _, path in staged)
-            bash(f"gh release upload {tag} {files} --clobber --repo {repository}")
+            bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, path in staged)} --clobber --repo {repository}")
     anchor = f"sha-{context.short}"
-    fresh = [AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}") for name, _ in staged]
-    staged_stems = {stem for name, _ in staged if (stem := asset_stem(name)) is not None}
     parts = _ANCHOR_PATTERN.split(body)
     sections: list[tuple[str, str]] = [
         (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "") for index in range(1, len(parts), 2)
     ]
-    carried = (
-        [link for link in parse_asset_links(sections[0][1]) if asset_stem(link.name) not in staged_stems]
-        if sections
-        else []
-    )
     new_entry = (
         anchor,
-        render_draft_section(heading_fragments, (fresh + carried) or None, context.manifest, packages or None).strip(),
+        render_draft_section(
+            heading_fragments,
+            (
+                [
+                    AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}")
+                    for name, _ in staged
+                ]
+                + (
+                    [
+                        link
+                        for link in parse_asset_links(sections[0][1])
+                        if asset_stem(link.name)
+                        not in {stem for name, _ in staged if (stem := asset_stem(name)) is not None}
+                    ]
+                    if sections
+                    else []
+                )
+            )
+            or None,
+            context.manifest,
+            packages or None,
+        ).strip(),
     )
     for index, (existing_anchor, _) in enumerate(sections):
         if existing_anchor == anchor:
@@ -85,9 +98,8 @@ def write_draft_section(
             break
     else:
         sections.insert(0, new_entry)
-    blocks = [f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
-        file.write("\n\n".join(blocks) + "\n")
+        file.write("\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]) + "\n")
         notes_path = file.name
     bash(f"gh release edit {tag} --repo {repository} --notes-file {notes_path}")
     Path(notes_path).unlink()
