@@ -64,15 +64,6 @@ def main(
             settings.github_workspace,
         )
 
-        if published:
-            recap = "\n".join([
-                "### Published dev versions",
-                *(f"{registry_name}: {identity} @ {version}" for registry_name, identity, version in published),
-            ])
-            print(recap)
-            print("Consume these by exact version pin - there is no discovery tooling by design")
-            write_step_summary(settings.github_step_summary, recap)
-
     merge_message = bash_output(f"git log -1 --format=%B {head}").strip()
     merge_match = _MERGE_PR_PATTERN.search(merge_message)
     pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
