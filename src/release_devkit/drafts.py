@@ -82,11 +82,6 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             if channel == ReleaseChannel.STABLE:
                 create_and_push_tag(f"{name}-v{plan.version}")
 
-        # Tag the bumped app versions before cutting the stable release
-        if channel == ReleaseChannel.STABLE:
-            for app_name, app_version in release_plan.app_versions.items():
-                create_and_push_tag(f"{app_name}-v{app_version}")
-
         # List published packages with their registry links
         if context.publish_config.packages:
             blocks.append(
@@ -116,6 +111,11 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                     ],
                 )
             )
+
+    # Tag the bumped app versions before cutting the stable release
+    if channel == ReleaseChannel.STABLE:
+        for app_name, app_version in release_plan.app_versions.items():
+            create_and_push_tag(f"{app_name}-v{app_version}")
 
     # Compose the channel's release tag
     match channel:
