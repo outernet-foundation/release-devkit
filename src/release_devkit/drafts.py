@@ -34,7 +34,6 @@ def write_draft_section(
     packages: list[PackageRow] | None = None,
 ) -> None:
     # Detect apps whose source changed since their last version tag
-    repository = context.settings.github_repository
     changed_apps = {
         name: app
         for name, app in context.publish_config.apps.items()
@@ -45,13 +44,14 @@ def write_draft_section(
         )
     }
 
-    # Create the draft release when it does not exist yet
-    if not bash_check(f"gh release view {tag} --repo {repository}"):
-        bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
-        print(f"  Draft release {tag} created")
-
-    # Read the current release body
-    body = json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body"))["body"]
+    # Read the current body, treating a missing draft as empty
+    repository = context.settings.github_repository
+    draft_exists = bash_check(f"gh release view {tag} --repo {repository}")
+    body = (
+        json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body"))["body"]
+        if draft_exists
+        else ""
+    )
 
     # Skip the write when nothing changed
     if (
@@ -63,6 +63,11 @@ def write_draft_section(
     ):
         print("Nothing to publish")
         return
+
+    # Ensure the draft release exists
+    if not draft_exists:
+        bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
+        print(f"  Draft release {tag} created")
 
     # Stage app assets pulled from the builds shelf
     apps = changed_apps if stage_changed_only else context.publish_config.apps

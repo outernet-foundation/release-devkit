@@ -243,6 +243,7 @@ def test_update_pr_draft_skips_when_nothing_changed(monkeypatch: pytest.MonkeyPa
     update_pr_draft()
 
     assert pull_assets.calls == []
+    assert not any("gh release create" in command for command in bash_log.commands)
     assert not any("gh release upload" in command for command in bash_log.commands)
     assert not any("gh release edit" in command for command in bash_log.commands)
 
