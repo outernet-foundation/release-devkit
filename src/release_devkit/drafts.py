@@ -13,6 +13,7 @@ from ci_devkit.ci_step import ci_step
 from release_devkit.builds import DigestEntry, pull_build_assets
 from release_devkit.config import AppConfig
 from release_devkit.context import VerbContext
+from release_devkit.plan import apps_with_changes
 from release_devkit.rendering import DIGEST_PATTERN, AssetLink, PackageRow, parse_asset_links, render_draft_section
 
 DEV_DRAFT_TAG = "dev-builds"
@@ -74,6 +75,30 @@ class DraftRelease:
         bash(f"gh release edit {self.tag} --repo {self.repository} --notes-file {notes_path}")
         Path(notes_path).unlink()
         print(f"  Section {anchor} written to draft {self.tag}")
+
+
+def write_draft_section(
+    context: VerbContext,
+    tag: str,
+    heading_fragments: list[str],
+    stage_changed_only: bool,
+    publishing: bool = False,
+    packages: list[PackageRow] | None = None,
+) -> None:
+    changed_apps = apps_with_changes(context.publish_config)
+    draft = DraftRelease(tag, context.settings.github_repository, context.head)
+    if (
+        not publishing
+        and not changed_apps
+        and not (context.manifest is not None and draft.has_new_digests(context.manifest))
+    ):
+        print("Nothing to publish")
+        return
+    apps = changed_apps if stage_changed_only else context.publish_config.apps
+    staged: list[tuple[str, Path]] = []
+    if apps:
+        staged = publish_draft_assets(context, apps, draft)
+    draft.upsert_section(f"sha-{context.short}", heading_fragments, staged, context.manifest, packages)
 
 
 def publish_draft_assets(

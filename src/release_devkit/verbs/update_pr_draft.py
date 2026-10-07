@@ -8,11 +8,7 @@ import typer
 
 from release_devkit.config import DEFAULT_CONFIG_PATH
 from release_devkit.context import pr_head_context
-from release_devkit.drafts import (
-    DraftRelease,
-    publish_draft_assets,
-)
-from release_devkit.plan import apps_with_changes
+from release_devkit.drafts import write_draft_section
 
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -27,20 +23,12 @@ def update_pr_draft(
     context = pr_head_context(config)
     pr_number = int(PR_REF_PATTERN.findall(context.settings.github_ref)[0][0])
 
-    draft = DraftRelease(f"{PR_DRAFT_TAG_PREFIX}{pr_number}", context.settings.github_repository, context.head)
-
-    if not bool(apps_with_changes(context.publish_config)) and not (
-        context.manifest is not None and draft.has_new_digests(context.manifest)
-    ):
-        print("Nothing to publish")
-        return
-
-    draft.upsert_section(
-        f"sha-{context.short}",
+    write_draft_section(
+        context,
+        f"{PR_DRAFT_TAG_PREFIX}{pr_number}",
         [
             f"[{context.short}]({context.commit_url})",
             f"[PR #{pr_number}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
         ],
-        publish_draft_assets(context, context.publish_config.apps, draft),
-        context.manifest,
+        stage_changed_only=False,
     )

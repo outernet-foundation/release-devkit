@@ -9,12 +9,8 @@ from bashrun.bash import bash_output
 
 from release_devkit.config import DEFAULT_CONFIG_PATH
 from release_devkit.context import merge_push_context
-from release_devkit.drafts import (
-    DEV_DRAFT_TAG,
-    DraftRelease,
-    publish_draft_assets,
-)
-from release_devkit.plan import apps_with_changes, compute_release_plan, package_rows
+from release_devkit.drafts import DEV_DRAFT_TAG, write_draft_section
+from release_devkit.plan import compute_release_plan, package_rows
 from release_devkit.publishing import DevStrategy, publish_packages
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -32,20 +28,6 @@ def main(
 
     release_plan = compute_release_plan(context.publish_config)
 
-    draft = DraftRelease(DEV_DRAFT_TAG, context.settings.github_repository, context.head)
-
-    changed_apps = apps_with_changes(context.publish_config)
-
-    has_app_changes = bool(changed_apps)
-
-    if (
-        not release_plan.publishing
-        and not has_app_changes
-        and not (context.manifest is not None and draft.has_new_digests(context.manifest))
-    ):
-        print("Nothing to publish")
-        return
-
     published: list[tuple[str, str, str]] = []
     if release_plan.publishing:
         published = publish_packages(
@@ -59,19 +41,16 @@ def main(
     groups = _MERGE_PR_PATTERN.findall(bash_output(f"git log -1 --format=%B {context.head}").strip())[0]
     pr_number = int(groups[0])
 
-    staged_assets: list[tuple[str, Path]] = []
-    if has_app_changes:
-        staged_assets = publish_draft_assets(context, changed_apps, draft)
-
-    draft.upsert_section(
-        f"sha-{context.short}",
+    write_draft_section(
+        context,
+        DEV_DRAFT_TAG,
         [
             f"[{context.short}]({context.commit_url})",
             f"[PR #{pr_number}: {groups[1]}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
         ],
-        staged_assets,
-        context.manifest,
-        package_rows(
+        stage_changed_only=True,
+        publishing=bool(release_plan.publishing),
+        packages=package_rows(
             packages,
             {
                 {identity: name for name, package in packages.items() for identity in package.registries.values()}[
