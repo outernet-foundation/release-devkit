@@ -35,11 +35,10 @@ def main(
         f"gh release list --repo {context.settings.github_repository} --json tagName"
         f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
     ).strip()
-    release_tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
 
     write_release(
         context,
-        release_tag,
+        f"{year_month}.{(int(existing) if existing else 0) + 1}",
         None,
         {**release_plan.app_last_versions, **release_plan.app_versions},
         None,

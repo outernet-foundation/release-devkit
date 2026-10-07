@@ -20,11 +20,9 @@ def update_pr_draft(
 ) -> None:
     context = pr_head_context(config)
 
-    tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
-
     write_release(
         context,
-        tag,
+        f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}",
         context.short,
         {name: latest_version(f"{name}-v") for name in context.publish_config.apps},
         f"### [{context.short}]({context.commit_url})",
