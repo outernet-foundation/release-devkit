@@ -89,16 +89,20 @@ def write_draft_section(
     app_rows = [
         app_row(app_name, app_last_versions.get(app_name), asset_name, repository, tag)
         for app_name, asset_name, _ in staged
-    ] + (
-        [
-            row
-            for row in parse_app_rows(sections[0][1])
-            if asset_stem(row.asset_name or "")
-            not in {stem for _, asset_name, _ in staged if (stem := asset_stem(asset_name)) is not None}
-        ]
-        if sections
-        else []
-    )
+    ]
+    if sections:
+        restaged_stems = {stem for _, asset_name, _ in staged if (stem := asset_stem(asset_name)) is not None}
+        lines = sections[0][1].splitlines()
+        if APP_TABLE_HEADER in lines:
+            for line in lines[lines.index(APP_TABLE_HEADER) + 1 :]:
+                stripped = line.strip()
+                if not stripped.startswith("|"):
+                    break
+                if set(stripped) <= set("|-: "):
+                    continue
+                match = _APP_ROW_PATTERN.fullmatch(stripped)
+                if match is not None and asset_stem(match[3]) not in restaged_stems:
+                    app_rows.append(AppRow(match[1], match[2] or None, match[3], match[4]))
 
     # Render the new section body
     body = render_release_body(f"### {' — '.join(heading_fragments)}", packages, app_rows, context.manifest, level=4)
@@ -123,23 +127,6 @@ def write_draft_section(
 def asset_stem(name: str) -> str | None:
     match = _ASSET_NAME_PATTERN.fullmatch(name)
     return match.group(1) if match is not None else None
-
-
-def parse_app_rows(section: str) -> list[AppRow]:
-    lines = section.splitlines()
-    if APP_TABLE_HEADER not in lines:
-        return []
-    rows: list[AppRow] = []
-    for line in lines[lines.index(APP_TABLE_HEADER) + 1 :]:
-        stripped = line.strip()
-        if not stripped.startswith("|"):
-            break
-        if set(stripped) <= set("|-: "):
-            continue
-        match = _APP_ROW_PATTERN.fullmatch(stripped)
-        if match is not None:
-            rows.append(AppRow(match[1], match[2] or None, match[3], match[4]))
-    return rows
 
 
 def run_with_notes_file(command: str, body: str) -> None:
