@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from tempfile import mkdtemp
 
 import pytest
 
@@ -117,6 +118,13 @@ def make_context(
     )
 
 
+def make_source_file(name: str) -> Path:
+    directory = Path(mkdtemp(prefix="test-source-"))
+    source = directory / name
+    source.write_text("build content", encoding="utf-8")
+    return source
+
+
 def patch_common(
     monkeypatch: pytest.MonkeyPatch,
     config: PublishConfig,
@@ -196,12 +204,32 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"})
 
-    publish_packages, pull_assets, written = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
+    patch_plan_tags(monkeypatch, tags)
+    patch_common(monkeypatch, config)
+    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
+    pull_assets = CallRecorder([("myapp", artifact, make_source_file("MyApp-AndroidMobile.apk"))])
+    monkeypatch.setattr(builds_module, "pull_build_assets", pull_assets)
+    publish_packages = CallRecorder([])
+    monkeypatch.setattr(prerelease, "publish_packages", publish_packages)
+    written: list[str] = []
+
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
+
+    prerelease.main()
 
     assert publish_packages.calls == []
     assert pull_assets.calls != []
     assert pull_assets.calls[0][2] == CERTIFIED_SHA
-    assert written != []
+    assert len(written) == 1
+    assert "| App | Version | Asset |" in written[0]
+    fresh_link = f"https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-{SHORT_SHA}.apk"
+    assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk]({fresh_link}) |" in written[0]
 
 
 def test_dev_draft_surfaces_only_changed_apps(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -332,8 +360,10 @@ def test_snapshot_section_carries_forward_unchanged_app_assets(monkeypatch: pyte
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
     old_asset = "MyApp-AndroidMobile-999999999999.apk"
-    old_link = f"- [{old_asset}](https://github.com/owner/repo/releases/download/dev-builds/{old_asset})"
-    draft_body = f'<a id="sha-999999999999"></a>\n### Old\n{old_link}'
+    old_row = (
+        f"| myapp | 1.0.0 | [{old_asset}](https://github.com/owner/repo/releases/download/dev-builds/{old_asset}) |"
+    )
+    draft_body = f'<a id="sha-999999999999"></a>\n### Old\n\n| App | Version | Asset |\n|---|---|---|\n{old_row}'
 
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan({"pkg"})))
     patch_plan_tags(monkeypatch, tags)
@@ -358,7 +388,7 @@ def test_snapshot_section_carries_forward_unchanged_app_assets(monkeypatch: pyte
 
     assert written
     section = written[0].split(f'<a id="sha-{SHORT_SHA}"></a>', 1)[1].split('<a id="sha-999999999999"></a>', 1)[0]
-    assert old_link in section
+    assert old_row in section
 
 
 def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch) -> None:

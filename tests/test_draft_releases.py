@@ -156,7 +156,7 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
-    monkeypatch.setattr(builds_module, "pull_build_assets", FixedReturn([(artifact, source)]))
+    monkeypatch.setattr(builds_module, "pull_build_assets", FixedReturn([("myapp", artifact, source)]))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
@@ -175,7 +175,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     monkeypatch.setattr(
         update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config(), manifest=manifest))
     )
-    monkeypatch.setattr(builds_module, "pull_build_assets", FixedReturn([(artifact, source)]))
+    monkeypatch.setattr(builds_module, "pull_build_assets", FixedReturn([("myapp", artifact, source)]))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
@@ -310,26 +310,36 @@ def test_write_draft_section_replaces_same_anchor_and_preserves_others(monkeypat
     assert "### New v1" not in written[0]
 
 
-def test_write_draft_section_carries_assets_from_newest_section_and_drops_staged_stems(
+def test_write_draft_section_carries_app_rows_from_newest_section_and_drops_staged_stems(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    old_link = "- [MyApp-AndroidMobile-111111111111.apk](https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-111111111111.apk)"
-    replaced_link = "- [OtherApp-Android-222222222222.apk](https://github.com/owner/repo/releases/download/dev-builds/OtherApp-Android-222222222222.apk)"
-    stale_link = "- [OtherApp-Android-333333333333.apk](https://github.com/owner/repo/releases/download/dev-builds/OtherApp-Android-333333333333.apk)"
+    carried_row = (
+        "| sideapp | 2.0.0 | [SideApp-222222222222.apk]"
+        "(https://github.com/owner/repo/releases/download/dev-builds/SideApp-222222222222.apk) |"
+    )
     body = (
-        f'<a id="sha-newest"></a>\n### Newest\n{old_link}\n{replaced_link}\n\n'
-        f'<a id="sha-old"></a>\n### Old\n{stale_link}'
+        '<a id="sha-newest"></a>\n### Newest\n\n'
+        "| App | Version | Asset |\n|---|---|---|\n"
+        "| myapp | 1.0.0 | [MyApp-AndroidMobile-111111111111.apk]"
+        "(https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-111111111111.apk) |\n"
+        f"{carried_row}\n\n"
+        '<a id="sha-old"></a>\n### Old\n\n'
+        "| App | Version | Asset |\n|---|---|---|\n"
+        "| sideapp | 1.9.0 | [SideApp-333333333333.apk]"
+        "(https://github.com/owner/repo/releases/download/dev-builds/SideApp-333333333333.apk) |"
     )
     view_json = json.dumps({"body": body, "url": DRAFT_URL})
     patch_bash(monkeypatch, check_returns=True)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
     monkeypatch.setattr(
         builds_module,
         "pull_build_assets",
         FixedReturn([
             (
-                BuildArtifactConfig(project="OtherApp", platform="Android", name="OtherApp-Android.apk"),
-                make_source_file("OtherApp-Android.apk"),
+                "myapp",
+                BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk"),
+                make_source_file("MyApp-AndroidMobile.apk"),
             )
         ]),
     )
@@ -350,10 +360,11 @@ def test_write_draft_section_carries_assets_from_newest_section_and_drops_staged
     assert written
     anchor = f"sha-{SHORT_SHA}"
     section = written[0].split(f'<a id="{anchor}"></a>', 1)[1].split('<a id="sha-newest"></a>', 1)[0]
-    assert old_link in section
-    assert f"OtherApp-Android-{SHORT_SHA}.apk" in section
-    assert "OtherApp-Android-222222222222.apk" not in section
-    assert "OtherApp-Android-333333333333.apk" not in section
+    fresh_link = f"https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-{SHORT_SHA}.apk"
+    assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk]({fresh_link}) |" in section
+    assert "111111111111" not in section
+    assert carried_row in section
+    assert "333333333333" not in section
 
 
 def test_write_draft_section_guard_compares_manifest_digests_against_body(monkeypatch: pytest.MonkeyPatch) -> None:

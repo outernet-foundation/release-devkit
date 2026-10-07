@@ -29,12 +29,12 @@ def stage_build_assets(
     context: VerbContext,
     apps: dict[str, AppConfig],
     short: str | None,
-) -> list[tuple[str, Path]]:
+) -> list[tuple[str, str, Path]]:
     if not apps:
         return []
     staging = Path(mkdtemp(prefix="build-assets-"))
-    staged: list[tuple[str, Path]] = []
-    for artifact, source in pull_build_assets(
+    staged: list[tuple[str, str, Path]] = []
+    for app_name, artifact, source in pull_build_assets(
         apps,
         context.publish_config.builds_registry,
         context.certified,
@@ -45,7 +45,7 @@ def stage_build_assets(
         name = f"{named.stem}-{short}{named.suffix}" if short is not None else named.name
         target = staging / name
         shutil.copy2(source, target)
-        staged.append((name, target))
+        staged.append((app_name, name, target))
         print(f"  Asset: {name}")
     return staged
 
@@ -56,7 +56,7 @@ def pull_build_assets(
     sha: str,
     registry_username: str,
     registry_token: str,
-) -> list[tuple[BuildArtifactConfig, Path]]:
+) -> list[tuple[str, BuildArtifactConfig, Path]]:
     apps_with_builds = {name: app.builds for name, app in apps.items() if app.builds}
     if not apps_with_builds:
         return []
@@ -66,7 +66,7 @@ def pull_build_assets(
 
     build_tag = f"sha-{sha}"
     staging = Path(mkdtemp(prefix="release-builds-"))
-    assets: list[tuple[BuildArtifactConfig, Path]] = []
+    assets: list[tuple[str, BuildArtifactConfig, Path]] = []
 
     for app_name, artifacts in apps_with_builds.items():
         with ci_step(f"Pull build artifacts ({app_name})"):
@@ -93,7 +93,7 @@ def pull_build_assets(
                         f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
                         f"({', '.join(path.name for path in files)}); declare which one with 'file'"
                     )
-                assets.append((artifact, source))
+                assets.append((app_name, artifact, source))
                 print(f"  Asset: {source.name}")
 
     return assets

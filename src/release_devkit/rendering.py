@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from release_devkit.builds import DigestEntry
 
 DIGEST_PATTERN = re.compile(r"sha256:[a-f0-9]{64}")
+APP_TABLE_HEADER = "| App | Version | Asset |"
 
 
 @dataclass
@@ -23,9 +24,11 @@ class PackageRow:
 
 
 @dataclass
-class AssetLink:
+class AppRow:
     name: str
-    url: str
+    version: str | None
+    asset_name: str | None
+    asset_url: str | None
 
 
 def render_packages_table(rows: list[PackageRow]) -> list[str]:
@@ -46,6 +49,18 @@ def render_packages_table(rows: list[PackageRow]) -> list[str]:
             else:
                 registry_parts.append(link.name)
         lines.append(f"| {row.name} | {version_cell} | {', '.join(registry_parts)} |")
+    return lines
+
+
+def render_app_table(rows: list[AppRow]) -> list[str]:
+    lines = [APP_TABLE_HEADER, "|---|---|---|"]
+    for row in rows:
+        version_cell = row.version if row.version is not None else "—"
+        if row.asset_name is not None and row.asset_url is not None:
+            asset_cell = f"[{row.asset_name}]({row.asset_url})"
+        else:
+            asset_cell = "—"
+        lines.append(f"| {row.name} | {version_cell} | {asset_cell} |")
     return lines
 
 

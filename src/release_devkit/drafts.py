@@ -10,9 +10,11 @@ from bashrun.bash import bash, bash_check, bash_output
 from release_devkit.builds import stage_build_assets
 from release_devkit.context import VerbContext
 from release_devkit.rendering import (
+    APP_TABLE_HEADER,
     DIGEST_PATTERN,
-    AssetLink,
+    AppRow,
     PackageRow,
+    render_app_table,
     render_images_table,
     render_packages_table,
 )
@@ -21,7 +23,7 @@ from release_devkit.tags import has_changes_since, latest_version
 DEV_DRAFT_TAG = "dev-builds"
 _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
 _ASSET_NAME_PATTERN = re.compile(r"^(.+)-[0-9a-f]{12}\.[^.]+$")
-_ASSET_LINK_PATTERN = re.compile(r"^- \[([^\]]+)\]\(([^)]+)\)$", re.MULTILINE)
+_APP_ROW_PATTERN = re.compile(r"\| ([^|]+) \| ([^|]*) \| \[([^\]]+)\]\(([^)]+)\) \|")
 
 
 def write_draft_section(
@@ -33,12 +35,13 @@ def write_draft_section(
     packages: list[PackageRow] | None = None,
 ) -> None:
     # Detect apps whose source changed since their last version tag
+    app_last_versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
     changed_apps = {
         name: app
         for name, app in context.publish_config.apps.items()
         if app.builds is not None
         and has_changes_since(
-            f"{name}-v{version}" if (version := latest_version(f"{name}-v")) else None,
+            f"{name}-v{app_last_versions[name]}" if app_last_versions[name] else None,
             app.path,
         )
     }
@@ -74,7 +77,7 @@ def write_draft_section(
 
     # Upload staged assets onto the draft
     if staged:
-        bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, path in staged)} --clobber --repo {repository}")
+        bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
 
     # Split the body into anchor-keyed sections
     anchor = f"sha-{context.short}"
@@ -83,14 +86,21 @@ def write_draft_section(
         (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "") for index in range(1, len(parts), 2)
     ]
 
-    # Carry forward asset links not re-staged this run
-    assets = [
-        AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}") for name, _ in staged
+    # Collect fresh app rows and carry forward rows not re-staged this run
+    app_rows = [
+        AppRow(
+            app_name,
+            app_last_versions.get(app_name),
+            asset_name,
+            f"https://github.com/{repository}/releases/download/{tag}/{asset_name}",
+        )
+        for app_name, asset_name, _ in staged
     ] + (
         [
-            AssetLink(link_name, link_url)
-            for link_name, link_url in _ASSET_LINK_PATTERN.findall(sections[0][1])
-            if asset_stem(link_name) not in {stem for name, _ in staged if (stem := asset_stem(name)) is not None}
+            row
+            for row in parse_app_rows(sections[0][1])
+            if asset_stem(row.asset_name or "")
+            not in {stem for _, asset_name, _ in staged if (stem := asset_stem(asset_name)) is not None}
         ]
         if sections
         else []
@@ -103,9 +113,9 @@ def write_draft_section(
         section_lines.append("")
         section_lines.extend(render_packages_table(packages))
 
-    if assets:
+    if app_rows:
         section_lines.append("")
-        section_lines.extend(f"- [{link.name}]({link.url})" for link in assets)
+        section_lines.extend(render_app_table(app_rows))
 
     if context.manifest:
         section_lines.append("")
@@ -132,6 +142,23 @@ def write_draft_section(
 def asset_stem(name: str) -> str | None:
     match = _ASSET_NAME_PATTERN.fullmatch(name)
     return match.group(1) if match is not None else None
+
+
+def parse_app_rows(section: str) -> list[AppRow]:
+    lines = section.splitlines()
+    if APP_TABLE_HEADER not in lines:
+        return []
+    rows: list[AppRow] = []
+    for line in lines[lines.index(APP_TABLE_HEADER) + 1 :]:
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            break
+        if set(stripped) <= set("|-: "):
+            continue
+        match = _APP_ROW_PATTERN.fullmatch(stripped)
+        if match is not None:
+            rows.append(AppRow(match[1], match[2] or None, match[3], match[4]))
+    return rows
 
 
 def run_with_notes_file(command: str, body: str) -> None:

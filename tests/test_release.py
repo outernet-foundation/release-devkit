@@ -65,13 +65,23 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(release, "merge_push_context", FixedReturn(make_context(config)))
     monkeypatch.setattr(release, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(release, "create_and_push_tag", noop)
-    monkeypatch.setattr(release, "latest_version", FixedReturn(None))
+    monkeypatch.setattr(release, "latest_version", FixedReturn("1.0.0"))
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
     monkeypatch.setattr(builds_module, "pull_build_assets", FixedReturn([]))
-    monkeypatch.setattr(drafts, "bash", noop)
+    written: list[str] = []
+
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
     delete_recorder = CallRecorder()
     monkeypatch.setattr(release, "delete_draft_release", delete_recorder)
 
     release.main()
 
     assert delete_recorder.calls == [(DEV_DRAFT_TAG, "owner/repo")]
+    assert len(written) == 1
+    assert "## Apps" in written[0]
+    assert "| myapp | 1.0.0 | — |" in written[0]
