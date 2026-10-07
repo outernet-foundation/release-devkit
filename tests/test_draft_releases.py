@@ -5,16 +5,22 @@ from pathlib import Path
 
 import pytest
 
-from release_devkit import drafts
 from release_devkit import plan as plan_module
-from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig, Settings
-from release_devkit.builds import DigestEntry
-from release_devkit.context import VerbContext
-from release_devkit.drafts import delete_draft_release
-from release_devkit.verbs.update_pr_draft import update_pr_draft
+from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig
+from release_devkit.plan import ReleasePlan
+from release_devkit.verbs import release as release_module
+from release_devkit.verbs.release import (
+    DIGEST_FILE_NAME,
+    DigestEntry,
+    ReleaseChannel,
+    delete_draft_release,
+)
 
 DRAFT_URL = "https://github.com/owner/repo/releases/untagged-abc"
 DRAFT_VIEW_JSON = json.dumps({"body": "", "url": DRAFT_URL})
+DRAFT_REPOSITORY = "owner/repo"
+CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
+SHORT_SHA = CERTIFIED_SHA[:12]
 
 
 class BashLog:
@@ -33,16 +39,6 @@ class FixedReturn:
         return self.value
 
 
-class CallRecorder:
-    def __init__(self, return_value: object = None) -> None:
-        self._return_value = return_value
-        self.calls: list[tuple[object, ...]] = []
-
-    def __call__(self, *args: object, **kwargs: object) -> object:
-        self.calls.append(args)
-        return self._return_value
-
-
 class FakeTags:
     def __init__(self, versions: dict[str, str | None], changed: set[str]) -> None:
         self._versions = versions
@@ -57,10 +53,39 @@ class FakeTags:
         return tag.rsplit("-v", 1)[0] in self._changed
 
 
+class FakePullArtifact:
+    def __init__(self, layers: dict[tuple[str, str], dict[str, str]]) -> None:
+        self.layers = layers
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(
+        self,
+        builds_registry: str,
+        project: str,
+        platform: str,
+        tag: str,
+        target: Path,
+        **kwargs: object,
+    ) -> bool:
+        self.calls.append((builds_registry, project, platform, tag, target))
+        files = self.layers.get((project, platform))
+        if files is None:
+            return False
+        target.mkdir(parents=True, exist_ok=True)
+        for file_name, content in files.items():
+            (target / file_name).write_text(content, encoding="utf-8")
+        return True
+
+
+def digest_layer(manifest: dict[str, DigestEntry]) -> dict[tuple[str, str], dict[str, str]]:
+    data = {name: entry.model_dump() for name, entry in manifest.items()}
+    return {("images-digests", "all"): {DIGEST_FILE_NAME: json.dumps(data)}}
+
+
 def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
     monkeypatch.setattr(plan_module, "get_latest_version", tags.latest_version)
     monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
-    monkeypatch.setattr(drafts, "get_latest_version", tags.latest_version)
+    monkeypatch.setattr(release_module, "get_latest_version", tags.latest_version)
 
 
 def make_build_config() -> PublishConfig:
@@ -82,69 +107,53 @@ def make_empty_config() -> PublishConfig:
     )
 
 
-class FakePullBuild:
-    def __init__(self, layers: dict[tuple[str, str], list[str]]) -> None:
-        self.layers = layers
-        self.calls: list[tuple[object, ...]] = []
-
-    def __call__(
-        self,
-        builds_registry: str,
-        project: str,
-        platform: str,
-        tag: str,
-        target: Path,
-        **kwargs: object,
-    ) -> None:
-        self.calls.append((builds_registry, project, platform, tag, target))
-        target.mkdir(parents=True, exist_ok=True)
-        for file_name in self.layers[(project, platform)]:
-            (target / file_name).write_text("build content", encoding="utf-8")
-
-
-def patch_pull_build(monkeypatch: pytest.MonkeyPatch, layers: dict[tuple[str, str], list[str]]) -> FakePullBuild:
-    pull_build = FakePullBuild(layers)
-    monkeypatch.setattr(drafts, "pull_build", pull_build)
-    return pull_build
-
-
-DRAFT_REPOSITORY = "owner/repo"
-CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
-SHORT_SHA = CERTIFIED_SHA[:12]
-
-
 def patch_context(
     monkeypatch: pytest.MonkeyPatch,
     publish_config: PublishConfig,
-    manifest: dict[str, DigestEntry] | None = None,
     github_ref: str = "refs/pull/7/merge",
 ) -> None:
-    monkeypatch.setattr(drafts, "load_config", FixedReturn(publish_config))
-    monkeypatch.setattr(drafts, "build_context", FixedReturn(make_context(manifest, github_ref)))
-
-
-def make_context(
-    manifest: dict[str, DigestEntry] | None = None,
-    github_ref: str = "refs/pull/7/merge",
-) -> VerbContext:
-    return VerbContext(
-        settings=Settings(
-            github_token="token",
-            github_repository=DRAFT_REPOSITORY,
-            github_actor="bot",
-            github_ref=github_ref,
-        ),
-        head=CERTIFIED_SHA,
-        certified=CERTIFIED_SHA,
-        manifest=manifest,
-    )
+    monkeypatch.setenv("GITHUB_REPOSITORY", DRAFT_REPOSITORY)
+    monkeypatch.setenv("GITHUB_ACTOR", "bot")
+    monkeypatch.setenv("GITHUB_WORKSPACE", "/workspace")
+    monkeypatch.setenv("GITHUB_REF", github_ref)
+    monkeypatch.setattr(release_module, "load_config", FixedReturn(publish_config))
+    monkeypatch.setattr(release_module, "compute_release_plan", FixedReturn(ReleasePlan.empty()))
 
 
 def patch_bash(monkeypatch: pytest.MonkeyPatch, check_returns: object = False) -> BashLog:
-    monkeypatch.setattr(drafts, "bash_check", FixedReturn(check_returns))
+    monkeypatch.setattr(release_module, "bash_check", FixedReturn(check_returns))
     bash_log = BashLog()
-    monkeypatch.setattr(drafts, "bash", bash_log)
+    monkeypatch.setattr(release_module, "bash", bash_log)
     return bash_log
+
+
+def patch_pr_bash_output(monkeypatch: pytest.MonkeyPatch, body: str = "") -> None:
+    def dispatching_bash_output(command: str) -> str:
+        if command == "git rev-parse HEAD":
+            return CERTIFIED_SHA
+        return json.dumps({"body": body})
+
+    monkeypatch.setattr(release_module, "bash_output", dispatching_bash_output)
+
+
+def patch_pull_artifact(
+    monkeypatch: pytest.MonkeyPatch, layers: dict[tuple[str, str], dict[str, str]]
+) -> FakePullArtifact:
+    pull_artifact = FakePullArtifact(layers)
+    monkeypatch.setattr(release_module, "pull_artifact", pull_artifact)
+    return pull_artifact
+
+
+def capturing_bash(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    written: list[str] = []
+
+    def capturing(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(release_module, "bash", capturing)
+    return written
 
 
 def test_delete_draft_release_deletes_with_cleanup_tag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,11 +178,11 @@ def test_delete_draft_release_noop_when_absent(monkeypatch: pytest.MonkeyPatch) 
 def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_context(monkeypatch, make_build_config())
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
-    patch_pull_build(monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp.apk"]})
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+    patch_pull_artifact(monkeypatch, {("MyApp", "AndroidMobile"): {"MyApp.apk": "build content"}})
+    patch_pr_bash_output(monkeypatch)
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
-    update_pr_draft()
+    release_module.main(channel=ReleaseChannel.PR)
 
     assert any("pr-7" in command for command in bash_log.commands)
     assert any("gh release upload pr-7" in command and "--clobber" in command for command in bash_log.commands)
@@ -183,22 +192,16 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
 
 def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
-    patch_context(monkeypatch, make_build_config(), manifest=manifest)
-    patch_pull_build(monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp.apk"]})
+    patch_context(monkeypatch, make_build_config())
+    patch_pull_artifact(
+        monkeypatch, {("MyApp", "AndroidMobile"): {"MyApp.apk": "build content"}, **digest_layer(manifest)}
+    )
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
-    monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+    written = capturing_bash(monkeypatch)
 
-    written: list[str] = []
-
-    def capturing_bash(command: str) -> None:
-        if "--notes-file" in command:
-            path = command.split("--notes-file", 1)[1].strip().split()[0]
-            written.append(Path(path).read_text(encoding="utf-8"))
-
-    monkeypatch.setattr(drafts, "bash", capturing_bash)
-
-    update_pr_draft()
+    release_module.main(channel=ReleaseChannel.PR)
 
     assert written
     assert "zed-capture" in written[0]
@@ -208,23 +211,30 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     assert f"sha-{SHORT_SHA}" in written[0]
 
 
+def test_update_pr_draft_omits_images_when_manifest_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_context(monkeypatch, make_build_config())
+    patch_pull_artifact(monkeypatch, {("MyApp", "AndroidMobile"): {"MyApp.apk": "build content"}})
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+    written = capturing_bash(monkeypatch)
+
+    release_module.main(channel=ReleaseChannel.PR)
+
+    assert written
+    assert "Built images" not in written[0]
+
+
 def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.MonkeyPatch) -> None:
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
     config = PublishConfig(apps={}, builds_registry="ghcr.io/owner/repo/builds")
-    patch_context(monkeypatch, config, manifest=manifest)
-    monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+    patch_context(monkeypatch, config)
+    patch_pull_artifact(monkeypatch, digest_layer(manifest))
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+    written = capturing_bash(monkeypatch)
 
-    written: list[str] = []
-
-    def capturing_bash(command: str) -> None:
-        if "--notes-file" in command:
-            path = command.split("--notes-file", 1)[1].strip().split()[0]
-            written.append(Path(path).read_text(encoding="utf-8"))
-
-    monkeypatch.setattr(drafts, "bash", capturing_bash)
-
-    update_pr_draft()
+    release_module.main(channel=ReleaseChannel.PR)
 
     assert written
     assert "zed-capture" in written[0]
@@ -233,10 +243,10 @@ def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.Monke
 
 def test_update_pr_draft_no_app_builds_uploads_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_context(monkeypatch, make_empty_config())
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+    patch_pr_bash_output(monkeypatch)
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
-    update_pr_draft()
+    release_module.main(channel=ReleaseChannel.PR)
 
     assert not any("gh release upload" in command for command in bash_log.commands)
     assert any("gh release edit pr-7" in command for command in bash_log.commands)
@@ -244,31 +254,32 @@ def test_update_pr_draft_no_app_builds_uploads_nothing(monkeypatch: pytest.Monke
 
 def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_context(monkeypatch, make_build_config(), github_ref="refs/heads/dev")
+    patch_pr_bash_output(monkeypatch)
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
     with pytest.raises(IndexError):
-        update_pr_draft()
+        release_module.main(channel=ReleaseChannel.PR)
 
     assert not bash_log.commands
 
 
 def test_update_pr_draft_writes_notes_file_without_recreating(monkeypatch: pytest.MonkeyPatch) -> None:
-    bash_log = patch_bash(monkeypatch, check_returns=True)
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     patch_context(monkeypatch, PublishConfig())
+    patch_pr_bash_output(monkeypatch)
+    bash_log = patch_bash(monkeypatch, check_returns=True)
 
-    update_pr_draft()
+    release_module.main(channel=ReleaseChannel.PR)
 
     assert any("gh release edit pr-7" in command and "--notes-file" in command for command in bash_log.commands)
     assert not any("gh release create" in command for command in bash_log.commands)
 
 
 def test_update_pr_draft_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) -> None:
-    bash_log = patch_bash(monkeypatch, check_returns=False)
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     patch_context(monkeypatch, PublishConfig())
+    patch_pr_bash_output(monkeypatch)
+    bash_log = patch_bash(monkeypatch, check_returns=False)
 
-    update_pr_draft()
+    release_module.main(channel=ReleaseChannel.PR)
 
     assert any(
         "gh release create pr-7" in command and "--draft" in command and f"--target {CERTIFIED_SHA}" in command
@@ -279,21 +290,12 @@ def test_update_pr_draft_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) 
 
 def test_update_pr_draft_replaces_same_anchor_and_preserves_others(monkeypatch: pytest.MonkeyPatch) -> None:
     body = f'<a id="sha-old"></a>\n### Old\n\n<a id="sha-{SHORT_SHA}"></a>\n### New v1'
-    view_json = json.dumps({"body": body, "url": DRAFT_URL})
-    patch_bash(monkeypatch, check_returns=True)
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
     patch_context(monkeypatch, PublishConfig())
+    patch_pr_bash_output(monkeypatch, body)
+    patch_bash(monkeypatch, check_returns=True)
+    written = capturing_bash(monkeypatch)
 
-    written: list[str] = []
-
-    def capturing_bash(command: str) -> None:
-        if "--notes-file" in command:
-            path = command.split("--notes-file", 1)[1].strip().split()[0]
-            written.append(Path(path).read_text(encoding="utf-8"))
-
-    monkeypatch.setattr(drafts, "bash", capturing_bash)
-
-    update_pr_draft()
+    release_module.main(channel=ReleaseChannel.PR)
 
     assert written
     assert "### Old" in written[0]
@@ -302,8 +304,6 @@ def test_update_pr_draft_replaces_same_anchor_and_preserves_others(monkeypatch: 
 
 
 def test_update_pr_draft_lists_one_row_per_staged_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
-    patch_bash(monkeypatch, check_returns=False)
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     config = PublishConfig(
         apps={
             "myapp": AppConfig(
@@ -319,20 +319,18 @@ def test_update_pr_draft_lists_one_row_per_staged_artifact(monkeypatch: pytest.M
     )
     patch_context(monkeypatch, config)
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
-    patch_pull_build(
-        monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp-AndroidMobile.apk"], ("MyApp", "IOS"): ["MyApp-IOS.apk"]}
+    patch_pull_artifact(
+        monkeypatch,
+        {
+            ("MyApp", "AndroidMobile"): {"MyApp-AndroidMobile.apk": "build content"},
+            ("MyApp", "IOS"): {"MyApp-IOS.apk": "build content"},
+        },
     )
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+    written = capturing_bash(monkeypatch)
 
-    written: list[str] = []
-
-    def capturing_bash(command: str) -> None:
-        if "--notes-file" in command:
-            path = command.split("--notes-file", 1)[1].strip().split()[0]
-            written.append(Path(path).read_text(encoding="utf-8"))
-
-    monkeypatch.setattr(drafts, "bash", capturing_bash)
-
-    update_pr_draft()
+    release_module.main(channel=ReleaseChannel.PR)
 
     assert written
     assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk](" in written[0]

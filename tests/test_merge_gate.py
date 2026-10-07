@@ -73,6 +73,8 @@ def run_gate(
     delete_draft_fn: Callable[[str, str], None] | None = None,
 ) -> tuple[SystemExit | None, BashLog]:
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_ACTOR", "bot")
+    monkeypatch.setenv("GITHUB_WORKSPACE", "/workspace")
     monkeypatch.setattr(merge_gate, "bash_output", CommandResponses(responses))
     bash_log = BashLog()
     monkeypatch.setattr(merge_gate, "bash", bash_log)

@@ -12,9 +12,6 @@ from release_devkit.verbs.lint_workflows import (
     validate_workflow_file,
 )
 
-# still installed as console scripts, but the lint blesses only the release --channel spellings
-LEGACY_VERB_SCRIPTS = ("prerelease", "update-pr-draft-release")
-
 
 def write_workflow(tmp_path: Path, text: str, name: str = "workflow.yml") -> Path:
     workflow_path = tmp_path / name
@@ -151,7 +148,7 @@ def job_block(job_name: str, steps: str, needs: list[str] | None = None) -> str:
 def test_verb_spec_table_matches_the_console_scripts() -> None:
     pyproject = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
     scripts: dict[str, str] = pyproject["project"]["scripts"]
-    assert sorted([*VERB_SPECS, RELEASE_VERB]) == sorted(set(scripts) - set(LEGACY_VERB_SCRIPTS))
+    assert sorted([*VERB_SPECS, RELEASE_VERB]) == sorted(scripts)
 
 
 def test_valid_verb_job_has_no_problems(tmp_path: Path) -> None:
