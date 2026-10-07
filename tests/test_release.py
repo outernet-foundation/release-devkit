@@ -56,7 +56,7 @@ class FakePullBuild:
             (target / file_name).write_text("build content", encoding="utf-8")
 
 
-def make_context(publish_config: PublishConfig) -> VerbContext:
+def make_context() -> VerbContext:
     return VerbContext(
         settings=Settings(
             github_token="token",
@@ -64,7 +64,6 @@ def make_context(publish_config: PublishConfig) -> VerbContext:
             github_actor="bot",
             github_workspace="/workspace",
         ),
-        publish_config=publish_config,
         head="1111111111111111111111111111111111111111",
         certified=CERTIFIED_SHA,
         manifest=None,
@@ -89,7 +88,8 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
         app_last_versions={"myapp": None},
         app_versions={"myapp": "1.0.0"},
     )
-    monkeypatch.setattr(drafts, "build_context", FixedReturn(make_context(config)))
+    monkeypatch.setattr(drafts, "load_config", FixedReturn(config))
+    monkeypatch.setattr(drafts, "build_context", FixedReturn(make_context()))
     monkeypatch.setattr(drafts, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(drafts, "create_and_push_tag", noop)
     monkeypatch.setattr(drafts, "configure_git", noop)

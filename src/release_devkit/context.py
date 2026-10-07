@@ -8,13 +8,12 @@ from tempfile import mkdtemp
 from ci_devkit.builds import build_exists, pull_build
 
 from release_devkit.builds import DIGEST_FILE_NAME, DIGEST_PLATFORM, DIGEST_PROJECT, DigestEntry
-from release_devkit.config import PublishConfig, Settings, load_config
+from release_devkit.config import PublishConfig, Settings
 
 
 @dataclass
 class VerbContext:
     settings: Settings
-    publish_config: PublishConfig
     head: str
     certified: str
     manifest: dict[str, DigestEntry] | None
@@ -28,7 +27,7 @@ class VerbContext:
         return f"https://github.com/{self.settings.github_repository}/commit/{self.certified}"
 
 
-def build_context(head: str, certified: str, config: Path) -> VerbContext:
+def build_context(head: str, certified: str, publish_config: PublishConfig) -> VerbContext:
     settings = Settings.model_validate({})
     missing = [
         env_var
@@ -41,7 +40,6 @@ def build_context(head: str, certified: str, config: Path) -> VerbContext:
     ]
     if missing:
         raise SystemExit(f"{', '.join(missing)} not set — these verbs read the GitHub runner environment")
-    publish_config = load_config(config)
     manifest = None
     if publish_config.builds_registry is not None and build_exists(
         publish_config.builds_registry,
@@ -65,7 +63,6 @@ def build_context(head: str, certified: str, config: Path) -> VerbContext:
         manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
     return VerbContext(
         settings=settings,
-        publish_config=publish_config,
         head=head,
         certified=certified,
         manifest=manifest,

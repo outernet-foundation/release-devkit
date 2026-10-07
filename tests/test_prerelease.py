@@ -126,7 +126,6 @@ def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
 
 
 def make_context(
-    config: PublishConfig,
     manifest: dict[str, DigestEntry] | None = None,
 ) -> VerbContext:
     return VerbContext(
@@ -136,7 +135,6 @@ def make_context(
             github_actor="bot",
             github_workspace="/workspace",
         ),
-        publish_config=config,
         head=MERGE_SHA,
         certified=CERTIFIED_SHA,
         manifest=manifest,
@@ -174,7 +172,8 @@ def patch_common(
     config: PublishConfig,
     manifest: dict[str, DigestEntry] | None = None,
 ) -> FakePullBuild:
-    monkeypatch.setattr(drafts, "build_context", FixedReturn(make_context(config, manifest)))
+    monkeypatch.setattr(drafts, "load_config", FixedReturn(config))
+    monkeypatch.setattr(drafts, "build_context", FixedReturn(make_context(manifest)))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())
 
@@ -427,7 +426,8 @@ def run_merge_identity(monkeypatch: pytest.MonkeyPatch, parents_output: str) -> 
     config = make_config(apps={"myapp": make_app()})
     monkeypatch.setattr(drafts, "compute_release_plan", FixedReturn(make_plan(set())))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
-    build_context = CallRecorder(make_context(config))
+    monkeypatch.setattr(drafts, "load_config", FixedReturn(config))
+    build_context = CallRecorder(make_context())
     monkeypatch.setattr(drafts, "build_context", build_context)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())

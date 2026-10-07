@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from release_devkit import context as context_module
+from release_devkit.config import load_config
 from release_devkit.context import build_context
 
 
@@ -41,7 +42,9 @@ def test_build_context_manifest_is_none_when_no_registry(monkeypatch: pytest.Mon
     make_env(monkeypatch)
 
     result = build_context(
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", write_config(tmp_path)
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        load_config(write_config(tmp_path)),
     )
 
     assert result.manifest is None
@@ -54,7 +57,7 @@ def test_build_context_manifest_is_none_when_build_missing(monkeypatch: pytest.M
     result = build_context(
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        write_config(tmp_path, "builds_registry: ghcr.io/owner/repo/builds\n"),
+        load_config(write_config(tmp_path, "builds_registry: ghcr.io/owner/repo/builds\n")),
     )
 
     assert result.manifest is None
@@ -83,7 +86,7 @@ def test_build_context_pulls_the_sha_tag_and_parses_entries(monkeypatch: pytest.
     result = build_context(
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         certified,
-        write_config(tmp_path, "builds_registry: ghcr.io/owner/repo/builds\n"),
+        load_config(write_config(tmp_path, "builds_registry: ghcr.io/owner/repo/builds\n")),
     )
 
     assert result.manifest is not None

@@ -12,6 +12,7 @@ from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.builds import pull_build
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
+from release_devkit.config import load_config
 from release_devkit.context import build_context
 from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, compute_release_plan
 from release_devkit.publishing import build_registries
@@ -27,6 +28,8 @@ class ReleaseChannel(StrEnum):
 
 
 def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
+    publish_config = load_config(config)
+
     # Assemble the release notes from the heading and the artifact tables
     prefix = "#" * (2 if channel == ReleaseChannel.STABLE else 4)
     blocks: list[str] = []
@@ -34,16 +37,16 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
     # Head the snapshot section with the merge's PR title
     if channel == ReleaseChannel.PR:
-        context = build_context(head, head, config)
+        context = build_context(head, head, publish_config)
         tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
-        versions = {name: get_latest_version(f"{name}-v") for name in context.publish_config.apps}
+        versions = {name: get_latest_version(f"{name}-v") for name in publish_config.apps}
         blocks.append(f"### [{context.short}]({context.commit_url})")
     else:
         parents = bash_output(f"git log -1 --format=%P {head}").strip().split()
-        context = build_context(head, parents[1] if len(parents) >= 2 else head, config)
+        context = build_context(head, parents[1] if len(parents) >= 2 else head, publish_config)
 
         # Publish every changed package to its registry and tag the stable versions
-        release_plan = compute_release_plan(context.publish_config)
+        release_plan = compute_release_plan(publish_config)
 
         # Stop a stable run with nothing to ship
         if channel == ReleaseChannel.STABLE and not release_plan.publishing and not release_plan.app_versions:
@@ -77,7 +80,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         install_node("24", "https://registry.npmjs.org")
         registries = build_registries(context.settings.nuget_api_key)
         table_rows: list[list[str]] = []
-        for name, package in context.publish_config.packages.items():
+        for name, package in publish_config.packages.items():
             plan = release_plan.plans[name]
             registry = registries[package.registry]
             latest_version = get_latest_version(f"{name}-v")
@@ -137,7 +140,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
 
     # Stage every app's build artifacts as release assets
-    apps_with_builds = {name: app.builds for name, app in context.publish_config.apps.items() if app.builds}
+    apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds}
     if apps_with_builds:
         staging = Path(mkdtemp(prefix="release-builds-"))
         staged: list[tuple[str, str, Path]] = []
@@ -146,7 +149,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         ]:
             layer = staging / f"{artifact.project}-{artifact.platform}"
             pull_build(
-                context.publish_config.builds_registry or "",
+                publish_config.builds_registry or "",
                 artifact.project,
                 artifact.platform,
                 f"sha-{context.certified}",
