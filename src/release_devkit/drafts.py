@@ -14,14 +14,13 @@ from release_devkit.rendering import (
     DIGEST_PATTERN,
     AppRow,
     PackageRow,
-    app_row,
+    collect_app_rows,
     render_release_body,
 )
 from release_devkit.tags import has_changes_since, latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
 _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
-_ASSET_NAME_PATTERN = re.compile(r"^(.+)-[0-9a-f]{12}\.[^.]+$")
 _APP_ROW_PATTERN = re.compile(r"\| ([^|]+) \| ([^|]*) \| \[([^\]]+)\]\(([^)]+)\) \|")
 
 
@@ -83,13 +82,9 @@ def write_draft_section(
         (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "") for index in range(1, len(parts), 2)
     ]
 
-    # Collect fresh app rows and carry forward rows not re-staged this run
-    app_rows = [
-        app_row(app_name, app_last_versions.get(app_name), asset_name, repository, tag)
-        for app_name, asset_name, _ in staged
-    ]
+    # Parse the carried app rows out of the newest section
+    carried: list[AppRow] = []
     if sections:
-        restaged_stems = {stem for _, asset_name, _ in staged if (stem := asset_stem(asset_name)) is not None}
         lines = sections[0][1].splitlines()
         if APP_TABLE_HEADER in lines:
             for line in lines[lines.index(APP_TABLE_HEADER) + 1 :]:
@@ -99,8 +94,11 @@ def write_draft_section(
                 if set(stripped) <= set("|-: "):
                     continue
                 match = _APP_ROW_PATTERN.fullmatch(stripped)
-                if match is not None and asset_stem(match[3]) not in restaged_stems:
-                    app_rows.append(AppRow(match[1], match[2] or None, match[3], match[4]))
+                if match is not None:
+                    carried.append(AppRow(match[1], match[2] or None, match[3], match[4]))
+
+    # Build the section's app table rows
+    app_rows = collect_app_rows(staged, app_last_versions, carried, repository, tag)
 
     # Render the new section body
     body = render_release_body(f"### {' — '.join(heading_fragments)}", packages, app_rows, context.manifest, level=4)
@@ -119,11 +117,6 @@ def write_draft_section(
         f"gh release edit {tag} --repo {repository}",
         "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]) + "\n",
     )
-
-
-def asset_stem(name: str) -> str | None:
-    match = _ASSET_NAME_PATTERN.fullmatch(name)
-    return match.group(1) if match is not None else None
 
 
 def run_with_notes_file(command: str, body: str) -> None:

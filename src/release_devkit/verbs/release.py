@@ -13,7 +13,7 @@ from release_devkit.context import merge_push_context
 from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release, run_with_notes_file
 from release_devkit.plan import compute_release_plan, package_rows
 from release_devkit.publishing import StableStrategy, publish_packages
-from release_devkit.rendering import AppRow, app_row, render_release_body
+from release_devkit.rendering import collect_app_rows, render_release_body
 from release_devkit.tags import create_and_push_tag, latest_version
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -58,18 +58,12 @@ def main(
         f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
     ).strip()
     release_tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
-
     staged = stage_build_assets(context, publish_config.apps, None)
     assets = [target for _, _, target in staged]
-    asset_by_app = {app_name: asset_name for app_name, asset_name, _ in staged}
+    app_versions = {app_name: latest_version(f"{app_name}-v") for app_name in publish_config.apps}
+    app_rows = collect_app_rows(staged, app_versions, [], repository, release_tag)
 
     rows = package_rows(packages)
-    app_rows: list[AppRow] = []
-    for app_name in publish_config.apps:
-        version = latest_version(f"{app_name}-v")
-        if not version:
-            continue
-        app_rows.append(app_row(app_name, version, asset_by_app.get(app_name), repository, release_tag))
 
     notes = render_release_body(None, rows, app_rows, context.manifest, level=2) + "\n"
     run_with_notes_file(

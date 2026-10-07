@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import mkdtemp
 
 import pytest
 
 from release_devkit import builds as builds_module
 from release_devkit import drafts
 from release_devkit.verbs import release
+from release_devkit.builds import BuildArtifactConfig
 from release_devkit.config import AppConfig, PublishConfig, Settings
 from release_devkit.context import VerbContext
 from release_devkit.drafts import DEV_DRAFT_TAG
@@ -36,6 +39,13 @@ def noop(*args: object, **kwargs: object) -> None:
 CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
 
 
+def make_source_file(name: str) -> Path:
+    directory = Path(mkdtemp(prefix="test-source-"))
+    source = directory / name
+    source.write_text("build content", encoding="utf-8")
+    return source
+
+
 def make_context(publish_config: PublishConfig) -> VerbContext:
     return VerbContext(
         settings=Settings(
@@ -53,7 +63,14 @@ def make_context(publish_config: PublishConfig) -> VerbContext:
 
 def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) -> None:
     config = PublishConfig(
-        apps={"myapp": AppConfig(path=Path("apps/myapp"), major_minor="1.0")},
+        apps={
+            "myapp": AppConfig(
+                path=Path("apps/myapp"),
+                major_minor="1.0",
+                builds=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")],
+            )
+        },
+        builds_registry="ghcr.io/owner/repo/builds",
     )
     release_plan = ReleasePlan(
         plans={},
@@ -62,12 +79,17 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
         app_last_versions={"myapp": None},
         app_versions={"myapp": "1.0.0"},
     )
+    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(release, "merge_push_context", FixedReturn(make_context(config)))
     monkeypatch.setattr(release, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(release, "create_and_push_tag", noop)
     monkeypatch.setattr(release, "latest_version", FixedReturn("1.0.0"))
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
-    monkeypatch.setattr(builds_module, "pull_build_assets", FixedReturn([]))
+    monkeypatch.setattr(
+        builds_module,
+        "pull_build_assets",
+        FixedReturn([("myapp", artifact, make_source_file("MyApp-AndroidMobile.apk"))]),
+    )
     written: list[str] = []
 
     def capturing_bash(command: str) -> None:
@@ -83,6 +105,10 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
 
     assert delete_recorder.calls == [(DEV_DRAFT_TAG, "owner/repo")]
     assert len(written) == 1
+    release_tag = f"{datetime.now(UTC).strftime('%Y.%m')}.1"
     assert "## Apps" in written[0]
-    assert "| myapp | 1.0.0 | — |" in written[0]
+    assert (
+        f"| myapp | 1.0.0 | [MyApp-AndroidMobile.apk]"
+        f"(https://github.com/owner/repo/releases/download/{release_tag}/MyApp-AndroidMobile.apk) |"
+    ) in written[0]
     assert "## Packages" not in written[0]

@@ -367,6 +367,45 @@ def test_write_draft_section_carries_app_rows_from_newest_section_and_drops_stag
     assert "333333333333" not in section
 
 
+def test_write_draft_section_lists_one_row_per_staged_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_bash(monkeypatch, check_returns=False)
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
+    monkeypatch.setattr(
+        builds_module,
+        "pull_build_assets",
+        FixedReturn([
+            (
+                "myapp",
+                BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk"),
+                make_source_file("MyApp-AndroidMobile.apk"),
+            ),
+            (
+                "myapp",
+                BuildArtifactConfig(project="MyApp", platform="IOS", name="MyApp-IOS.apk"),
+                make_source_file("MyApp-IOS.apk"),
+            ),
+        ]),
+    )
+
+    written: list[str] = []
+
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
+
+    write_draft_section(
+        make_context(make_build_config()), "dev-builds", ["Run"], stage_changed_only=False, publishing=True
+    )
+
+    assert written
+    assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk](" in written[0]
+    assert f"| myapp | 1.0.0 | [MyApp-IOS-{SHORT_SHA}.apk](" in written[0]
+
+
 def test_write_draft_section_guard_compares_manifest_digests_against_body(monkeypatch: pytest.MonkeyPatch) -> None:
     known = "sha256:" + "a" * 64
     fresh = "sha256:" + "b" * 64
