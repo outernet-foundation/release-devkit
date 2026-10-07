@@ -14,7 +14,6 @@ from release_devkit.drafts import (
 )
 from release_devkit.plan import apps_with_changes
 from release_devkit.rendering import DraftSection, render_asset_links, render_draft_section
-from release_devkit.tags import GitTags
 
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -43,7 +42,7 @@ def update_pr_draft(
     tag = f"{PR_DRAFT_TAG_PREFIX}{pr_number}"
     draft = DraftRelease(tag, repository, head)
 
-    has_app_changes = bool(apps_with_changes(publish_config, GitTags()))
+    has_app_changes = bool(apps_with_changes(publish_config))
     has_image_changes = manifest is not None and draft.has_new_digests(manifest)
     if not has_app_changes and not has_image_changes:
         print("Nothing to publish")

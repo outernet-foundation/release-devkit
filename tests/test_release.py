@@ -27,14 +27,6 @@ class CallRecorder:
         self.calls.append(args)
 
 
-class FakeTags:
-    def latest_version(self, prefix: str) -> str | None:
-        return None
-
-    def create_and_push_tag(self, tag: str) -> None:
-        pass
-
-
 def noop(*args: object, **kwargs: object) -> None:
     pass
 
@@ -70,7 +62,8 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     )
     monkeypatch.setattr(release, "merge_push_context", FixedReturn(make_context(config)))
     monkeypatch.setattr(release, "compute_release_plan", FixedReturn(release_plan))
-    monkeypatch.setattr(release, "GitTags", FixedReturn(FakeTags()))
+    monkeypatch.setattr(release, "create_and_push_tag", noop)
+    monkeypatch.setattr(release, "latest_version", FixedReturn(None))
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
     monkeypatch.setattr(release, "pull_build_assets", FixedReturn([]))
     monkeypatch.setattr(release, "bash", noop)

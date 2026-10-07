@@ -8,6 +8,7 @@ from tempfile import mkdtemp
 import pytest
 
 from release_devkit import drafts
+from release_devkit import plan as plan_module
 from release_devkit.verbs import update_pr_draft as update_pr_draft_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig, Settings
 from release_devkit.builds import DigestEntry, pull_build_assets
@@ -63,6 +64,11 @@ class FakeTags:
         if tag is None:
             return True
         return tag.rsplit("-v", 1)[0] in self._changed
+
+
+def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
+    monkeypatch.setattr(plan_module, "latest_version", tags.latest_version)
+    monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
 
 
 def make_build_config() -> PublishConfig:
@@ -151,9 +157,7 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     source = make_source_file("MyApp.apk")
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
-    monkeypatch.setattr(
-        update_pr_draft_module, "GitTags", FixedReturn(FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
-    )
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     bash_log = patch_bash(monkeypatch, check_returns=False)
@@ -174,9 +178,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
         update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config(), manifest=manifest))
     )
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
-    monkeypatch.setattr(
-        update_pr_draft_module, "GitTags", FixedReturn(FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
-    )
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
@@ -210,9 +212,7 @@ def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -
 
 def test_update_pr_draft_skips_when_nothing_changed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
-    monkeypatch.setattr(
-        update_pr_draft_module, "GitTags", FixedReturn(FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
-    )
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     bash_log = patch_bash(monkeypatch, check_returns=False)
     pull_assets = CallRecorder([])

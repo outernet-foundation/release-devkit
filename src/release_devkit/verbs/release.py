@@ -16,7 +16,7 @@ from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release
 from release_devkit.plan import compute_release_plan, package_rows
 from release_devkit.publishing import StableStrategy, publish_packages
 from release_devkit.rendering import PackageRow, render_release_body
-from release_devkit.tags import GitTags
+from release_devkit.tags import create_and_push_tag, latest_version
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -32,9 +32,8 @@ def main(
     repository = settings.github_repository
 
     packages = publish_config.packages
-    tags = GitTags()
 
-    release_plan = compute_release_plan(publish_config, tags)
+    release_plan = compute_release_plan(publish_config)
 
     if not release_plan.anything_releases():
         print("Nothing to publish")
@@ -53,12 +52,12 @@ def main(
         plan = release_plan.plans[name]
         if plan.publish:
             tag = f"{name}-v{plan.version}"
-            tags.create_and_push_tag(tag)
+            create_and_push_tag(tag)
             print(f"  Tagged: {tag}")
 
     for app_name, app_version in release_plan.app_versions.items():
         tag = f"{app_name}-v{app_version}"
-        tags.create_and_push_tag(tag)
+        create_and_push_tag(tag)
         print(f"  Tagged: {tag}")
 
     year_month = datetime.now(UTC).strftime("%Y.%m")
@@ -78,10 +77,10 @@ def main(
         shutil.copy2(source, asset)
         assets.append(asset)
 
-    rows = package_rows(packages, tags)
+    rows = package_rows(packages)
 
     for app_name in publish_config.apps:
-        version = tags.latest_version(f"{app_name}-v")
+        version = latest_version(f"{app_name}-v")
         if version:
             rows.append(PackageRow(app_name, version))
 

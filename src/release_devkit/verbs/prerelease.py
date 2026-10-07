@@ -18,7 +18,6 @@ from release_devkit.drafts import (
 from release_devkit.plan import apps_with_changes, compute_release_plan, package_rows
 from release_devkit.publishing import DevStrategy, publish_packages
 from release_devkit.rendering import DraftSection, render_draft_section
-from release_devkit.tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -40,13 +39,12 @@ def main(
     manifest = context.manifest
 
     packages = publish_config.packages
-    tags = GitTags()
 
-    release_plan = compute_release_plan(publish_config, tags)
+    release_plan = compute_release_plan(publish_config)
 
     draft = DraftRelease(DEV_DRAFT_TAG, repository, head)
 
-    changed_apps = apps_with_changes(publish_config, tags)
+    changed_apps = apps_with_changes(publish_config)
 
     has_app_changes = bool(changed_apps)
 
@@ -100,7 +98,7 @@ def main(
         identity: name for name, package in packages.items() for identity in package.registries.values()
     }
     dev_versions = {identity_to_name[identity]: version for _, identity, version in published}
-    rows = package_rows(packages, tags, dev_versions)
+    rows = package_rows(packages, dev_versions)
 
     fresh_assets = draft.asset_links(staged_assets)
     replaced_stems = {stem for stem in (asset_stem(name) for name, _ in staged_assets) if stem is not None}

@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from release_devkit import plan as plan_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig
-from release_devkit.tags import GitTags, parse_major_minor, parse_version
 from release_devkit.manifests import DependencyEdge
 from release_devkit.plan import (
     PackagePlan,
@@ -16,6 +16,7 @@ from release_devkit.plan import (
     resolve_dependency_versions,
 )
 from release_devkit.registries import SENTINEL_VERSION
+from release_devkit.tags import latest_version, latest_version_in_line, parse_major_minor, parse_version
 
 
 def test_latest_version_skips_prerelease_tags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,7 +25,7 @@ def test_latest_version_skips_prerelease_tags(monkeypatch: pytest.MonkeyPatch) -
         preview_and_stable_tags,
     )
 
-    assert GitTags().latest_version("pkg-v") == "1.0.5"
+    assert latest_version("pkg-v") == "1.0.5"
 
 
 def test_latest_version_returns_none_when_no_stable_tag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -33,7 +34,7 @@ def test_latest_version_returns_none_when_no_stable_tag(monkeypatch: pytest.Monk
         prerelease_only_tags,
     )
 
-    assert GitTags().latest_version("pkg-v") is None
+    assert latest_version("pkg-v") is None
 
 
 def test_latest_version_in_line_filters_to_declared_line(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -42,12 +43,11 @@ def test_latest_version_in_line_filters_to_declared_line(monkeypatch: pytest.Mon
         multi_line_tags,
     )
 
-    tags = GitTags()
-    assert tags.latest_version_in_line("pkg-v", "1.0") == "1.0.10"
-    assert tags.latest_version_in_line("pkg-v", "1.9") == "1.9.2"
-    assert tags.latest_version_in_line("pkg-v", "2.4") == "2.4.1"
-    assert tags.latest_version_in_line("pkg-v", "1.10") == "1.10.3"
-    assert tags.latest_version_in_line("pkg-v", "0.1") is None
+    assert latest_version_in_line("pkg-v", "1.0") == "1.0.10"
+    assert latest_version_in_line("pkg-v", "1.9") == "1.9.2"
+    assert latest_version_in_line("pkg-v", "2.4") == "2.4.1"
+    assert latest_version_in_line("pkg-v", "1.10") == "1.10.3"
+    assert latest_version_in_line("pkg-v", "0.1") is None
 
 
 def preview_and_stable_tags(_prefix: str) -> list[str]:
@@ -78,6 +78,12 @@ class FakeTagSource:
 
     def has_changes_since(self, tag: str | None, path: Path) -> bool:
         return self.changed.get(path.as_posix(), False)
+
+
+def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTagSource) -> None:
+    monkeypatch.setattr(plan_module, "latest_version", tags.latest_version)
+    monkeypatch.setattr(plan_module, "latest_version_in_line", tags.latest_version_in_line)
+    monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
 
 
 ARFOUNDATION_EDGE = DependencyEdge(
@@ -170,7 +176,7 @@ def test_release_plan_refuses_cyclic_dependencies(tmp_path: Path, monkeypatch: p
     }
 
     with pytest.raises(ValueError, match="cyclic dependency edge"):
-        compute_release_plan(PublishConfig(packages=packages), FakeTagSource(versions={}, changed={}))
+        compute_release_plan(PublishConfig(packages=packages))
 
 
 RELEASE_CONFIG = PublishConfig(
@@ -179,10 +185,10 @@ RELEASE_CONFIG = PublishConfig(
 )
 
 
-def test_release_plan_bumps_apps_when_any_package_publishes():
-    tags = FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": True, "app": False})
+def test_release_plan_bumps_apps_when_any_package_publishes(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_plan_tags(monkeypatch, FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": True, "app": False}))
 
-    release_plan = compute_release_plan(RELEASE_CONFIG, tags)
+    release_plan = compute_release_plan(RELEASE_CONFIG)
 
     assert release_plan.publishing == {"pkg"}
     assert release_plan.plans["pkg"].version == "0.1.0"
@@ -190,26 +196,26 @@ def test_release_plan_bumps_apps_when_any_package_publishes():
     assert release_plan.anything_releases() is True
 
 
-def test_release_plan_leaves_everything_unchanged_when_nothing_changed():
-    tags = FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": False, "app": False})
+def test_release_plan_leaves_everything_unchanged_when_nothing_changed(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_plan_tags(monkeypatch, FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": False, "app": False}))
 
-    release_plan = compute_release_plan(RELEASE_CONFIG, tags)
+    release_plan = compute_release_plan(RELEASE_CONFIG)
 
     assert release_plan.publishing == set()
     assert release_plan.app_versions == {}
     assert release_plan.anything_releases() is False
 
 
-def test_release_plan_bumps_app_on_its_own_path_change():
-    tags = FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": False, "app": True})
+def test_release_plan_bumps_app_on_its_own_path_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_plan_tags(monkeypatch, FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": False, "app": True}))
 
-    release_plan = compute_release_plan(RELEASE_CONFIG, tags)
+    release_plan = compute_release_plan(RELEASE_CONFIG)
 
     assert release_plan.publishing == set()
     assert release_plan.app_versions == {"app": "0.2.4"}
 
 
-def test_apps_with_changes_lists_only_apps_with_builds_and_changes() -> None:
+def test_apps_with_changes_lists_only_apps_with_builds_and_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     config = PublishConfig(
         builds_registry="ghcr.io/owner/repo/builds",
         apps={
@@ -226,23 +232,26 @@ def test_apps_with_changes_lists_only_apps_with_builds_and_changes() -> None:
             "changed-no-builds": AppConfig(path=Path("apps/changed-no-builds"), major_minor="1.0"),
         },
     )
-    tags = FakeTagSource(
-        versions={"changed-v": ["1.0.0"], "unchanged-v": ["1.0.0"]},
-        changed={"apps/changed": True, "apps/unchanged": False, "apps/changed-no-builds": True},
+    patch_plan_tags(
+        monkeypatch,
+        FakeTagSource(
+            versions={"changed-v": ["1.0.0"], "unchanged-v": ["1.0.0"]},
+            changed={"apps/changed": True, "apps/unchanged": False, "apps/changed-no-builds": True},
+        ),
     )
 
-    assert set(apps_with_changes(config, tags)) == {"changed"}
+    assert set(apps_with_changes(config)) == {"changed"}
 
 
-def test_package_rows_use_override_then_tag_then_fallback() -> None:
+def test_package_rows_use_override_then_tag_then_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     packages = {
         "published": PackageConfig(path=Path("pkg/a"), major_minor="1.0", registries={"npm": "a-id"}),
         "tagged": PackageConfig(path=Path("pkg/b"), major_minor="1.0", registries={"npm": "b-id"}),
         "never": PackageConfig(path=Path("pkg/c"), major_minor="1.0", registries={"npm": "c-id"}),
     }
-    tags = FakeTagSource(versions={"tagged-v": ["1.2.3"]}, changed={})
+    patch_plan_tags(monkeypatch, FakeTagSource(versions={"tagged-v": ["1.2.3"]}, changed={}))
 
-    overridden = package_rows(packages, tags, {"published": "1.1.0-dev.abcdef123456"})
+    overridden = package_rows(packages, {"published": "1.1.0-dev.abcdef123456"})
     assert [(row.name, row.version) for row in overridden] == [
         ("published", "1.1.0-dev.abcdef123456"),
         ("tagged", "1.2.3"),

@@ -1,22 +1,18 @@
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Protocol
 
 from release_devkit.config import AppConfig, PackageConfig, PublishConfig
 from release_devkit.manifests import DependencyEdge, resolve_edges
 from release_devkit.registries import registry_url
 from release_devkit.rendering import PackageRow, RegistryLink
-from release_devkit.tags import parse_major_minor, parse_version
+from release_devkit.tags import (
+    has_changes_since,
+    latest_version,
+    latest_version_in_line,
+    parse_major_minor,
+    parse_version,
+)
 
 UNCHANGED_FALLBACK_VERSION = "0.0.0"
-
-
-class TagSource(Protocol):
-    def latest_version(self, prefix: str) -> str | None: ...
-
-    def latest_version_in_line(self, prefix: str, major_minor: str) -> str | None: ...
-
-    def has_changes_since(self, tag: str | None, path: Path) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -45,7 +41,7 @@ class ReleasePlan:
         return bool(self.publishing) or bool(self.app_versions)
 
 
-def compute_release_plan(publish_config: PublishConfig, tags: TagSource) -> ReleasePlan:
+def compute_release_plan(publish_config: PublishConfig) -> ReleasePlan:
     packages = publish_config.packages
     edges = resolve_edges(packages)
 
@@ -65,9 +61,9 @@ def compute_release_plan(publish_config: PublishConfig, tags: TagSource) -> Rele
     for name in ordered:
         package = packages[name]
         prefix = f"{name}-v"
-        last_version = tags.latest_version(prefix)
-        last_in_line = tags.latest_version_in_line(prefix, package.major_minor)
-        changed = tags.has_changes_since(f"{prefix}{last_version}" if last_version else None, package.path)
+        last_version = latest_version(prefix)
+        last_in_line = latest_version_in_line(prefix, package.major_minor)
+        changed = has_changes_since(f"{prefix}{last_version}" if last_version else None, package.path)
         plans[name] = PackagePlan(
             name=name,
             publish=changed,
@@ -88,10 +84,10 @@ def compute_release_plan(publish_config: PublishConfig, tags: TagSource) -> Rele
     app_versions: dict[str, str] = {}
     for app_name, app_config in publish_config.apps.items():
         prefix = f"{app_name}-v"
-        last_version = tags.latest_version(prefix)
-        last_in_line = tags.latest_version_in_line(prefix, app_config.major_minor)
+        last_version = latest_version(prefix)
+        last_in_line = latest_version_in_line(prefix, app_config.major_minor)
         app_last_versions[app_name] = last_version
-        changed = tags.has_changes_since(f"{prefix}{last_version}" if last_version else None, app_config.path)
+        changed = has_changes_since(f"{prefix}{last_version}" if last_version else None, app_config.path)
         if any_package_published:
             changed = True
         if changed:
@@ -136,13 +132,13 @@ def next_version(major_minor: str, last_in_line: str | None, last_overall: str |
     return f"{major}.{minor}.{patch + 1}"
 
 
-def apps_with_changes(publish_config: PublishConfig, tags: TagSource) -> dict[str, AppConfig]:
+def apps_with_changes(publish_config: PublishConfig) -> dict[str, AppConfig]:
     return {
         name: app
         for name, app in publish_config.apps.items()
         if app.builds is not None
-        and tags.has_changes_since(
-            f"{name}-v{version}" if (version := tags.latest_version(f"{name}-v")) else None,
+        and has_changes_since(
+            f"{name}-v{version}" if (version := latest_version(f"{name}-v")) else None,
             app.path,
         )
     }
@@ -150,13 +146,12 @@ def apps_with_changes(publish_config: PublishConfig, tags: TagSource) -> dict[st
 
 def package_rows(
     packages: dict[str, PackageConfig],
-    tags: TagSource,
     version_overrides: dict[str, str] | None = None,
 ) -> list[PackageRow]:
     overrides = version_overrides or {}
     rows: list[PackageRow] = []
     for name, package in packages.items():
-        version = overrides.get(name) or tags.latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
+        version = overrides.get(name) or latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
         registries = [
             RegistryLink(
                 registry_name,

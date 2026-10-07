@@ -6,12 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from release_devkit.verbs import prerelease
 from release_devkit import drafts
+from release_devkit import plan as plan_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig, Settings
 from release_devkit.builds import DigestEntry
 from release_devkit.context import VerbContext
 from release_devkit.plan import PackagePlan, ReleasePlan
+from release_devkit.verbs import prerelease
 
 
 class FakeTags:
@@ -94,6 +95,12 @@ def noop(*args: object, **kwargs: object) -> None:
     pass
 
 
+def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
+    monkeypatch.setattr(plan_module, "latest_version", tags.latest_version)
+    monkeypatch.setattr(plan_module, "latest_version_in_line", tags.latest_version_in_line)
+    monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
+
+
 def make_context(
     config: PublishConfig,
     manifest: dict[str, DigestEntry] | None = None,
@@ -140,7 +147,7 @@ def run_prerelease(
     tags: FakeTags,
 ) -> tuple[CallRecorder, CallRecorder, list[tuple[str, str]]]:
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(release_plan))
-    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
+    patch_plan_tags(monkeypatch, tags)
     pull_assets = patch_common(monkeypatch, config)
     publish_packages = CallRecorder([])
     monkeypatch.setattr(prerelease, "publish_packages", publish_packages)
@@ -230,7 +237,7 @@ def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: py
     }
 
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
-    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
+    patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config, manifest=manifest)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
     draft_body = (
@@ -264,7 +271,7 @@ def test_unchanged_images_only_run_skips_the_section(monkeypatch: pytest.MonkeyP
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest=digest_known, tags=["tree-1"])}
 
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
-    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
+    patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config, manifest=manifest)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
     draft_body = f"| zed-capture | tree-0 | `{digest_known}` |"
@@ -300,7 +307,7 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
     tags = FakeTags(versions={"myapp": "1.0.0", "settled": "2.1.0"}, changed=set())
 
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan({"fresh"})))
-    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
+    patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
     monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([("npm", "fresh-id", "1.0.1-dev.abcdef123456")]))
     upserts: list[tuple[str, str]] = []
@@ -327,7 +334,7 @@ def test_snapshot_section_carries_forward_unchanged_app_assets(monkeypatch: pyte
     draft_body = f'<a id="sha-999999999999"></a>\n### Old\n{old_link}'
 
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan({"pkg"})))
-    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
+    patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
     monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([]))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
@@ -357,7 +364,7 @@ def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch)
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan({"pkg"})))
-    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
+    patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
     monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([]))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
