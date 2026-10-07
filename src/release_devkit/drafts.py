@@ -66,51 +66,35 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         install_dotnet("8.0")
         install_node("24", "https://registry.npmjs.org")
         registries = build_registries(context.settings.nuget_api_key)
-        published: dict[str, str] = {}
+        table_rows: list[list[str]] = []
         for name, package in context.publish_config.packages.items():
             plan = release_plan.plans[name]
-            if not plan.publish:
-                continue
-            for registry_name, identity in package.registries.items():
-                published[identity] = registries[registry_name].publish(
-                    package.path,
-                    plan.version,
-                    release_plan.resolved_versions[name],
-                    channel == ReleaseChannel.DEV,
-                    context.short,
+            version: str | None = None
+            if plan.publish:
+                for registry_name in package.registries:
+                    version = registries[registry_name].publish(
+                        package.path,
+                        plan.version,
+                        release_plan.resolved_versions[name],
+                        channel == ReleaseChannel.DEV,
+                        context.short,
+                    )
+                if channel == ReleaseChannel.STABLE:
+                    create_and_push_tag(f"{name}-v{plan.version}")
+            version = version or latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
+            table_rows.append([
+                name,
+                version,
+                ", ".join(
+                    f"[{registry_name}]({registries[registry_name].url(identity, version)})"
+                    if version != UNCHANGED_FALLBACK_VERSION
+                    else registry_name
+                    for registry_name, identity in package.registries.items()
                 )
-            if channel == ReleaseChannel.STABLE:
-                create_and_push_tag(f"{name}-v{plan.version}")
-
-        # List published packages with their registry links
-        if context.publish_config.packages:
-            blocks.append(
-                f"{prefix} Packages\n"
-                + markdown_table(
-                    ["Package", "Version", "Registry"],
-                    [
-                        [
-                            name,
-                            version := next(
-                                (
-                                    published[identity]
-                                    for identity in package.registries.values()
-                                    if identity in published
-                                ),
-                                latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION,
-                            ),
-                            ", ".join(
-                                f"[{registry_name}]({build_registries('')[registry_name].url(identity, version)})"
-                                if version != UNCHANGED_FALLBACK_VERSION
-                                else registry_name
-                                for registry_name, identity in package.registries.items()
-                            )
-                            or "—",
-                        ]
-                        for name, package in context.publish_config.packages.items()
-                    ],
-                )
-            )
+                or "—",
+            ])
+        if table_rows:
+            blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
     # Tag the bumped app versions before cutting the stable release
     if channel == ReleaseChannel.STABLE:
@@ -208,7 +192,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
     # List built images from the digest manifest
     if context.manifest:
-        table_rows: list[list[str]] = []
+        table_rows = []
         for image_name, entry in context.manifest.items():
             tree_tag = next(
                 (tag_name for tag_name in entry.tags if tag_name.startswith("tree-")),
