@@ -2,14 +2,16 @@ from pathlib import Path
 
 import pytest
 
-from release_devkit.config import AppConfig, PackageConfig, PublishConfig
+from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig
 from release_devkit.tags import GitTags, parse_major_minor, parse_version
 from release_devkit.manifests import DependencyEdge
 from release_devkit.plan import (
     PackagePlan,
     ResolvedDependency,
+    apps_with_changes,
     compute_release_plan,
     next_version,
+    package_rows,
     resolve_dependency_versions,
 )
 
@@ -185,3 +187,47 @@ def test_release_plan_bumps_app_on_its_own_path_change():
 
     assert release_plan.publishing == set()
     assert release_plan.app_versions == {"app": "0.2.4"}
+
+
+def test_apps_with_changes_lists_only_apps_with_builds_and_changes() -> None:
+    config = PublishConfig(
+        builds_registry="ghcr.io/owner/repo/builds",
+        apps={
+            "changed": AppConfig(
+                path=Path("apps/changed"),
+                major_minor="1.0",
+                builds=[BuildArtifactConfig(project="Changed", platform="AndroidMobile")],
+            ),
+            "unchanged": AppConfig(
+                path=Path("apps/unchanged"),
+                major_minor="1.0",
+                builds=[BuildArtifactConfig(project="Unchanged", platform="AndroidMobile")],
+            ),
+            "changed-no-builds": AppConfig(path=Path("apps/changed-no-builds"), major_minor="1.0"),
+        },
+    )
+    tags = FakeTagSource(
+        versions={"changed-v": ["1.0.0"], "unchanged-v": ["1.0.0"]},
+        changed={"apps/changed": True, "apps/unchanged": False, "apps/changed-no-builds": True},
+    )
+
+    assert set(apps_with_changes(config, tags)) == {"changed"}
+
+
+def test_package_rows_use_override_then_tag_then_fallback() -> None:
+    packages = {
+        "published": PackageConfig(path=Path("pkg/a"), major_minor="1.0", registries={"npm": "a-id"}),
+        "tagged": PackageConfig(path=Path("pkg/b"), major_minor="1.0", registries={"npm": "b-id"}),
+        "never": PackageConfig(path=Path("pkg/c"), major_minor="1.0", registries={"npm": "c-id"}),
+    }
+    tags = FakeTagSource(versions={"tagged-v": ["1.2.3"]}, changed={})
+
+    overridden = package_rows(packages, tags, {"published": "1.1.0-dev.abcdef123456"})
+    assert [(row.name, row.version) for row in overridden] == [
+        ("published", "1.1.0-dev.abcdef123456"),
+        ("tagged", "1.2.3"),
+        ("never", "0.0.0"),
+    ]
+    assert overridden[0].registries[0].url is not None
+    assert overridden[1].registries[0].url is not None
+    assert overridden[2].registries[0].url is None

@@ -347,9 +347,16 @@ def test_flag_pass_through_contract_is_rejected(tmp_path: Path) -> None:
 
 
 def test_update_pr_draft_bare_invocation_is_clean(tmp_path: Path) -> None:
-    jobs = f"  update-pr-draft-release:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+    jobs = f"  update-pr-draft-release:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
     jobs += f"{UPDATE_PR_DRAFT_RUN}{RELEASE_ENV}"
     assert validate_workflow_file(write_workflow(tmp_path, workflow(jobs))) == []
+
+
+def test_update_pr_draft_requires_tags_checkout(tmp_path: Path) -> None:
+    jobs = f"  update-pr-draft-release:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+    jobs += f"{UPDATE_PR_DRAFT_RUN}{RELEASE_ENV}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("no checkout-with-tags checkout precedes" in problem for problem in problems)
 
 
 def test_validate_release_plan_rejects_flags(tmp_path: Path) -> None:

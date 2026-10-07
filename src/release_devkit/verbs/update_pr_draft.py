@@ -12,7 +12,9 @@ from release_devkit.drafts import (
     DraftRelease,
     publish_draft_assets,
 )
-from release_devkit.rendering import AssetLink, DraftSection, render_asset_links, render_draft_section
+from release_devkit.plan import apps_with_changes
+from release_devkit.rendering import DraftSection, render_asset_links, render_draft_section
+from release_devkit.tags import GitTags
 
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -35,6 +37,13 @@ def update_pr_draft(
 
     tag = f"{PR_DRAFT_TAG_PREFIX}{pr_number}"
     draft = DraftRelease(tag, repository, certified)
+
+    has_app_changes = bool(apps_with_changes(context.publish_config, GitTags()))
+    has_image_changes = context.manifest is not None and draft.has_new_digests(context.manifest)
+    if not has_app_changes and not has_image_changes:
+        print("Nothing to publish")
+        return
+
     staged = publish_draft_assets(
         context.publish_config,
         certified,
@@ -45,7 +54,7 @@ def update_pr_draft(
 
     pr_url = f"https://github.com/{repository}/pull/{pr_number}"
 
-    assets = [AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}") for name, _ in staged]
+    assets = draft.asset_links(staged)
 
     section = render_draft_section(
         DraftSection(

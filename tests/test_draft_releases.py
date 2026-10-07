@@ -41,6 +41,30 @@ class FixedReturn:
         return self.value
 
 
+class CallRecorder:
+    def __init__(self, return_value: object = None) -> None:
+        self._return_value = return_value
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        self.calls.append(args)
+        return self._return_value
+
+
+class FakeTags:
+    def __init__(self, versions: dict[str, str | None], changed: set[str]) -> None:
+        self._versions = versions
+        self._changed = changed
+
+    def latest_version(self, prefix: str) -> str | None:
+        return self._versions.get(prefix.removesuffix("-v"))
+
+    def has_changes_since(self, tag: str | None, path: Path) -> bool:
+        if tag is None:
+            return True
+        return tag.rsplit("-v", 1)[0] in self._changed
+
+
 def make_build_config() -> PublishConfig:
     return PublishConfig(
         apps={
@@ -127,6 +151,9 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     source = make_source_file("MyApp.apk")
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
+    monkeypatch.setattr(
+        update_pr_draft_module, "GitTags", FixedReturn(FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
+    )
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     bash_log = patch_bash(monkeypatch, check_returns=False)
@@ -147,6 +174,9 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
         update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config(), manifest=manifest))
     )
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
+    monkeypatch.setattr(
+        update_pr_draft_module, "GitTags", FixedReturn(FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
+    )
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
@@ -176,6 +206,23 @@ def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -
     update_pr_draft()
 
     assert not bash_log.commands
+
+
+def test_update_pr_draft_skips_when_nothing_changed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
+    monkeypatch.setattr(
+        update_pr_draft_module, "GitTags", FixedReturn(FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
+    )
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+    bash_log = patch_bash(monkeypatch, check_returns=False)
+    pull_assets = CallRecorder([])
+    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
+
+    update_pr_draft()
+
+    assert pull_assets.calls == []
+    assert not any("gh release upload" in command for command in bash_log.commands)
+    assert not any("gh release edit" in command for command in bash_log.commands)
 
 
 def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -236,3 +283,44 @@ def test_upsert_section_replaces_same_anchor_and_preserves_others(monkeypatch: p
     assert "### Old" in written[0]
     assert "### New v2" in written[0]
     assert "### New v1" not in written[0]
+
+
+def test_carried_asset_links_take_newest_section_and_drop_excluded_stems(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_link = "- [MyApp-AndroidMobile-111111111111.apk](https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-111111111111.apk)"
+    replaced_link = "- [OtherApp-Android-222222222222.apk](https://github.com/owner/repo/releases/download/dev-builds/OtherApp-Android-222222222222.apk)"
+    stale_link = "- [OtherApp-Android-333333333333.apk](https://github.com/owner/repo/releases/download/dev-builds/OtherApp-Android-333333333333.apk)"
+    body = (
+        f'<a id="sha-newest"></a>\n### Newest\n{old_link}\n{replaced_link}\n\n'
+        f'<a id="sha-old"></a>\n### Old\n{stale_link}'
+    )
+    view_json = json.dumps({"body": body, "url": DRAFT_URL})
+    patch_bash(monkeypatch, check_returns=True)
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
+
+    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
+
+    carried = draft.carried_asset_links({"OtherApp-Android"})
+    assert [link.name for link in carried] == ["MyApp-AndroidMobile-111111111111.apk"]
+    assert carried[0].url == (
+        "https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-111111111111.apk"
+    )
+
+
+def test_has_new_digests_compares_manifest_against_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    known = "sha256:" + "a" * 64
+    fresh = "sha256:" + "b" * 64
+    view_json = json.dumps({"body": f"| img | tree-1 | `{known}` |", "url": DRAFT_URL})
+    patch_bash(monkeypatch, check_returns=True)
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
+
+    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
+
+    assert (
+        draft.has_new_digests({"img": DigestEntry(ref="ghcr.io/owner/repo/img", digest=known, tags=["tree-1"])})
+        is False
+    )
+    assert (
+        draft.has_new_digests({"img": DigestEntry(ref="ghcr.io/owner/repo/img", digest=fresh, tags=["tree-1"])}) is True
+    )

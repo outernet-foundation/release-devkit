@@ -2,8 +2,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from release_devkit.config import PublishConfig, write_step_summary
+from release_devkit.config import AppConfig, PackageConfig, PublishConfig, write_step_summary
 from release_devkit.manifests import DependencyEdge, resolve_edges
+from release_devkit.registries import registry_url
+from release_devkit.rendering import PackageRow, RegistryLink
 from release_devkit.tags import parse_major_minor, parse_version
 
 UNCHANGED_FALLBACK_VERSION = "0.0.0"
@@ -155,3 +157,36 @@ def next_version(major_minor: str, last_in_line: str | None, last_overall: str |
         return f"{line[0]}.{line[1]}.0"
     major, minor, patch = parse_version(last_in_line)
     return f"{major}.{minor}.{patch + 1}"
+
+
+def apps_with_changes(publish_config: PublishConfig, tags: TagSource) -> dict[str, AppConfig]:
+    return {
+        name: app
+        for name, app in publish_config.apps.items()
+        if app.builds is not None
+        and tags.has_changes_since(
+            f"{name}-v{version}" if (version := tags.latest_version(f"{name}-v")) else None,
+            app.path,
+        )
+    }
+
+
+def package_rows(
+    packages: dict[str, PackageConfig],
+    tags: TagSource,
+    version_overrides: dict[str, str] | None = None,
+) -> list[PackageRow]:
+    overrides = version_overrides or {}
+    rows: list[PackageRow] = []
+    for name, package in packages.items():
+        version = overrides.get(name) or tags.latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
+        registries = [
+            RegistryLink(
+                registry_name,
+                version,
+                registry_url(registry_name, identity, version) if version != UNCHANGED_FALLBACK_VERSION else None,
+            )
+            for registry_name, identity in package.registries.items()
+        ]
+        rows.append(PackageRow(name, version, registries))
+    return rows

@@ -13,10 +13,9 @@ from release_devkit.builds import pull_build_assets
 from release_devkit.config import DEFAULT_CONFIG_PATH
 from release_devkit.context import merge_push_context
 from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release
-from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, compute_and_print_plan
+from release_devkit.plan import compute_and_print_plan, package_rows
 from release_devkit.publishing import StableStrategy, publish_packages
-from release_devkit.registries import registry_url
-from release_devkit.rendering import PackageRow, RegistryLink, render_release_body
+from release_devkit.rendering import PackageRow, render_release_body
 from release_devkit.tags import GitTags
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -78,18 +77,7 @@ def main(
         shutil.copy2(source, asset)
         assets.append(asset)
 
-    rows: list[PackageRow] = []
-    for name, package in publish_config.packages.items():
-        version = tags.latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
-        registries = [
-            RegistryLink(
-                registry_name,
-                version,
-                registry_url(registry_name, identity, version) if version != UNCHANGED_FALLBACK_VERSION else None,
-            )
-            for registry_name, identity in package.registries.items()
-        ]
-        rows.append(PackageRow(name, version, registries))
+    rows = package_rows(publish_config.packages, tags)
 
     for app_name in publish_config.apps:
         version = tags.latest_version(f"{app_name}-v")

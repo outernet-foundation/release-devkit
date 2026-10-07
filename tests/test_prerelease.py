@@ -218,7 +218,7 @@ def test_dev_draft_surfaces_only_changed_apps(monkeypatch: pytest.MonkeyPatch) -
     assert set(draft_config.apps) == {"changed-app"}
 
 
-def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
@@ -252,8 +252,101 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
 
     assert len(sections) == 1
     assert digest_new in sections[0]
-    assert digest_existing not in sections[0]
+    assert digest_existing in sections[0]
     assert f"[{SHORT_SHA}](https://github.com/owner/repo/commit/{CERTIFIED_SHA})" in sections[0]
+
+
+def test_unchanged_images_only_run_skips_the_section(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = make_config(apps={"myapp": make_app()})
+    tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
+
+    digest_known = "sha256:" + "a" * 64
+    manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest=digest_known, tags=["tree-1"])}
+
+    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
+    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
+    patch_common(monkeypatch, config, manifest=manifest)
+    monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
+    draft_body = f"| zed-capture | tree-0 | `{digest_known}` |"
+    monkeypatch.setattr(
+        drafts,
+        "bash_output",
+        FixedReturn(json.dumps({"body": draft_body, "url": "https://github.com/owner/repo/releases/untagged-abc"})),
+    )
+    upserts: list[tuple[str, str]] = []
+
+    def record_upsert(instance: drafts.DraftRelease, anchor: str, section: str) -> None:
+        upserts.append((anchor, section))
+
+    monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
+
+    prerelease.main()
+
+    assert upserts == []
+
+
+def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = make_config(
+        packages={
+            "fresh": PackageConfig(path=Path("packages/fresh"), major_minor="1.0", registries={"npm": "fresh-id"}),
+            "settled": PackageConfig(
+                path=Path("packages/settled"), major_minor="1.0", registries={"npm": "settled-id"}
+            ),
+        },
+        apps={"myapp": make_app()},
+    )
+    tags = FakeTags(versions={"myapp": "1.0.0", "settled": "2.1.0"}, changed=set())
+
+    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan({"fresh"})))
+    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
+    patch_common(monkeypatch, config)
+    monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([("npm", "fresh-id", "1.0.1-dev.abcdef123456")]))
+    upserts: list[tuple[str, str]] = []
+
+    def record_upsert(instance: drafts.DraftRelease, anchor: str, section: str) -> None:
+        upserts.append((anchor, section))
+
+    monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
+
+    prerelease.main()
+
+    assert len(upserts) == 1
+    section = upserts[0][1]
+    assert "| fresh | 1.0.1-dev.abcdef123456 |" in section
+    assert "| settled | 2.1.0 |" in section
+
+
+def test_snapshot_section_carries_forward_unchanged_app_assets(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = make_config(apps={"myapp": make_app()})
+    tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
+
+    old_asset = "MyApp-AndroidMobile-999999999999.apk"
+    old_link = f"- [{old_asset}](https://github.com/owner/repo/releases/download/dev-builds/{old_asset})"
+    draft_body = f'<a id="sha-999999999999"></a>\n### Old\n{old_link}'
+
+    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan({"pkg"})))
+    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
+    patch_common(monkeypatch, config)
+    monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([]))
+    monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
+    monkeypatch.setattr(
+        drafts,
+        "bash_output",
+        FixedReturn(json.dumps({"body": draft_body, "url": "https://github.com/owner/repo/releases/untagged-abc"})),
+    )
+    upserts: list[tuple[str, str]] = []
+
+    def record_upsert(instance: drafts.DraftRelease, anchor: str, section: str) -> None:
+        upserts.append((anchor, section))
+
+    monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
+
+    prerelease.main()
+
+    assert len(upserts) == 1
+    assert old_link in upserts[0][1]
 
 
 def test_package_only_run_creates_missing_dev_draft(monkeypatch: pytest.MonkeyPatch) -> None:

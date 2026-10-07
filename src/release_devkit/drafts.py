@@ -9,12 +9,13 @@ from tempfile import NamedTemporaryFile, mkdtemp
 from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 
-from release_devkit.builds import pull_build_assets
+from release_devkit.builds import DigestEntry, pull_build_assets
 from release_devkit.config import PublishConfig
-from release_devkit.rendering import DIGEST_PATTERN
+from release_devkit.rendering import DIGEST_PATTERN, AssetLink, parse_asset_links
 
 DEV_DRAFT_TAG = "dev-builds"
 _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
+_ASSET_NAME_PATTERN = re.compile(r"^(.+)-[0-9a-f]{12}\.[^.]+$")
 
 
 class DraftRelease:
@@ -31,6 +32,22 @@ class DraftRelease:
 
     def existing_digests(self) -> set[str]:
         return set(DIGEST_PATTERN.findall(self.body))
+
+    def has_new_digests(self, manifest: dict[str, DigestEntry]) -> bool:
+        existing = self.existing_digests()
+        return any(entry.digest not in existing for entry in manifest.values())
+
+    def asset_url(self, name: str) -> str:
+        return f"https://github.com/{self.repository}/releases/download/{self.tag}/{name}"
+
+    def asset_links(self, staged: list[tuple[str, Path]]) -> list[AssetLink]:
+        return [AssetLink(name, self.asset_url(name)) for name, _ in staged]
+
+    def carried_asset_links(self, exclude_stems: set[str]) -> list[AssetLink]:
+        if not self.sections:
+            return []
+        content = self.sections[0][1]
+        return [link for link in parse_asset_links(content) if asset_stem(link.name) not in exclude_stems]
 
     def upsert_section(self, anchor: str, section: str) -> None:
         new_entry = (anchor, section.strip())
@@ -89,6 +106,11 @@ def parse_sections(body: str) -> list[tuple[str, str]]:
         content = parts[index + 1].strip() if index + 1 < len(parts) else ""
         sections.append((anchor_id, content))
     return sections
+
+
+def asset_stem(name: str) -> str | None:
+    match = _ASSET_NAME_PATTERN.fullmatch(name)
+    return match.group(1) if match is not None else None
 
 
 def delete_draft_release(tag: str, repository: str) -> None:

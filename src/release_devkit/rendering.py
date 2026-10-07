@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from release_devkit.builds import DigestEntry
 
 DIGEST_PATTERN = re.compile(r"sha256:[a-f0-9]{64}")
+ASSET_LINK_PATTERN = re.compile(r"^- \[([^\]]+)\]\(([^)]+)\)$", re.MULTILINE)
 
 
 @dataclass
@@ -59,6 +60,10 @@ def render_packages_table(rows: list[PackageRow]) -> list[str]:
 
 def render_asset_links(links: list[AssetLink]) -> list[str]:
     return [f"- [{link.name}]({link.url})" for link in links]
+
+
+def parse_asset_links(content: str) -> list[AssetLink]:
+    return [AssetLink(name=name, url=url) for name, url in ASSET_LINK_PATTERN.findall(content)]
 
 
 def render_heading(fragments: list[str]) -> str:

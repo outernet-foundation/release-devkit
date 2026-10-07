@@ -66,7 +66,7 @@ VERB_CHECKOUTS: dict[str, str] = {
     "lint-workflows": CHECKOUT,
     "merge-gate": MERGE_BOT,
     "validate-release-plan": CHECKOUT_WITH_TAGS,
-    "update-pr-draft-release": CHECKOUT,
+    "update-pr-draft-release": CHECKOUT_WITH_TAGS,
 }
 
 SETUP_UV_RESTORE_INPUTS = {"enable-cache": True, "save-cache": "false"}
