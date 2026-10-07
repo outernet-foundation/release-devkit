@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 import typer
 from bashrun.bash import bash, bash_check, bash_output
@@ -37,6 +37,25 @@ class DigestEntry(BaseModel):
     ref: str
     digest: str
     tags: list[str]
+
+
+class PackageRow(NamedTuple):
+    name: str
+    version: str
+    registry: str
+    url: str | None
+
+
+class StagedAsset(NamedTuple):
+    app: str
+    asset: str
+
+
+class ImageRow(NamedTuple):
+    image: str
+    tag: str
+    digest: str
+    url: str | None
 
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -115,23 +134,37 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     # Publish the changed packages and tag the stable versions
     if channel in (ReleaseChannel.DEV, ReleaseChannel.STABLE):
         with ci_step("Publish packages"):
-            packages_rows = publish_packages(settings, publish_config, release_plan, channel, short_sha)
-        if packages_rows:
+            packages = publish_packages(settings, publish_config, release_plan, channel, short_sha)
+        if packages:
+            packages_rows = [
+                [name, version, f"[{registry}]({url})" if url else registry]
+                for name, version, registry, url in packages
+            ]
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], packages_rows)}")
 
     # Stage every app's build artifacts as release assets
     if publish_config.apps:
         with ci_step("Stage apps"):
-            apps_rows = stage_apps(
-                settings, publish_config, release_plan, channel, sha, short_sha, versions, tag, repository
-            )
-        blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], apps_rows)}")
+            assets = stage_apps(settings, publish_config, release_plan, channel, sha, short_sha, tag, repository)
+        assets_rows = [
+            [
+                app_name,
+                versions.get(app_name) or "—",
+                f"[{asset}](https://github.com/{repository}/releases/download/{tag}/{asset})",
+            ]
+            for app_name, asset in assets
+        ]
+        blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], assets_rows)}")
 
     # List the images built at this SHA from the builds shelf
     if publish_config.builds_registry is not None:
         with ci_step("List built images"):
-            images_rows = render_built_images(settings, publish_config, sha)
-        if images_rows:
+            images = render_built_images(settings, publish_config, sha)
+        if images:
+            images_rows = [
+                [image, f"[{image_tag}]({url})" if url and image_tag else (image_tag or "—"), f"`{digest}`"]
+                for image, image_tag, digest, url in images
+            ]
             blocks.append(f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], images_rows)}")
 
     # Join the blocks into one section
@@ -170,7 +203,7 @@ def publish_packages(
     release_plan: ReleasePlan,
     channel: ReleaseChannel,
     short_sha: str,
-) -> list[list[str]]:
+) -> list[PackageRow]:
     # Provision the toolchains for the registries this run publishes to
     publishing_registries = {publish_config.packages[name].registry for name in release_plan.publishing}
     if "nuget" in publishing_registries:
@@ -178,7 +211,7 @@ def publish_packages(
     if "npm" in publishing_registries:
         install_node("24", "https://registry.npmjs.org")
     registries = build_registries(settings.nuget_api_key)
-    table_rows: list[list[str]] = []
+    rows: list[PackageRow] = []
     for name, package in publish_config.packages.items():
         plan = release_plan.plans[name]
         registry = registries[package.registry]
@@ -186,20 +219,26 @@ def publish_packages(
 
         # List an unchanged package at its latest stable tag
         if not plan.publish and latest_version is not None:
-            table_rows.append([
-                name,
-                latest_version,
-                f"[{package.registry}]({registry.url(package.identity, latest_version)})",
-            ])
+            rows.append(
+                PackageRow(
+                    name=name,
+                    version=latest_version,
+                    registry=package.registry,
+                    url=registry.url(package.identity, latest_version),
+                )
+            )
             continue
 
         # List a never-published package with the fallback version
         if not plan.publish:
-            table_rows.append([
-                name,
-                UNCHANGED_FALLBACK_VERSION,
-                package.registry,
-            ])
+            rows.append(
+                PackageRow(
+                    name=name,
+                    version=UNCHANGED_FALLBACK_VERSION,
+                    registry=package.registry,
+                    url=None,
+                )
+            )
             continue
 
         # Publish the changed package and list the version it returned
@@ -214,13 +253,16 @@ def publish_packages(
         if channel == ReleaseChannel.STABLE:
             create_and_push_tag(f"{name}-v{plan.version}")
 
-        table_rows.append([
-            name,
-            version,
-            f"[{package.registry}]({registry.url(package.identity, version)})",
-        ])
+        rows.append(
+            PackageRow(
+                name=name,
+                version=version,
+                registry=package.registry,
+                url=registry.url(package.identity, version),
+            )
+        )
 
-    return table_rows
+    return rows
 
 
 def stage_apps(
@@ -230,12 +272,11 @@ def stage_apps(
     channel: ReleaseChannel,
     sha: str,
     short_sha: str,
-    versions: dict[str, str | None],
     tag: str,
     repository: str,
-) -> list[list[str]]:
+) -> list[StagedAsset]:
     staging = Path(mkdtemp(prefix="release-builds-"))
-    staged: list[tuple[str, str, Path]] = []
+    staged: list[tuple[str, Path]] = []
     for app_name, artifact in [
         (app_name, artifact) for app_name, app in publish_config.apps.items() for artifact in app.builds
     ]:
@@ -259,7 +300,7 @@ def stage_apps(
         name = named.name if channel == ReleaseChannel.STABLE else f"{named.stem}-{short_sha}{named.suffix}"
         target = staging / name
         shutil.copy2(source, target)
-        staged.append((app_name, name, target))
+        staged.append((app_name, target))
         print(f"  Asset: {name}")
 
     # Tag the bumped app versions alongside their staged assets
@@ -268,20 +309,12 @@ def stage_apps(
             create_and_push_tag(f"{app_name}-v{app_version}")
 
     # Upload the staged assets
-    bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
+    bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, path in staged)} --clobber --repo {repository}")
 
-    # List staged apps with their asset links
-    return [
-        [
-            app_name,
-            versions.get(app_name) or "—",
-            f"[{asset_name}](https://github.com/{repository}/releases/download/{tag}/{asset_name})",
-        ]
-        for app_name, asset_name, _ in staged
-    ]
+    return [StagedAsset(app=app_name, asset=path.name) for app_name, path in staged]
 
 
-def render_built_images(settings: Settings, publish_config: PublishConfig, sha: str) -> list[list[str]]:
+def render_built_images(settings: Settings, publish_config: PublishConfig, sha: str) -> list[ImageRow]:
     # Pull the digest manifest from the builds shelf
     digest_staging = Path(mkdtemp(prefix="digest-manifest-"))
     if not pull_artifact(
@@ -299,7 +332,7 @@ def render_built_images(settings: Settings, publish_config: PublishConfig, sha: 
     manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
 
     # List built images from the digest manifest
-    table_rows: list[list[str]] = []
+    rows: list[ImageRow] = []
     for image_name, entry in manifest.items():
         tree_tag = next(
             (tag_name for tag_name in entry.tags if tag_name.startswith("tree-")),
@@ -310,12 +343,8 @@ def render_built_images(settings: Settings, publish_config: PublishConfig, sha: 
             if entry.ref.startswith("ghcr.io/") and len(ref_parts := entry.ref[len("ghcr.io/") :].split("/", 1)) >= 2
             else None
         )
-        table_rows.append([
-            image_name,
-            f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—"),
-            f"`{entry.digest}`",
-        ])
-    return table_rows
+        rows.append(ImageRow(image=image_name, tag=tree_tag, digest=entry.digest, url=url))
+    return rows
 
 
 def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
