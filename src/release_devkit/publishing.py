@@ -11,6 +11,7 @@ from release_devkit.registries import (
     PublishRequest,
     build_registries,
 )
+from release_devkit.tags import create_and_push_tag
 
 
 def deliver_changed_packages(
@@ -61,4 +62,11 @@ def deliver_changed_packages(
                     )
                 )
             published.append((registry_name, identity, version))
+
+    if not dev:
+        for name in packages:
+            plan = release_plan.plans[name]
+            if plan.publish:
+                create_and_push_tag(f"{name}-v{plan.version}")
+
     return context, release_plan, published

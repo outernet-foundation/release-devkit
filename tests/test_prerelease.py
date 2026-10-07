@@ -158,14 +158,16 @@ def patch_common(
     return pull_assets
 
 
-def patch_publish_internals(monkeypatch: pytest.MonkeyPatch) -> FakePublishRegistry:
+def patch_publish_internals(monkeypatch: pytest.MonkeyPatch) -> tuple[FakePublishRegistry, CallRecorder]:
     npm_registry = FakePublishRegistry()
+    create_and_push_tag = CallRecorder()
     monkeypatch.setattr(publishing_module, "ci_step", FixedReturn(nullcontext(None)))
     monkeypatch.setattr(publishing_module, "configure_git", noop)
     monkeypatch.setattr(publishing_module, "install_dotnet", noop)
     monkeypatch.setattr(publishing_module, "install_node", noop)
     monkeypatch.setattr(publishing_module, "build_registries", FixedReturn({"npm": npm_registry}))
-    return npm_registry
+    monkeypatch.setattr(publishing_module, "create_and_push_tag", create_and_push_tag)
+    return npm_registry, create_and_push_tag
 
 
 def run_prerelease(
@@ -173,11 +175,11 @@ def run_prerelease(
     config: PublishConfig,
     release_plan: ReleasePlan,
     tags: FakeTags,
-) -> tuple[FakePublishRegistry, CallRecorder, list[str]]:
+) -> tuple[FakePublishRegistry, CallRecorder, CallRecorder, list[str]]:
     monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(release_plan))
     patch_plan_tags(monkeypatch, tags)
     pull_assets = patch_common(monkeypatch, config)
-    npm_registry = patch_publish_internals(monkeypatch)
+    npm_registry, create_and_push_tag = patch_publish_internals(monkeypatch)
     written: list[str] = []
 
     def capturing_bash(command: str) -> None:
@@ -189,14 +191,14 @@ def run_prerelease(
 
     prerelease.main()
 
-    return npm_registry, pull_assets, written
+    return npm_registry, create_and_push_tag, pull_assets, written
 
 
 def test_noop_merge_publishes_nothing_but_writes_section(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
-    npm_registry, pull_assets, written = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    npm_registry, _, pull_assets, written = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert npm_registry.calls == []
     assert pull_assets.calls != []
@@ -211,12 +213,13 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
     release_plan = make_plan({"pkg"})
 
-    npm_registry, pull_assets, written = run_prerelease(monkeypatch, config, release_plan, tags)
+    npm_registry, create_and_push_tag, pull_assets, written = run_prerelease(monkeypatch, config, release_plan, tags)
 
     assert len(npm_registry.calls) == 1
     assert npm_registry.calls[0].identity == "pkg-id"
     assert npm_registry.calls[0].version == f"1.0.0-dev.{SHORT_SHA}"
     assert npm_registry.calls[0].dist_tag == "dev"
+    assert create_and_push_tag.calls == []
     assert pull_assets.calls != []
     assert written != []
     assert f'<a id="sha-{SHORT_SHA}"></a>' in written[0]
@@ -232,7 +235,7 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     pull_assets = CallRecorder([("myapp", artifact, make_source_file("MyApp-AndroidMobile.apk"))])
     monkeypatch.setattr(builds_module, "pull_build_assets", pull_assets)
-    npm_registry = patch_publish_internals(monkeypatch)
+    npm_registry, _ = patch_publish_internals(monkeypatch)
     written: list[str] = []
 
     def capturing_bash(command: str) -> None:
@@ -266,7 +269,7 @@ def test_stages_all_apps_regardless_of_source_changes(monkeypatch: pytest.Monkey
         changed={"changed-app"},
     )
 
-    _, pull_assets, _ = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    _, _, pull_assets, _ = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert len(pull_assets.calls) == 1
     assert pull_assets.calls[0][0] == config.apps

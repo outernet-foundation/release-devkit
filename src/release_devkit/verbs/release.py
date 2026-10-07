@@ -29,11 +29,6 @@ def main(
 
     packages = context.publish_config.packages
 
-    for name in packages:
-        plan = release_plan.plans[name]
-        if plan.publish:
-            create_and_push_tag(f"{name}-v{plan.version}")
-
     for app_name, app_version in release_plan.app_versions.items():
         create_and_push_tag(f"{app_name}-v{app_version}")
 
