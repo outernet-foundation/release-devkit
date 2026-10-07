@@ -22,13 +22,11 @@ def write_draft_section(
     heading_fragments: list[str],
     packages: list[PackageRow] | None = None,
 ) -> None:
-    # Read the app versions for the table's version column
-    app_last_versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
+    app_last_versions = latest_app_versions(context)
 
     body = ensure_draft_release(context, tag)
 
-    staged = stage_build_assets(context, context.publish_config.apps, context.short)
-    upload_release_assets(context, tag, staged)
+    staged = stage_and_upload(context, tag, context.short)
 
     # Split the body into anchor-keyed sections
     anchor = f"sha-{context.short}"
@@ -52,10 +50,29 @@ def write_draft_section(
     else:
         sections.insert(0, new_entry)
 
-    # Write the merged body back to the release
+    edit_release_notes(
+        context,
+        tag,
+        "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]),
+        publish=False,
+    )
+
+
+def latest_app_versions(context: VerbContext) -> dict[str, str | None]:
+    return {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
+
+
+def stage_and_upload(context: VerbContext, tag: str, short: str | None) -> list[tuple[str, str, Path]]:
+    staged = stage_build_assets(context, context.publish_config.apps, short)
+    upload_release_assets(context, tag, staged)
+    return staged
+
+
+def edit_release_notes(context: VerbContext, tag: str, body: str, publish: bool) -> None:
+    draft_flag = " --draft=false" if publish else ""
     gh_release_with_notes(
-        f"gh release edit {tag} --repo {context.settings.github_repository}",
-        "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]) + "\n",
+        f"gh release edit {tag}{draft_flag} --repo {context.settings.github_repository}",
+        body + "\n",
     )
 
 
