@@ -19,10 +19,9 @@ DEV_DRAFT_TAG = "dev-builds"
 def write_release(
     context: VerbContext,
     tag: str,
-    short: str | None,
     versions: dict[str, str | None],
     heading: str | None,
-    published: list[tuple[str, str, str]] | None,
+    published: list[tuple[str, str]] | None,
     publish: bool,
 ) -> None:
     repository = context.settings.github_repository
@@ -36,6 +35,7 @@ def write_release(
 
     staged: list[tuple[str, str, Path]] = []
     if context.publish_config.apps:
+        short = None if publish else context.short
         staging = Path(mkdtemp(prefix="build-assets-"))
         for app_name, artifact, source in pull_build_assets(
             context.publish_config.apps,
@@ -65,7 +65,7 @@ def write_release(
         names_by_identity = {
             identity: name for name, package in configured.items() for identity in package.registries.values()
         }
-        overrides = {names_by_identity[identity]: version for _, identity, version in published}
+        overrides = {names_by_identity[identity]: version for identity, version in published}
         table_rows: list[list[str]] = []
         for package_row in package_rows(configured, overrides):
             if not package_row.registries:

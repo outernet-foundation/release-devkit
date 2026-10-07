@@ -137,16 +137,6 @@ def next_version(major_minor: str, last_in_line: str | None, last_overall: str |
     return f"{major}.{minor}.{patch + 1}"
 
 
-def package_version_overrides(
-    packages: dict[str, PackageConfig],
-    published: list[tuple[str, str, str]],
-) -> dict[str, str]:
-    names_by_identity = {
-        identity: name for name, package in packages.items() for identity in package.registries.values()
-    }
-    return {names_by_identity[identity]: version for _, identity, version in published}
-
-
 def package_rows(
     packages: dict[str, PackageConfig],
     version_overrides: dict[str, str] | None = None,

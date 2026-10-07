@@ -23,7 +23,6 @@ def update_pr_draft(
     write_release(
         context,
         f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}",
-        context.short,
         {name: latest_version(f"{name}-v") for name in context.publish_config.apps},
         f"### [{context.short}]({context.commit_url})",
         None,

@@ -30,7 +30,6 @@ def main(
     write_release(
         context,
         DEV_DRAFT_TAG,
-        context.short,
         release_plan.app_last_versions,
         f"### [{context.short}]({context.commit_url})"
         f" — [PR #{pr_number}: {pr_title}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",

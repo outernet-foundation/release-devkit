@@ -39,7 +39,6 @@ def main(
     write_release(
         context,
         f"{year_month}.{(int(existing) if existing else 0) + 1}",
-        None,
         {**release_plan.app_last_versions, **release_plan.app_versions},
         None,
         published,

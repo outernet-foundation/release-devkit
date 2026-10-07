@@ -22,11 +22,11 @@ PYPROJECT_VERSION_PATTERN = re.compile(r'^version\s*=\s*"[^"]*"')
 NPM_DEV_DIST_TAG = "dev"
 
 
-def publish_packages(context: VerbContext, dev: bool) -> tuple[ReleasePlan, list[tuple[str, str, str]]]:
+def publish_packages(context: VerbContext, dev: bool) -> tuple[ReleasePlan, list[tuple[str, str]]]:
     packages = context.publish_config.packages
     release_plan = compute_release_plan(context.publish_config)
 
-    published: list[tuple[str, str, str]] = []
+    published: list[tuple[str, str]] = []
     if not release_plan.publishing:
         return release_plan, published
 
@@ -43,7 +43,6 @@ def publish_packages(context: VerbContext, dev: bool) -> tuple[ReleasePlan, list
             continue
         for registry_name, identity in package.registries.items():
             published.append((
-                registry_name,
                 identity,
                 registries[registry_name].publish(
                     package.path, plan.version, release_plan.resolved_versions[name], dev, context.short
