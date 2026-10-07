@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings
@@ -15,6 +16,21 @@ class Settings(BaseSettings):
     github_actor: str = ""
     github_workspace: str = ""
     github_ref: str = ""
+
+    @model_validator(mode="after")
+    def require_runner_environment(self) -> Self:
+        missing = [
+            env_var
+            for env_var, value in (
+                ("GITHUB_REPOSITORY", self.github_repository),
+                ("GITHUB_ACTOR", self.github_actor),
+                ("GITHUB_WORKSPACE", self.github_workspace),
+            )
+            if not value
+        ]
+        if missing:
+            raise SystemExit(f"{', '.join(missing)} not set — these verbs read the GitHub runner environment")
+        return self
 
 
 class PackageConfig(BaseModel):
