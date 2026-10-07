@@ -62,13 +62,7 @@ def main(
 
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
-        staged_assets = publish_draft_assets(
-            context.publish_config.model_copy(update={"apps": changed_apps}),
-            context.certified,
-            context.settings.github_actor,
-            context.settings.github_token,
-            draft,
-        )
+        staged_assets = publish_draft_assets(context, changed_apps, draft)
 
     draft.upsert_section(
         f"sha-{context.short}",

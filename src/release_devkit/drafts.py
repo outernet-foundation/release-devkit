@@ -10,7 +10,8 @@ from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 
 from release_devkit.builds import DigestEntry, pull_build_assets
-from release_devkit.config import PublishConfig
+from release_devkit.config import AppConfig
+from release_devkit.context import VerbContext
 from release_devkit.rendering import DIGEST_PATTERN, AssetLink, PackageRow, parse_asset_links, render_draft_section
 
 DEV_DRAFT_TAG = "dev-builds"
@@ -74,13 +75,14 @@ class DraftRelease:
 
 
 def publish_draft_assets(
-    config: PublishConfig,
-    build_sha: str,
-    registry_username: str,
-    registry_token: str,
-    draft: DraftRelease,
+    context: VerbContext, apps: dict[str, AppConfig], draft: DraftRelease
 ) -> list[tuple[str, Path]]:
-    pulled = pull_build_assets(config, build_sha, registry_username, registry_token)
+    pulled = pull_build_assets(
+        context.publish_config.model_copy(update={"apps": apps}),
+        context.certified,
+        context.settings.github_actor,
+        context.settings.github_token,
+    )
 
     staging = Path(mkdtemp(prefix="draft-assets-"))
     staged: list[tuple[str, Path]] = []
@@ -92,7 +94,7 @@ def publish_draft_assets(
         else:
             stem = source.stem
             suffix = source.suffix
-        name = f"{stem}-{build_sha[:12]}{suffix}"
+        name = f"{stem}-{context.short}{suffix}"
         target = staging / name
         shutil.copy2(source, target)
         staged.append((name, target))
