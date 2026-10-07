@@ -13,7 +13,7 @@ from release_devkit.drafts import (
     publish_draft_assets,
 )
 from release_devkit.plan import apps_with_changes
-from release_devkit.rendering import DraftSection, render_asset_links, render_draft_section
+from release_devkit.rendering import render_asset_links, render_draft_section
 
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -62,11 +62,9 @@ def update_pr_draft(
     draft.upsert_section(
         f"sha-{context.short}",
         render_draft_section(
-            DraftSection(
-                heading_fragments=heading_fragments,
-                assets=assets or None,
-                images=manifest,
-            )
+            heading_fragments=heading_fragments,
+            assets=assets or None,
+            images=manifest,
         ),
     )
 

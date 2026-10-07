@@ -29,14 +29,6 @@ class AssetLink:
     url: str
 
 
-@dataclass
-class DraftSection:
-    heading_fragments: list[str]
-    packages: list[PackageRow] | None = None
-    assets: list[AssetLink] | None = None
-    images: dict[str, DigestEntry] | None = None
-
-
 def render_packages_table(rows: list[PackageRow]) -> list[str]:
     lines = ["| Package | Version | Registry |", "|---|---|---|"]
     for row in rows:
@@ -88,18 +80,23 @@ def render_images_table(manifest: dict[str, DigestEntry]) -> list[str]:
     return lines
 
 
-def render_draft_section(section: DraftSection) -> str:
-    lines = [render_heading(section.heading_fragments)]
-    if section.packages:
+def render_draft_section(
+    heading_fragments: list[str],
+    packages: list[PackageRow] | None = None,
+    assets: list[AssetLink] | None = None,
+    images: dict[str, DigestEntry] | None = None,
+) -> str:
+    lines = [render_heading(heading_fragments)]
+    if packages:
         lines.append("")
-        lines.extend(render_packages_table(section.packages))
-    if section.assets:
+        lines.extend(render_packages_table(packages))
+    if assets:
         lines.append("")
-        lines.extend(render_asset_links(section.assets))
-    if section.images:
+        lines.extend(render_asset_links(assets))
+    if images:
         lines.append("")
         lines.append("#### Built images")
-        lines.extend(render_images_table(section.images))
+        lines.extend(render_images_table(images))
     return "\n".join(lines)
 
 
