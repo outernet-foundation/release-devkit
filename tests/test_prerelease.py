@@ -12,6 +12,7 @@ from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig,
 from release_devkit.builds import DigestEntry
 from release_devkit.context import VerbContext
 from release_devkit.plan import PackagePlan, ReleasePlan
+from release_devkit.rendering import AssetLink, PackageRow, render_draft_section
 from release_devkit.verbs import prerelease
 
 
@@ -153,8 +154,15 @@ def run_prerelease(
     monkeypatch.setattr(prerelease, "publish_packages", publish_packages)
     upserts: list[tuple[str, str]] = []
 
-    def record_upsert(instance: drafts.DraftRelease, anchor: str, section: str) -> None:
-        upserts.append((anchor, section))
+    def record_upsert(
+        instance: drafts.DraftRelease,
+        anchor: str,
+        heading_fragments: list[str],
+        assets: list[AssetLink] | None = None,
+        images: dict[str, DigestEntry] | None = None,
+        packages: list[PackageRow] | None = None,
+    ) -> None:
+        upserts.append((anchor, render_draft_section(heading_fragments, assets, images, packages)))
 
     monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
 
@@ -250,8 +258,15 @@ def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: py
     )
     sections: list[str] = []
 
-    def record_upsert(instance: drafts.DraftRelease, anchor: str, section: str) -> None:
-        sections.append(section)
+    def record_upsert(
+        instance: drafts.DraftRelease,
+        anchor: str,
+        heading_fragments: list[str],
+        assets: list[AssetLink] | None = None,
+        images: dict[str, DigestEntry] | None = None,
+        packages: list[PackageRow] | None = None,
+    ) -> None:
+        sections.append(render_draft_section(heading_fragments, assets, images, packages))
 
     monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
 
@@ -282,8 +297,15 @@ def test_unchanged_images_only_run_skips_the_section(monkeypatch: pytest.MonkeyP
     )
     upserts: list[tuple[str, str]] = []
 
-    def record_upsert(instance: drafts.DraftRelease, anchor: str, section: str) -> None:
-        upserts.append((anchor, section))
+    def record_upsert(
+        instance: drafts.DraftRelease,
+        anchor: str,
+        heading_fragments: list[str],
+        assets: list[AssetLink] | None = None,
+        images: dict[str, DigestEntry] | None = None,
+        packages: list[PackageRow] | None = None,
+    ) -> None:
+        upserts.append((anchor, render_draft_section(heading_fragments, assets, images, packages)))
 
     monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
 
@@ -312,8 +334,15 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
     monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([("npm", "fresh-id", "1.0.1-dev.abcdef123456")]))
     upserts: list[tuple[str, str]] = []
 
-    def record_upsert(instance: drafts.DraftRelease, anchor: str, section: str) -> None:
-        upserts.append((anchor, section))
+    def record_upsert(
+        instance: drafts.DraftRelease,
+        anchor: str,
+        heading_fragments: list[str],
+        assets: list[AssetLink] | None = None,
+        images: dict[str, DigestEntry] | None = None,
+        packages: list[PackageRow] | None = None,
+    ) -> None:
+        upserts.append((anchor, render_draft_section(heading_fragments, assets, images, packages)))
 
     monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
 
@@ -345,8 +374,15 @@ def test_snapshot_section_carries_forward_unchanged_app_assets(monkeypatch: pyte
     )
     upserts: list[tuple[str, str]] = []
 
-    def record_upsert(instance: drafts.DraftRelease, anchor: str, section: str) -> None:
-        upserts.append((anchor, section))
+    def record_upsert(
+        instance: drafts.DraftRelease,
+        anchor: str,
+        heading_fragments: list[str],
+        assets: list[AssetLink] | None = None,
+        images: dict[str, DigestEntry] | None = None,
+        packages: list[PackageRow] | None = None,
+    ) -> None:
+        upserts.append((anchor, render_draft_section(heading_fragments, assets, images, packages)))
 
     monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
 

@@ -11,7 +11,7 @@ from ci_devkit.ci_step import ci_step
 
 from release_devkit.builds import DigestEntry, pull_build_assets
 from release_devkit.config import PublishConfig
-from release_devkit.rendering import DIGEST_PATTERN, AssetLink, parse_asset_links
+from release_devkit.rendering import DIGEST_PATTERN, AssetLink, PackageRow, parse_asset_links, render_draft_section
 
 DEV_DRAFT_TAG = "dev-builds"
 _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
@@ -49,8 +49,15 @@ class DraftRelease:
         content = self.sections[0][1]
         return [link for link in parse_asset_links(content) if asset_stem(link.name) not in exclude_stems]
 
-    def upsert_section(self, anchor: str, section: str) -> None:
-        new_entry = (anchor, section.strip())
+    def upsert_section(
+        self,
+        anchor: str,
+        heading_fragments: list[str],
+        assets: list[AssetLink] | None = None,
+        images: dict[str, DigestEntry] | None = None,
+        packages: list[PackageRow] | None = None,
+    ) -> None:
+        new_entry = (anchor, render_draft_section(heading_fragments, assets, images, packages).strip())
         for index, (existing_anchor, _) in enumerate(self.sections):
             if existing_anchor == anchor:
                 self.sections[index] = new_entry

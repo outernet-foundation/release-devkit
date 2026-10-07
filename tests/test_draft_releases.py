@@ -268,7 +268,7 @@ def test_upsert_section_writes_notes_file_without_recreating(monkeypatch: pytest
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
     draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
-    draft.upsert_section("run-42", "### Heading")
+    draft.upsert_section("run-42", ["Heading"])
 
     assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
     assert not any("gh release create" in command for command in bash_log.commands)
@@ -279,7 +279,7 @@ def test_upsert_section_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
     draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
-    draft.upsert_section("run-42", "### Heading")
+    draft.upsert_section("run-42", ["Heading"])
 
     assert any(
         "gh release create dev-builds" in command and "--draft" in command and f"--target {CERTIFIED_SHA}" in command
@@ -304,7 +304,7 @@ def test_upsert_section_replaces_same_anchor_and_preserves_others(monkeypatch: p
     monkeypatch.setattr(drafts, "bash", capturing_bash)
 
     draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
-    draft.upsert_section("sha-new", "### New v2")
+    draft.upsert_section("sha-new", ["New v2"])
 
     assert written
     assert "### Old" in written[0]

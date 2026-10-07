@@ -17,7 +17,6 @@ from release_devkit.drafts import (
 )
 from release_devkit.plan import apps_with_changes, compute_release_plan, package_rows
 from release_devkit.publishing import DevStrategy, publish_packages
-from release_devkit.rendering import render_draft_section
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -80,30 +79,28 @@ def main(
     anchor = f"sha-{short}"
     draft.upsert_section(
         anchor,
-        render_draft_section(
-            [
-                f"[{short}]({context.commit_url})",
-                f"[PR #{pr_number}: {groups[1]}](https://github.com/{repository}/pull/{pr_number})",
-            ],
-            (
-                draft.asset_links(staged_assets)
-                + draft.carried_asset_links({
-                    stem for stem in (asset_stem(name) for name, _ in staged_assets) if stem is not None
-                })
-            )
-            or None,
-            manifest,
-            package_rows(
-                packages,
-                {
-                    {identity: name for name, package in packages.items() for identity in package.registries.values()}[
-                        identity
-                    ]: version
-                    for _, identity, version in published
-                },
-            )
-            or None,
-        ),
+        [
+            f"[{short}]({context.commit_url})",
+            f"[PR #{pr_number}: {groups[1]}](https://github.com/{repository}/pull/{pr_number})",
+        ],
+        (
+            draft.asset_links(staged_assets)
+            + draft.carried_asset_links({
+                stem for stem in (asset_stem(name) for name, _ in staged_assets) if stem is not None
+            })
+        )
+        or None,
+        manifest,
+        package_rows(
+            packages,
+            {
+                {identity: name for name, package in packages.items() for identity in package.registries.values()}[
+                    identity
+                ]: version
+                for _, identity, version in published
+            },
+        )
+        or None,
     )
 
     backlink_text = f"### Draft release `{DEV_DRAFT_TAG}` updated\n- [Section `{anchor}`]({draft.url}#{anchor})"
