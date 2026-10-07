@@ -12,7 +12,15 @@ from ci_devkit.ci_step import ci_step
 from release_devkit.builds import pull_build_assets
 from release_devkit.context import VerbContext
 from release_devkit.plan import apps_with_changes
-from release_devkit.rendering import DIGEST_PATTERN, AssetLink, PackageRow, parse_asset_links, render_draft_section
+from release_devkit.rendering import (
+    DIGEST_PATTERN,
+    AssetLink,
+    PackageRow,
+    parse_asset_links,
+    render_asset_links,
+    render_images_table,
+    render_packages_table,
+)
 
 DEV_DRAFT_TAG = "dev-builds"
 _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
@@ -67,31 +75,29 @@ def write_draft_section(
     sections: list[tuple[str, str]] = [
         (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "") for index in range(1, len(parts), 2)
     ]
-    new_entry = (
-        anchor,
-        render_draft_section(
-            heading_fragments,
-            (
-                [
-                    AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}")
-                    for name, _ in staged
-                ]
-                + (
-                    [
-                        link
-                        for link in parse_asset_links(sections[0][1])
-                        if asset_stem(link.name)
-                        not in {stem for name, _ in staged if (stem := asset_stem(name)) is not None}
-                    ]
-                    if sections
-                    else []
-                )
-            )
-            or None,
-            context.manifest,
-            packages or None,
-        ).strip(),
+    assets = [
+        AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}") for name, _ in staged
+    ] + (
+        [
+            link
+            for link in parse_asset_links(sections[0][1])
+            if asset_stem(link.name) not in {stem for name, _ in staged if (stem := asset_stem(name)) is not None}
+        ]
+        if sections
+        else []
     )
+    section_lines = [f"### {' — '.join(heading_fragments)}"]
+    if packages:
+        section_lines.append("")
+        section_lines.extend(render_packages_table(packages))
+    if assets:
+        section_lines.append("")
+        section_lines.extend(render_asset_links(assets))
+    if context.manifest:
+        section_lines.append("")
+        section_lines.append("#### Built images")
+        section_lines.extend(render_images_table(context.manifest))
+    new_entry = (anchor, "\n".join(section_lines).strip())
     for index, (existing_anchor, _) in enumerate(sections):
         if existing_anchor == anchor:
             sections[index] = new_entry

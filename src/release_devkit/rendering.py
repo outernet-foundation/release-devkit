@@ -58,10 +58,6 @@ def parse_asset_links(content: str) -> list[AssetLink]:
     return [AssetLink(name=name, url=url) for name, url in ASSET_LINK_PATTERN.findall(content)]
 
 
-def render_heading(fragments: list[str]) -> str:
-    return f"### {' \u2014 '.join(fragments)}"
-
-
 def render_images_table(manifest: dict[str, DigestEntry]) -> list[str]:
     lines = ["| Image | Tag | Digest |", "|---|---|---|"]
     for target, entry in manifest.items():
@@ -75,29 +71,9 @@ def render_images_table(manifest: dict[str, DigestEntry]) -> list[str]:
             parts = remainder.split("/", 1)
             if len(parts) >= 2:
                 url = f"https://github.com/orgs/{parts[0]}/packages/container/{parts[1].replace('/', '%2F')}"
-        tag_cell = f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "\u2014")
+        tag_cell = f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—")
         lines.append(f"| {target} | {tag_cell} | `{entry.digest}` |")
     return lines
-
-
-def render_draft_section(
-    heading_fragments: list[str],
-    assets: list[AssetLink] | None = None,
-    images: dict[str, DigestEntry] | None = None,
-    packages: list[PackageRow] | None = None,
-) -> str:
-    lines = [render_heading(heading_fragments)]
-    if packages:
-        lines.append("")
-        lines.extend(render_packages_table(packages))
-    if assets:
-        lines.append("")
-        lines.extend(render_asset_links(assets))
-    if images:
-        lines.append("")
-        lines.append("#### Built images")
-        lines.extend(render_images_table(images))
-    return "\n".join(lines)
 
 
 def render_release_body(rows: list[PackageRow], images: dict[str, DigestEntry] | None) -> str:
