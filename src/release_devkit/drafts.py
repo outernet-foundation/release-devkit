@@ -33,6 +33,7 @@ def write_release(
 ) -> None:
     repository = context.settings.github_repository
 
+    # Ensure a draft release exists and read its current body
     view_command = f"gh release view {tag} --repo {repository}"
     body = ""
     if bash_check(view_command):
@@ -40,6 +41,7 @@ def write_release(
     else:
         bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
 
+    # Stage every app's build artifacts as release assets
     staged: list[tuple[str, str, Path]] = []
     apps_with_builds = {name: app.builds for name, app in context.publish_config.apps.items() if app.builds}
     if apps_with_builds:
@@ -57,6 +59,8 @@ def write_release(
                 registry_username=context.settings.github_actor,
                 registry_token=context.settings.github_token,
             )
+
+            # Select the file inside the pulled layer that becomes the asset
             files = sorted(path for path in layer.rglob("*") if path.is_file())
             if artifact.file is not None:
                 source = next((path for path in files if path.name == artifact.file), None)
@@ -69,6 +73,8 @@ def write_release(
                     f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
                     f"({', '.join(path.name for path in files)}); declare which one with 'file'"
                 )
+
+            # Copy the asset under its release name and record it
             named = Path(artifact.name) if artifact.name else source
             name = named.name if publish else f"{named.stem}-{context.short}{named.suffix}"
             target = staging / name
@@ -76,15 +82,17 @@ def write_release(
             staged.append((app_name, name, target))
             print(f"  Asset: {name}")
 
+    # Upload the staged assets
     if staged:
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
 
+    # Assemble the notes section from the heading and the artifact tables
     prefix = "#" * (2 if publish else 4)
     blocks: list[str] = []
-
     if heading is not None:
         blocks.append(heading)
 
+    # List published packages with their registry links
     if published is not None:
         configured = context.publish_config.packages
         table_rows: list[list[str]] = []
@@ -111,6 +119,7 @@ def write_release(
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
+    # List staged apps with their asset links
     if staged:
         table_rows = [
             [
@@ -122,6 +131,7 @@ def write_release(
         ]
         blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], table_rows)}")
 
+    # List built images from the digest manifest
     if context.manifest:
         table_rows = []
         for image_name, entry in context.manifest.items():
@@ -142,8 +152,10 @@ def write_release(
             ])
         blocks.append(f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], table_rows)}")
 
+    # Join the blocks into one section
     section = "\n\n".join(blocks)
 
+    # Splice the section into the draft body at its SHA anchor
     if not publish:
         anchor = f"sha-{context.short}"
         parts = re.split(r'<a id="([^"]+)"></a>', body)
@@ -152,6 +164,7 @@ def write_release(
         sections = {anchor: section, **sections}
         section = "\n\n".join(f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections.items())
 
+    # Apply the notes to the release from a temp file
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
         file.write(section + "\n")
         notes_path = file.name
