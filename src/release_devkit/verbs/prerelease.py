@@ -28,27 +28,21 @@ def main(
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
     context = merge_push_context(config)
-    settings = context.settings
-    publish_config = context.publish_config
-    head = context.head
-    short = context.short
-    repository = settings.github_repository
-    manifest = context.manifest
 
-    packages = publish_config.packages
+    packages = context.publish_config.packages
 
-    release_plan = compute_release_plan(publish_config)
+    release_plan = compute_release_plan(context.publish_config)
 
-    draft = DraftRelease(DEV_DRAFT_TAG, repository, head)
+    draft = DraftRelease(DEV_DRAFT_TAG, context.settings.github_repository, context.head)
 
-    changed_apps = apps_with_changes(publish_config)
+    changed_apps = apps_with_changes(context.publish_config)
 
     has_app_changes = bool(changed_apps)
 
     if (
         not release_plan.publishing
         and not has_app_changes
-        and not (manifest is not None and draft.has_new_digests(manifest))
+        and not (context.manifest is not None and draft.has_new_digests(context.manifest))
     ):
         print("Nothing to publish")
         return
@@ -58,29 +52,29 @@ def main(
         published = publish_packages(
             packages,
             release_plan,
-            settings.nuget_api_key,
-            DevStrategy(short),
-            settings.github_workspace,
+            context.settings.nuget_api_key,
+            DevStrategy(context.short),
+            context.settings.github_workspace,
         )
 
-    groups = _MERGE_PR_PATTERN.findall(bash_output(f"git log -1 --format=%B {head}").strip())[0]
+    groups = _MERGE_PR_PATTERN.findall(bash_output(f"git log -1 --format=%B {context.head}").strip())[0]
     pr_number = int(groups[0])
 
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
         staged_assets = publish_draft_assets(
-            publish_config.model_copy(update={"apps": changed_apps}),
+            context.publish_config.model_copy(update={"apps": changed_apps}),
             context.certified,
-            settings.github_actor,
-            settings.github_token,
+            context.settings.github_actor,
+            context.settings.github_token,
             draft,
         )
 
     draft.upsert_section(
-        f"sha-{short}",
+        f"sha-{context.short}",
         [
-            f"[{short}]({context.commit_url})",
-            f"[PR #{pr_number}: {groups[1]}](https://github.com/{repository}/pull/{pr_number})",
+            f"[{context.short}]({context.commit_url})",
+            f"[PR #{pr_number}: {groups[1]}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
         ],
         (
             draft.asset_links(staged_assets)
@@ -89,7 +83,7 @@ def main(
             })
         )
         or None,
-        manifest,
+        context.manifest,
         package_rows(
             packages,
             {

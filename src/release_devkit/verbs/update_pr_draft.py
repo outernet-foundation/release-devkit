@@ -25,15 +25,13 @@ def update_pr_draft(
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
     context = pr_head_context(config)
-    settings = context.settings
-    publish_config = context.publish_config
-    pr_number = int(PR_REF_PATTERN.findall(settings.github_ref)[0][0])
-    repository = settings.github_repository
-    manifest = context.manifest
+    pr_number = int(PR_REF_PATTERN.findall(context.settings.github_ref)[0][0])
 
-    draft = DraftRelease(f"{PR_DRAFT_TAG_PREFIX}{pr_number}", repository, context.head)
+    draft = DraftRelease(f"{PR_DRAFT_TAG_PREFIX}{pr_number}", context.settings.github_repository, context.head)
 
-    if not bool(apps_with_changes(publish_config)) and not (manifest is not None and draft.has_new_digests(manifest)):
+    if not bool(apps_with_changes(context.publish_config)) and not (
+        context.manifest is not None and draft.has_new_digests(context.manifest)
+    ):
         print("Nothing to publish")
         return
 
@@ -41,17 +39,17 @@ def update_pr_draft(
         f"sha-{context.short}",
         [
             f"[{context.short}]({context.commit_url})",
-            f"[PR #{pr_number}](https://github.com/{repository}/pull/{pr_number})",
+            f"[PR #{pr_number}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
         ],
         draft.asset_links(
             publish_draft_assets(
-                publish_config,
+                context.publish_config,
                 context.certified,
-                settings.github_actor,
-                settings.github_token,
+                context.settings.github_actor,
+                context.settings.github_token,
                 draft,
             )
         )
         or None,
-        manifest,
+        context.manifest,
     )
