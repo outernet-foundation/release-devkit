@@ -84,23 +84,12 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             ).strip()
             tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
             versions = {**release_plan.app_last_versions, **release_plan.app_versions}
-            heading = None
         case ReleaseChannel.DEV:
-            # Head the snapshot section with the merge's PR title
-            pr_number, pr_title = re.findall(
-                r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
-            )[0]
             tag = DEV_DRAFT_TAG
             versions = release_plan.app_last_versions
-            heading = (
-                f"### [{context.short}]({context.commit_url})"
-                f" — [PR #{pr_number}: {pr_title}]"
-                f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
-            )
         case ReleaseChannel.PR:
             tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
             versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
-            heading = f"### [{context.short}]({context.commit_url})"
 
     publish = channel == ReleaseChannel.STABLE
     repository = context.settings.github_repository
@@ -160,8 +149,18 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     # Assemble the notes section from the heading and the artifact tables
     prefix = "#" * (2 if publish else 4)
     blocks: list[str] = []
-    if heading is not None:
-        blocks.append(heading)
+    if channel == ReleaseChannel.DEV:
+        # Head the snapshot section with the merge's PR title
+        pr_number, pr_title = re.findall(
+            r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
+        )[0]
+        blocks.append(
+            f"### [{context.short}]({context.commit_url})"
+            f" — [PR #{pr_number}: {pr_title}]"
+            f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
+        )
+    elif channel == ReleaseChannel.PR:
+        blocks.append(f"### [{context.short}]({context.commit_url})")
 
     # List published packages with their registry links
     if published is not None:
