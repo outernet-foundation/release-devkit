@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from release_devkit import plan as plan_module
-from release_devkit.config import AppConfig, PackageConfig, PublishConfig
+from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig
 from release_devkit.manifests import DependencyEdge
 from release_devkit.plan import (
     PackagePlan,
@@ -179,7 +179,14 @@ def test_release_plan_refuses_cyclic_dependencies(tmp_path: Path, monkeypatch: p
 
 RELEASE_CONFIG = PublishConfig(
     packages={"pkg": PackageConfig(path=Path("pkg"), major_minor="0.1", registry="npm", identity="pkg")},
-    apps={"app": AppConfig(path=Path("app"), major_minor="0.2")},
+    apps={
+        "app": AppConfig(
+            path=Path("app"),
+            major_minor="0.2",
+            builds=[BuildArtifactConfig(project="App", platform="AndroidMobile")],
+        )
+    },
+    builds_registry="ghcr.io/owner/repo/builds",
 )
 
 

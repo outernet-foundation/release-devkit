@@ -117,7 +117,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], packages_rows)}")
 
     # Stage every app's build artifacts as release assets
-    if any(app.builds for app in publish_config.apps.values()):
+    if publish_config.apps:
         with ci_step("Upload app builds"):
             apps_rows = stage_app_builds(settings, publish_config, channel, sha, short_sha, versions, tag, repository)
         blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], apps_rows)}")
@@ -231,12 +231,10 @@ def stage_app_builds(
     tag: str,
     repository: str,
 ) -> list[list[str]]:
-    apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds}
-
     staging = Path(mkdtemp(prefix="release-builds-"))
     staged: list[tuple[str, str, Path]] = []
     for app_name, artifact in [
-        (app_name, artifact) for app_name, artifacts in apps_with_builds.items() for artifact in artifacts
+        (app_name, artifact) for app_name, app in publish_config.apps.items() for artifact in app.builds
     ]:
         layer = staging / f"{artifact.project}-{artifact.platform}"
         # Pull the artifact layer from the builds shelf

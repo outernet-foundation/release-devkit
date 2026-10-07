@@ -56,7 +56,7 @@ class AppConfig(BaseModel):
 
     path: Path
     major_minor: str = Field(pattern=r"^\d+\.\d+$")
-    builds: list[BuildArtifactConfig] | None = Field(default=None, min_length=1)
+    builds: list[BuildArtifactConfig] = Field(min_length=1)
 
 
 class PublishConfig(BaseModel):
@@ -71,8 +71,8 @@ class PublishConfig(BaseModel):
         for name, package in self.packages.items():
             if package.registry not in KNOWN_REGISTRIES:
                 raise ValueError(f"package '{name}' declares unknown registry '{package.registry}'")
-        if self.builds_registry is None and any(app.builds for app in self.apps.values()):
-            raise ValueError("builds_registry is required when any app declares builds")
+        if self.builds_registry is None and self.apps:
+            raise ValueError("builds_registry is required when any app is declared")
         return self
 
 

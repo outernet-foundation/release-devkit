@@ -39,8 +39,10 @@ def write_config(tmp_path: Path) -> Path:
                     "capture-tool": {
                         "path": "apps/CaptureTool",
                         "major_minor": "0.2",
+                        "builds": [{"project": "CaptureTool", "platform": "AndroidMobile"}],
                     }
                 },
+                "builds_registry": "ghcr.io/owner/repo/builds",
             },
             default_flow_style=False,
             sort_keys=False,

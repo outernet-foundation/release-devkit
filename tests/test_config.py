@@ -42,8 +42,12 @@ def base_payload() -> dict[str, object]:
             "capture-tool": {
                 "path": "apps/CaptureTool",
                 "major_minor": "1.0",
+                "builds": [
+                    {"project": "CaptureTool", "platform": "AndroidMobile", "file": "Capture_Tool.apk"},
+                ],
             },
         },
+        "builds_registry": "ghcr.io/outernet-foundation/placeframe-capture-tool/builds",
     }
 
 
@@ -138,7 +142,6 @@ def test_load_config_rejects_duplicate_keys(tmp_path: Path):
 def test_load_config_parses_app_builds_shelf(tmp_path: Path):
     payload = base_payload()
     assert isinstance(payload["apps"], dict)
-    payload["builds_registry"] = "ghcr.io/outernet-foundation/placeframe-capture-tool/builds"
     payload["apps"]["capture-tool"]["builds"] = [
         {"project": "CaptureTool", "platform": "AndroidMobile", "file": "Capture_Tool.apk"},
         {"project": "capture-tool", "platform": "images-lock", "name": "images-lock-zed.lock"},
@@ -147,7 +150,6 @@ def test_load_config_parses_app_builds_shelf(tmp_path: Path):
     config = load_config(write_config(tmp_path, payload))
 
     builds = config.apps["capture-tool"].builds
-    assert builds is not None
     assert config.builds_registry == "ghcr.io/outernet-foundation/placeframe-capture-tool/builds"
     assert [(artifact.project, artifact.platform) for artifact in builds] == [
         ("CaptureTool", "AndroidMobile"),
@@ -155,3 +157,20 @@ def test_load_config_parses_app_builds_shelf(tmp_path: Path):
     ]
     assert builds[0].name is None
     assert builds[1].name == "images-lock-zed.lock"
+
+
+def test_load_config_rejects_app_without_builds(tmp_path: Path):
+    payload = base_payload()
+    assert isinstance(payload["apps"], dict)
+    del payload["apps"]["capture-tool"]["builds"]
+
+    with pytest.raises(ValidationError, match="builds"):
+        load_config(write_config(tmp_path, payload))
+
+
+def test_load_config_rejects_apps_without_builds_registry(tmp_path: Path):
+    payload = base_payload()
+    del payload["builds_registry"]
+
+    with pytest.raises(ValidationError, match="builds_registry is required"):
+        load_config(write_config(tmp_path, payload))

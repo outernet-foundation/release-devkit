@@ -101,12 +101,6 @@ def make_build_config() -> PublishConfig:
     )
 
 
-def make_empty_config() -> PublishConfig:
-    return PublishConfig(
-        apps={"myapp": AppConfig(path=Path("apps/myapp"), major_minor="1.0")},
-    )
-
-
 def patch_context(
     monkeypatch: pytest.MonkeyPatch,
     publish_config: PublishConfig,
@@ -241,8 +235,8 @@ def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.Monke
     assert "sha256:abc" in written[0]
 
 
-def test_update_pr_draft_no_app_builds_uploads_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    patch_context(monkeypatch, make_empty_config())
+def test_update_pr_draft_no_apps_uploads_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_context(monkeypatch, PublishConfig())
     patch_pr_bash_output(monkeypatch)
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
