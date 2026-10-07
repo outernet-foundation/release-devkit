@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from release_devkit import builds as builds_module
 from release_devkit import drafts
 from release_devkit import plan as plan_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig, Settings
@@ -131,7 +132,7 @@ def patch_common(
     )
     monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
     pull_assets = CallRecorder([])
-    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
+    monkeypatch.setattr(builds_module, "pull_build_assets", pull_assets)
     monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Merge PR #7: Add the thing\n"))
     return pull_assets
 

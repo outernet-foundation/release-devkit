@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from pathlib import Path
-from tempfile import NamedTemporaryFile, mkdtemp
+from tempfile import NamedTemporaryFile
 
 from bashrun.bash import bash, bash_check, bash_output
 
-from release_devkit.builds import pull_build_assets
+from release_devkit.builds import stage_build_assets
 from release_devkit.context import VerbContext
 from release_devkit.rendering import (
     DIGEST_PATTERN,
@@ -71,22 +70,7 @@ def write_draft_section(
 
     # Stage app assets pulled from the builds shelf
     apps = changed_apps if stage_changed_only else context.publish_config.apps
-    staged: list[tuple[str, Path]] = []
-    if apps:
-        staging = Path(mkdtemp(prefix="draft-assets-"))
-        for artifact, source in pull_build_assets(
-            apps,
-            context.publish_config.builds_registry,
-            context.certified,
-            context.settings.github_actor,
-            context.settings.github_token,
-        ):
-            named = Path(artifact.name) if artifact.name is not None else source
-            name = f"{named.stem}-{context.short}{named.suffix}"
-            target = staging / name
-            shutil.copy2(source, target)
-            staged.append((name, target))
-            print(f"  Asset: {name}")
+    staged = stage_build_assets(context, apps, context.short)
 
     # Upload staged assets onto the draft
     if staged:
@@ -138,17 +122,26 @@ def write_draft_section(
         sections.insert(0, new_entry)
 
     # Write the merged body back to the release
-    with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
-        file.write("\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]) + "\n")
-        notes_path = file.name
-    bash(f"gh release edit {tag} --repo {repository} --notes-file {notes_path}")
-    Path(notes_path).unlink()
+    run_with_notes_file(
+        f"gh release edit {tag} --repo {repository}",
+        "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]) + "\n",
+    )
     print(f"  Section {anchor} written to draft {tag}")
 
 
 def asset_stem(name: str) -> str | None:
     match = _ASSET_NAME_PATTERN.fullmatch(name)
     return match.group(1) if match is not None else None
+
+
+def run_with_notes_file(command: str, body: str) -> None:
+    with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
+        file.write(body)
+        notes_path = file.name
+    try:
+        bash(f"{command} --notes-file {notes_path}")
+    finally:
+        Path(notes_path).unlink()
 
 
 def delete_draft_release(tag: str, repository: str) -> None:

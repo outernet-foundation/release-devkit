@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from release_devkit import builds as builds_module
+from release_devkit import drafts
 from release_devkit.verbs import release
 from release_devkit.config import AppConfig, PublishConfig, Settings
 from release_devkit.context import VerbContext
@@ -65,8 +67,8 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(release, "create_and_push_tag", noop)
     monkeypatch.setattr(release, "latest_version", FixedReturn(None))
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
-    monkeypatch.setattr(release, "pull_build_assets", FixedReturn([]))
-    monkeypatch.setattr(release, "bash", noop)
+    monkeypatch.setattr(builds_module, "pull_build_assets", FixedReturn([]))
+    monkeypatch.setattr(drafts, "bash", noop)
     delete_recorder = CallRecorder()
     monkeypatch.setattr(release, "delete_draft_release", delete_recorder)
 

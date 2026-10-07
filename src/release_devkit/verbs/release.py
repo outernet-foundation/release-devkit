@@ -1,18 +1,16 @@
 from __future__ import annotations
 
-import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import NamedTemporaryFile, mkdtemp
 from typing import Annotated
 
 import typer
-from bashrun.bash import bash, bash_output
+from bashrun.bash import bash_output
 
-from release_devkit.builds import pull_build_assets
+from release_devkit.builds import stage_build_assets
 from release_devkit.config import DEFAULT_CONFIG_PATH
 from release_devkit.context import merge_push_context
-from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release
+from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release, run_with_notes_file
 from release_devkit.plan import compute_release_plan, package_rows
 from release_devkit.publishing import StableStrategy, publish_packages
 from release_devkit.rendering import PackageRow, render_images_table, render_packages_table
@@ -66,18 +64,7 @@ def main(
     ).strip()
     release_tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
 
-    staging = Path(mkdtemp(prefix="release-assets-"))
-    assets: list[Path] = []
-    for artifact, source in pull_build_assets(
-        publish_config.apps,
-        publish_config.builds_registry,
-        context.certified,
-        settings.github_actor,
-        settings.github_token,
-    ):
-        asset = staging / (artifact.name or source.name)
-        shutil.copy2(source, asset)
-        assets.append(asset)
+    assets = [target for _, target in stage_build_assets(context, publish_config.apps, None)]
 
     rows = package_rows(packages)
 
@@ -94,16 +81,10 @@ def main(
     )
     print(notes)
 
-    with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
-        file.write(notes)
-        notes_path = file.name
-    bash(
-        f"gh release create {release_tag} --title {release_tag}"
-        f" --notes-file {notes_path}"
-        f" --repo {repository}"
-        f" {' '.join(f'{asset}' for asset in assets)}"
+    run_with_notes_file(
+        f"gh release create {release_tag} --title {release_tag} --repo {repository} {' '.join(f'{asset}' for asset in assets)}",
+        notes,
     )
-    Path(notes_path).unlink()
     print(f"  Release created: {release_tag}")
 
     delete_draft_release(DEV_DRAFT_TAG, repository)
