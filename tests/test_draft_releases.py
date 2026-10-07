@@ -7,7 +7,6 @@ import pytest
 
 from release_devkit import drafts
 from release_devkit import plan as plan_module
-from release_devkit.verbs import update_pr_draft as update_pr_draft_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig, Settings
 from release_devkit.builds import DigestEntry
 from release_devkit.context import VerbContext
@@ -61,7 +60,7 @@ class FakeTags:
 def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
     monkeypatch.setattr(plan_module, "latest_version", tags.latest_version)
     monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
-    monkeypatch.setattr(update_pr_draft_module, "latest_version", tags.latest_version)
+    monkeypatch.setattr(drafts, "latest_version", tags.latest_version)
 
 
 def make_build_config() -> PublishConfig:
@@ -160,7 +159,7 @@ def test_delete_draft_release_noop_when_absent(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
+    monkeypatch.setattr(drafts, "pr_head_context", FixedReturn(make_context(make_build_config())))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
     patch_pull_build(monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp.apk"]})
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
@@ -176,9 +175,7 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
 
 def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
-    monkeypatch.setattr(
-        update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config(), manifest=manifest))
-    )
+    monkeypatch.setattr(drafts, "pr_head_context", FixedReturn(make_context(make_build_config(), manifest=manifest)))
     patch_pull_build(monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp.apk"]})
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
@@ -206,7 +203,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
 def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.MonkeyPatch) -> None:
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
     config = PublishConfig(apps={}, builds_registry="ghcr.io/owner/repo/builds")
-    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(config, manifest=manifest)))
+    monkeypatch.setattr(drafts, "pr_head_context", FixedReturn(make_context(config, manifest=manifest)))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
@@ -227,7 +224,7 @@ def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.Monke
 
 
 def test_update_pr_draft_no_app_builds_uploads_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_empty_config())))
+    monkeypatch.setattr(drafts, "pr_head_context", FixedReturn(make_context(make_empty_config())))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
@@ -239,7 +236,7 @@ def test_update_pr_draft_no_app_builds_uploads_nothing(monkeypatch: pytest.Monke
 
 def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.MonkeyPatch) -> None:
     context = make_context(make_build_config(), github_ref="refs/heads/dev")
-    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(context))
+    monkeypatch.setattr(drafts, "pr_head_context", FixedReturn(context))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
     with pytest.raises(IndexError):
@@ -251,7 +248,7 @@ def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.Monke
 def test_update_pr_draft_writes_notes_file_without_recreating(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=True)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
-    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(PublishConfig())))
+    monkeypatch.setattr(drafts, "pr_head_context", FixedReturn(make_context(PublishConfig())))
 
     update_pr_draft()
 
@@ -262,7 +259,7 @@ def test_update_pr_draft_writes_notes_file_without_recreating(monkeypatch: pytes
 def test_update_pr_draft_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=False)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
-    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(PublishConfig())))
+    monkeypatch.setattr(drafts, "pr_head_context", FixedReturn(make_context(PublishConfig())))
 
     update_pr_draft()
 
@@ -278,7 +275,7 @@ def test_update_pr_draft_replaces_same_anchor_and_preserves_others(monkeypatch: 
     view_json = json.dumps({"body": body, "url": DRAFT_URL})
     patch_bash(monkeypatch, check_returns=True)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
-    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(PublishConfig())))
+    monkeypatch.setattr(drafts, "pr_head_context", FixedReturn(make_context(PublishConfig())))
 
     written: list[str] = []
 
@@ -313,7 +310,7 @@ def test_update_pr_draft_lists_one_row_per_staged_artifact(monkeypatch: pytest.M
         },
         builds_registry="ghcr.io/owner/repo/builds",
     )
-    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(config)))
+    monkeypatch.setattr(drafts, "pr_head_context", FixedReturn(make_context(config)))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
     patch_pull_build(
         monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp-AndroidMobile.apk"], ("MyApp", "IOS"): ["MyApp-IOS.apk"]}

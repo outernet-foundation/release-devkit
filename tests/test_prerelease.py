@@ -173,21 +173,22 @@ def patch_common(
     config: PublishConfig,
     manifest: dict[str, DigestEntry] | None = None,
 ) -> FakePullBuild:
-    monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
+    monkeypatch.setattr(drafts, "merge_push_context", FixedReturn(make_context(config, manifest)))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())
-    monkeypatch.setattr(
-        drafts,
-        "bash_output",
-        FixedReturn('{"body": "", "url": "https://github.com/owner/repo/releases/untagged-abc"}'),
-    )
+
+    def dispatching_bash_output(command: str) -> str:
+        if command.startswith("git log"):
+            return "Merge PR #7: Add the thing\n"
+        return '{"body": "", "url": "https://github.com/owner/repo/releases/untagged-abc"}'
+
+    monkeypatch.setattr(drafts, "bash_output", dispatching_bash_output)
     layers = {
         (artifact.project, artifact.platform): [f"{artifact.project}.apk"]
         for app in config.apps.values()
         for artifact in app.builds or []
     }
     pull_build = patch_pull_build(monkeypatch, layers)
-    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Merge PR #7: Add the thing\n"))
     return pull_build
 
 
@@ -327,11 +328,13 @@ def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: py
     draft_body = (
         f"#### Built images\n| Image | Tag | Digest |\n|---|---|---|\n| other-capture | tree-2 | `{digest_existing}` |"
     )
-    monkeypatch.setattr(
-        drafts,
-        "bash_output",
-        FixedReturn(json.dumps({"body": draft_body, "url": "https://github.com/owner/repo/releases/untagged-abc"})),
-    )
+
+    def dispatching_bash_output(command: str) -> str:
+        if command.startswith("git log"):
+            return "Merge PR #7: Add the thing\n"
+        return json.dumps({"body": draft_body, "url": "https://github.com/owner/repo/releases/untagged-abc"})
+
+    monkeypatch.setattr(drafts, "bash_output", dispatching_bash_output)
     written: list[str] = []
 
     def capturing_bash(command: str) -> None:
@@ -400,7 +403,13 @@ def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch)
     patch_publish_internals(monkeypatch)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
     view_calls = CallRecorder('{"body": "", "url": "https://github.com/owner/repo/releases/untagged-abc"}')
-    monkeypatch.setattr(drafts, "bash_output", view_calls)
+
+    def counting_bash_output(command: str) -> str:
+        if command.startswith("git log"):
+            return "Merge PR #7: Add the thing\n"
+        return str(view_calls(command))
+
+    monkeypatch.setattr(drafts, "bash_output", counting_bash_output)
     monkeypatch.setattr(drafts, "bash", CallRecorder())
 
     prerelease.main()

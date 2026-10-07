@@ -3,34 +3,72 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
 
 from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.builds import pull_build
 
-from release_devkit.context import VerbContext
+from release_devkit.context import merge_push_context, pr_head_context
 from release_devkit.plan import UNCHANGED_FALLBACK_VERSION
-from release_devkit.publishing import build_registries
-from release_devkit.tags import latest_version
+from release_devkit.publishing import build_registries, publish_packages
+from release_devkit.tags import create_and_push_tag, latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
 
 
-def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
-    lines = [f"| {' | '.join(headers)} |", f"|{'|'.join('---' for _ in headers)}|"]
-    lines.extend(f"| {' | '.join(row)} |" for row in rows)
-    return "\n".join(lines)
+class ReleaseChannel(StrEnum):
+    STABLE = "stable"
+    DEV = "dev"
+    PR = "pr"
 
 
-def write_release(
-    context: VerbContext,
-    tag: str,
-    versions: dict[str, str | None],
-    heading: str | None,
-    published: list[tuple[str, str]] | None,
-    publish: bool,
-) -> None:
+def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
+    # Resolve the PR draft surface without publishing packages
+    if channel == ReleaseChannel.PR:
+        context = pr_head_context(config)
+        published = None
+        tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
+        versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
+        heading = f"### [{context.short}]({context.commit_url})"
+    else:
+        # Publish every changed package for the delivery channels
+        context = merge_push_context(config)
+        release_plan, published = publish_packages(context, dev=channel == ReleaseChannel.DEV)
+        if channel == ReleaseChannel.STABLE:
+            # Stop when the stable run has nothing to ship
+            if not release_plan.publishing and not release_plan.app_versions:
+                return
+
+            # Tag the bumped app versions before cutting the release
+            for app_name, app_version in release_plan.app_versions.items():
+                create_and_push_tag(f"{app_name}-v{app_version}")
+
+            # Compose this month's next CalVer tag
+            year_month = datetime.now(UTC).strftime("%Y.%m")
+            existing = bash_output(
+                f"gh release list --repo {context.settings.github_repository} --json tagName"
+                f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
+            ).strip()
+            tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
+            versions = {**release_plan.app_last_versions, **release_plan.app_versions}
+            heading = None
+        else:
+            # Head the snapshot section with the merge's PR title
+            pr_number, pr_title = re.findall(
+                r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
+            )[0]
+            tag = DEV_DRAFT_TAG
+            versions = release_plan.app_last_versions
+            heading = (
+                f"### [{context.short}]({context.commit_url})"
+                f" — [PR #{pr_number}: {pr_title}]"
+                f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
+            )
+
+    publish = channel == ReleaseChannel.STABLE
     repository = context.settings.github_repository
 
     # Ensure a draft release exists and read its current body
@@ -168,12 +206,23 @@ def write_release(
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
         file.write(section + "\n")
         notes_path = file.name
+
     try:
         bash(
             f"gh release edit {tag}{' --draft=false' if publish else ''} --repo {repository} --notes-file {notes_path}"
         )
     finally:
         Path(notes_path).unlink()
+
+    # Reset the dev draft once the stable release is cut
+    if channel == ReleaseChannel.STABLE:
+        delete_draft_release(DEV_DRAFT_TAG, repository)
+
+
+def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
+    lines = [f"| {' | '.join(headers)} |", f"|{'|'.join('---' for _ in headers)}|"]
+    lines.extend(f"| {' | '.join(row)} |" for row in rows)
+    return "\n".join(lines)
 
 
 def delete_draft_release(tag: str, repository: str) -> None:
