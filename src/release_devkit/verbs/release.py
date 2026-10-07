@@ -111,19 +111,25 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
     # Publish the changed packages and tag the stable versions
     if channel in (ReleaseChannel.DEV, ReleaseChannel.STABLE):
-        packages_table = publish_packages(settings, publish_config, release_plan, channel, short_sha, prefix)
+        with ci_step("Publish packages"):
+            packages_table = publish_packages(settings, publish_config, release_plan, channel, short_sha, prefix)
         if packages_table is not None:
             blocks.append(packages_table)
 
     # Stage every app's build artifacts as release assets
-    apps_table = stage_app_builds(settings, publish_config, channel, sha, short_sha, versions, tag, repository, prefix)
-    if apps_table is not None:
+    if any(app.builds for app in publish_config.apps.values()):
+        with ci_step("Upload app builds"):
+            apps_table = stage_app_builds(
+                settings, publish_config, channel, sha, short_sha, versions, tag, repository, prefix
+            )
         blocks.append(apps_table)
 
     # List the images built at this SHA from the builds shelf
-    images_table = render_built_images(settings, publish_config, sha, prefix)
-    if images_table is not None:
-        blocks.append(images_table)
+    if publish_config.builds_registry is not None:
+        with ci_step("List built images"):
+            images_table = render_built_images(settings, publish_config, sha, prefix)
+        if images_table is not None:
+            blocks.append(images_table)
 
     # Join the blocks into one section
     section = "\n\n".join(blocks)
@@ -163,63 +169,62 @@ def publish_packages(
     short_sha: str,
     prefix: str,
 ) -> str | None:
-    with ci_step("Publish packages"):
-        # Provision the runner and the registries for publishing
-        configure_git(settings.github_workspace)
-        install_dotnet("8.0")
-        install_node("24", "https://registry.npmjs.org")
-        registries = build_registries(settings.nuget_api_key)
-        table_rows: list[list[str]] = []
-        for name, package in publish_config.packages.items():
-            plan = release_plan.plans[name]
-            registry = registries[package.registry]
-            latest_version = get_latest_version(f"{name}-v")
+    # Provision the runner and the registries for publishing
+    configure_git(settings.github_workspace)
+    install_dotnet("8.0")
+    install_node("24", "https://registry.npmjs.org")
+    registries = build_registries(settings.nuget_api_key)
+    table_rows: list[list[str]] = []
+    for name, package in publish_config.packages.items():
+        plan = release_plan.plans[name]
+        registry = registries[package.registry]
+        latest_version = get_latest_version(f"{name}-v")
 
-            # List an unchanged package at its latest stable tag
-            if not plan.publish and latest_version is not None:
-                table_rows.append([
-                    name,
-                    latest_version,
-                    f"[{package.registry}]({registry.url(package.identity, latest_version)})",
-                ])
-                continue
-
-            # List a never-published package with the fallback version
-            if not plan.publish:
-                table_rows.append([
-                    name,
-                    UNCHANGED_FALLBACK_VERSION,
-                    package.registry,
-                ])
-                continue
-
-            # Publish the changed package and list the version it returned
-            version = registry.publish(
-                package.path,
-                plan.version,
-                release_plan.resolved_versions[name],
-                channel == ReleaseChannel.DEV,
-                short_sha,
-            )
-
-            if channel == ReleaseChannel.STABLE:
-                create_and_push_tag(f"{name}-v{plan.version}")
-
+        # List an unchanged package at its latest stable tag
+        if not plan.publish and latest_version is not None:
             table_rows.append([
                 name,
-                version,
-                f"[{package.registry}]({registry.url(package.identity, version)})",
+                latest_version,
+                f"[{package.registry}]({registry.url(package.identity, latest_version)})",
             ])
+            continue
 
-        # Tag the bumped app versions before cutting the stable release
+        # List a never-published package with the fallback version
+        if not plan.publish:
+            table_rows.append([
+                name,
+                UNCHANGED_FALLBACK_VERSION,
+                package.registry,
+            ])
+            continue
+
+        # Publish the changed package and list the version it returned
+        version = registry.publish(
+            package.path,
+            plan.version,
+            release_plan.resolved_versions[name],
+            channel == ReleaseChannel.DEV,
+            short_sha,
+        )
+
         if channel == ReleaseChannel.STABLE:
-            for app_name, app_version in release_plan.app_versions.items():
-                create_and_push_tag(f"{app_name}-v{app_version}")
+            create_and_push_tag(f"{name}-v{plan.version}")
 
-        # Render the packages table
-        if not table_rows:
-            return None
-        return f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}"
+        table_rows.append([
+            name,
+            version,
+            f"[{package.registry}]({registry.url(package.identity, version)})",
+        ])
+
+    # Tag the bumped app versions before cutting the stable release
+    if channel == ReleaseChannel.STABLE:
+        for app_name, app_version in release_plan.app_versions.items():
+            create_and_push_tag(f"{app_name}-v{app_version}")
+
+    # Render the packages table
+    if not table_rows:
+        return None
+    return f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}"
 
 
 def stage_app_builds(
@@ -232,106 +237,98 @@ def stage_app_builds(
     tag: str,
     repository: str,
     prefix: str,
-) -> str | None:
+) -> str:
     apps_with_builds = {name: app.builds for name, app in publish_config.apps.items() if app.builds}
-    if not apps_with_builds:
-        return None
 
-    with ci_step("Upload app builds"):
-        staging = Path(mkdtemp(prefix="release-builds-"))
-        staged: list[tuple[str, str, Path]] = []
-        for app_name, artifact in [
-            (app_name, artifact) for app_name, artifacts in apps_with_builds.items() for artifact in artifacts
-        ]:
-            layer = staging / f"{artifact.project}-{artifact.platform}"
-            # Pull the artifact layer from the builds shelf
-            pull_artifact(
-                publish_config.builds_registry or "",
-                artifact.project,
-                artifact.platform,
-                f"sha-{sha}",
-                layer,
-                registry_username=settings.github_actor,
-                registry_token=settings.github_token,
+    staging = Path(mkdtemp(prefix="release-builds-"))
+    staged: list[tuple[str, str, Path]] = []
+    for app_name, artifact in [
+        (app_name, artifact) for app_name, artifacts in apps_with_builds.items() for artifact in artifacts
+    ]:
+        layer = staging / f"{artifact.project}-{artifact.platform}"
+        # Pull the artifact layer from the builds shelf
+        pull_artifact(
+            publish_config.builds_registry or "",
+            artifact.project,
+            artifact.platform,
+            f"sha-{sha}",
+            layer,
+            registry_username=settings.github_actor,
+            registry_token=settings.github_token,
+        )
+
+        # Select the file inside the pulled layer that becomes the asset
+        files = sorted(path for path in layer.rglob("*") if path.is_file())
+        if artifact.file is not None:
+            source = next((path for path in files if path.name == artifact.file), None)
+            if source is None:
+                raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {layer}")
+        elif len(files) == 1:
+            source = files[0]
+        else:
+            raise SystemExit(
+                f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
+                f"({', '.join(path.name for path in files)}); declare which one with 'file'"
             )
 
-            # Select the file inside the pulled layer that becomes the asset
-            files = sorted(path for path in layer.rglob("*") if path.is_file())
-            if artifact.file is not None:
-                source = next((path for path in files if path.name == artifact.file), None)
-                if source is None:
-                    raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {layer}")
-            elif len(files) == 1:
-                source = files[0]
-            else:
-                raise SystemExit(
-                    f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
-                    f"({', '.join(path.name for path in files)}); declare which one with 'file'"
-                )
+        # Copy the asset under its release name and record it
+        named = Path(artifact.name) if artifact.name else source
+        name = named.name if channel == ReleaseChannel.STABLE else f"{named.stem}-{short_sha}{named.suffix}"
+        target = staging / name
+        shutil.copy2(source, target)
+        staged.append((app_name, name, target))
+        print(f"  Asset: {name}")
 
-            # Copy the asset under its release name and record it
-            named = Path(artifact.name) if artifact.name else source
-            name = named.name if channel == ReleaseChannel.STABLE else f"{named.stem}-{short_sha}{named.suffix}"
-            target = staging / name
-            shutil.copy2(source, target)
-            staged.append((app_name, name, target))
-            print(f"  Asset: {name}")
+    # Upload the staged assets
+    bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
 
-        # Upload the staged assets
-        bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
-
-        # List staged apps with their asset links
-        table_rows = [
-            [
-                app_name,
-                versions.get(app_name) or "—",
-                f"[{asset_name}](https://github.com/{repository}/releases/download/{tag}/{asset_name})",
-            ]
-            for app_name, asset_name, _ in staged
+    # List staged apps with their asset links
+    table_rows = [
+        [
+            app_name,
+            versions.get(app_name) or "—",
+            f"[{asset_name}](https://github.com/{repository}/releases/download/{tag}/{asset_name})",
         ]
-        return f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], table_rows)}"
+        for app_name, asset_name, _ in staged
+    ]
+    return f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], table_rows)}"
 
 
 def render_built_images(settings: Settings, publish_config: PublishConfig, sha: str, prefix: str) -> str | None:
-    if publish_config.builds_registry is None:
+    # Pull the digest manifest from the builds shelf
+    digest_staging = Path(mkdtemp(prefix="digest-manifest-"))
+    if not pull_artifact(
+        publish_config.builds_registry or "",
+        DIGEST_PROJECT,
+        DIGEST_PLATFORM,
+        f"sha-{sha}",
+        digest_staging,
+        required=False,
+        registry_username=settings.github_actor,
+        registry_token=settings.github_token,
+    ):
         return None
+    data = json.loads((digest_staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
+    manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
 
-    with ci_step("List built images"):
-        # Pull the digest manifest from the builds shelf
-        digest_staging = Path(mkdtemp(prefix="digest-manifest-"))
-        if not pull_artifact(
-            publish_config.builds_registry,
-            DIGEST_PROJECT,
-            DIGEST_PLATFORM,
-            f"sha-{sha}",
-            digest_staging,
-            required=False,
-            registry_username=settings.github_actor,
-            registry_token=settings.github_token,
-        ):
-            return None
-        data = json.loads((digest_staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
-        manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
-
-        # List built images from the digest manifest
-        table_rows: list[list[str]] = []
-        for image_name, entry in manifest.items():
-            tree_tag = next(
-                (tag_name for tag_name in entry.tags if tag_name.startswith("tree-")),
-                entry.tags[0] if entry.tags else "",
-            )
-            url = (
-                f"https://github.com/orgs/{ref_parts[0]}/packages/container/{ref_parts[1].replace('/', '%2F')}"
-                if entry.ref.startswith("ghcr.io/")
-                and len(ref_parts := entry.ref[len("ghcr.io/") :].split("/", 1)) >= 2
-                else None
-            )
-            table_rows.append([
-                image_name,
-                f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—"),
-                f"`{entry.digest}`",
-            ])
-        return f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], table_rows)}"
+    # List built images from the digest manifest
+    table_rows: list[list[str]] = []
+    for image_name, entry in manifest.items():
+        tree_tag = next(
+            (tag_name for tag_name in entry.tags if tag_name.startswith("tree-")),
+            entry.tags[0] if entry.tags else "",
+        )
+        url = (
+            f"https://github.com/orgs/{ref_parts[0]}/packages/container/{ref_parts[1].replace('/', '%2F')}"
+            if entry.ref.startswith("ghcr.io/") and len(ref_parts := entry.ref[len("ghcr.io/") :].split("/", 1)) >= 2
+            else None
+        )
+        table_rows.append([
+            image_name,
+            f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—"),
+            f"`{entry.digest}`",
+        ])
+    return f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], table_rows)}"
 
 
 def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
