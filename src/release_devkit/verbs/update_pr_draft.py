@@ -29,31 +29,24 @@ def update_pr_draft(
     settings = context.settings
     publish_config = context.publish_config
     pr_number = pr_number_from_ref(settings.github_ref)
-    head = context.head
-    certified = context.certified
-    short = context.short
-    commit_url = context.commit_url
     repository = settings.github_repository
     manifest = context.manifest
 
     tag = f"{PR_DRAFT_TAG_PREFIX}{pr_number}"
-    draft = DraftRelease(tag, repository, head)
+    draft = DraftRelease(tag, repository, context.head)
 
-    has_app_changes = bool(apps_with_changes(publish_config))
-    has_image_changes = manifest is not None and draft.has_new_digests(manifest)
-    if not has_app_changes and not has_image_changes:
+    if not bool(apps_with_changes(publish_config)) and not (manifest is not None and draft.has_new_digests(manifest)):
         print("Nothing to publish")
         return
 
-    pr_url = f"https://github.com/{repository}/pull/{pr_number}"
     heading_fragments = [
-        f"[{short}]({commit_url})",
-        f"[PR #{pr_number}]({pr_url})",
+        f"[{context.short}]({context.commit_url})",
+        f"[PR #{pr_number}](https://github.com/{repository}/pull/{pr_number})",
     ]
 
     staged = publish_draft_assets(
         publish_config,
-        certified,
+        context.certified,
         settings.github_actor,
         settings.github_token,
         draft,
@@ -61,15 +54,16 @@ def update_pr_draft(
 
     assets = draft.asset_links(staged)
 
-    section = render_draft_section(
-        DraftSection(
-            heading_fragments=heading_fragments,
-            assets=assets or None,
-            images=manifest,
-        )
+    draft.upsert_section(
+        f"sha-{context.short}",
+        render_draft_section(
+            DraftSection(
+                heading_fragments=heading_fragments,
+                assets=assets or None,
+                images=manifest,
+            )
+        ),
     )
-
-    draft.upsert_section(f"sha-{context.short}", section)
 
     summary_lines = [f"### Draft release `{tag}`", ""]
     summary_lines.extend(render_asset_links(assets))

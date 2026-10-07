@@ -28,7 +28,6 @@ def main(
     context = merge_push_context(config)
     settings = context.settings
     publish_config = context.publish_config
-    certified = context.certified
     repository = settings.github_repository
 
     packages = publish_config.packages
@@ -65,15 +64,14 @@ def main(
         f"gh release list --repo {repository} --json tagName"
         f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
     ).strip()
-    count = int(existing) if existing else 0
-    release_tag = f"{year_month}.{count + 1}"
+    release_tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
 
-    pulled = pull_build_assets(publish_config, certified, settings.github_actor, settings.github_token)
     staging = Path(mkdtemp(prefix="release-assets-"))
     assets: list[Path] = []
-    for artifact, source in pulled:
-        asset_name = artifact.name or source.name
-        asset = staging / asset_name
+    for artifact, source in pull_build_assets(
+        publish_config, context.certified, settings.github_actor, settings.github_token
+    ):
+        asset = staging / (artifact.name or source.name)
         shutil.copy2(source, asset)
         assets.append(asset)
 
@@ -87,7 +85,6 @@ def main(
     notes = render_release_body(rows, context.manifest)
     print(notes)
 
-    asset_args = " ".join(f'"{asset}"' for asset in assets)
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
         file.write(notes)
         notes_path = file.name
@@ -95,7 +92,7 @@ def main(
         f"gh release create {release_tag} --title {release_tag}"
         f" --notes-file {notes_path}"
         f" --repo {repository}"
-        f" {asset_args}"
+        f" {' '.join(f'{asset}' for asset in assets)}"
     )
     Path(notes_path).unlink()
     print(f"  Release created: {release_tag}")
