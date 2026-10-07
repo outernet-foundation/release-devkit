@@ -38,15 +38,15 @@ def main(
             context.settings.github_workspace,
         )
 
-    groups = _MERGE_PR_PATTERN.findall(bash_output(f"git log -1 --format=%B {context.head}").strip())[0]
-    pr_number = int(groups[0])
+    pr_number, pr_title = _MERGE_PR_PATTERN.findall(bash_output(f"git log -1 --format=%B {context.head}").strip())[0]
+    pr_number = int(pr_number)
 
     write_draft_section(
         context,
         DEV_DRAFT_TAG,
         [
             f"[{context.short}]({context.commit_url})",
-            f"[PR #{pr_number}: {groups[1]}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
+            f"[PR #{pr_number}: {pr_title}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
         ],
         packages=package_rows(
             packages,
