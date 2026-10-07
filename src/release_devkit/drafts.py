@@ -33,6 +33,7 @@ def write_draft_section(
     publishing: bool = False,
     packages: list[PackageRow] | None = None,
 ) -> None:
+    # Detect apps whose source changed since their last version tag
     repository = context.settings.github_repository
     changed_apps = {
         name: app
@@ -43,10 +44,16 @@ def write_draft_section(
             app.path,
         )
     }
+
+    # Create the draft release when it does not exist yet
     if not bash_check(f"gh release view {tag} --repo {repository}"):
         bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
         print(f"  Draft release {tag} created")
+
+    # Read the current release body
     body = json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body"))["body"]
+
+    # Skip the write when nothing changed
     if (
         not publishing
         and not changed_apps
@@ -56,6 +63,8 @@ def write_draft_section(
     ):
         print("Nothing to publish")
         return
+
+    # Stage app assets pulled from the builds shelf
     apps = changed_apps if stage_changed_only else context.publish_config.apps
     staged: list[tuple[str, Path]] = []
     if apps:
@@ -73,13 +82,19 @@ def write_draft_section(
             shutil.copy2(source, target)
             staged.append((name, target))
             print(f"  Asset: {name}")
+
+    # Upload staged assets onto the draft
     if staged:
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, path in staged)} --clobber --repo {repository}")
+
+    # Split the body into anchor-keyed sections
     anchor = f"sha-{context.short}"
     parts = _ANCHOR_PATTERN.split(body)
     sections: list[tuple[str, str]] = [
         (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "") for index in range(1, len(parts), 2)
     ]
+
+    # Carry forward asset links not re-staged this run
     assets = [
         AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}") for name, _ in staged
     ] + (
@@ -91,17 +106,24 @@ def write_draft_section(
         if sections
         else []
     )
+
+    # Render the new section body
     section_lines = [f"### {' — '.join(heading_fragments)}"]
+
     if packages:
         section_lines.append("")
         section_lines.extend(render_packages_table(packages))
+
     if assets:
         section_lines.append("")
         section_lines.extend(f"- [{link.name}]({link.url})" for link in assets)
+
     if context.manifest:
         section_lines.append("")
         section_lines.append("#### Built images")
         section_lines.extend(render_images_table(context.manifest))
+
+    # Replace this SHA's section or prepend a new one
     new_entry = (anchor, "\n".join(section_lines).strip())
     for index, (existing_anchor, _) in enumerate(sections):
         if existing_anchor == anchor:
@@ -109,6 +131,8 @@ def write_draft_section(
             break
     else:
         sections.insert(0, new_entry)
+
+    # Write the merged body back to the release
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
         file.write("\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]) + "\n")
         notes_path = file.name
