@@ -47,7 +47,6 @@ class BuildArtifactConfig(BaseModel):
 
     project: str
     platform: str
-    file: str | None = None
     name: str | None = None
 
 

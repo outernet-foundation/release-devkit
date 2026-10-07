@@ -251,19 +251,14 @@ def stage_apps(
             registry_token=settings.github_token,
         )
 
-        # Select the file inside the pulled layer that becomes the asset
-        files = sorted(path for path in layer.rglob("*") if path.is_file())
-        if artifact.file is not None:
-            source = next((path for path in files if path.name == artifact.file), None)
-            if source is None:
-                raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {layer}")
-        elif len(files) == 1:
-            source = files[0]
-        else:
+        # The layer holds exactly one file: the build's single player binary
+        files = sorted(path for path in layer.iterdir() if path.is_file())
+        if len(files) != 1:
             raise SystemExit(
-                f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
-                f"({', '.join(path.name for path in files)}); declare which one with 'file'"
+                f"shelf layer for ({artifact.project}, {artifact.platform}) must hold exactly one file, "
+                f"found {len(files)} ({', '.join(path.name for path in files)})"
             )
+        source = files[0]
 
         # Copy the asset under its release name and record it
         named = Path(artifact.name) if artifact.name else source

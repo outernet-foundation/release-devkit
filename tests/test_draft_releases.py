@@ -247,6 +247,19 @@ def test_update_pr_draft_no_apps_uploads_nothing(monkeypatch: pytest.MonkeyPatch
     assert any("gh release edit pr-7" in command for command in bash_log.commands)
 
 
+def test_update_pr_draft_refuses_multi_file_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_context(monkeypatch, make_build_config())
+    patch_pull_artifact(
+        monkeypatch, {("MyApp", "AndroidMobile"): {"MyApp.apk": "build content", "BuildReport.json": "{}"}}
+    )
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+
+    with pytest.raises(SystemExit, match="exactly one file"):
+        release_module.main(channel=ReleaseChannel.PR)
+
+
 def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_context(monkeypatch, make_build_config(), github_ref="refs/heads/dev")
     patch_pr_bash_output(monkeypatch)

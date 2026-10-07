@@ -43,7 +43,7 @@ def base_payload() -> dict[str, object]:
                 "path": "apps/CaptureTool",
                 "major_minor": "1.0",
                 "builds": [
-                    {"project": "CaptureTool", "platform": "AndroidMobile", "file": "Capture_Tool.apk"},
+                    {"project": "CaptureTool", "platform": "AndroidMobile"},
                 ],
             },
         },
@@ -143,7 +143,7 @@ def test_load_config_parses_app_builds_shelf(tmp_path: Path):
     payload = base_payload()
     assert isinstance(payload["apps"], dict)
     payload["apps"]["capture-tool"]["builds"] = [
-        {"project": "CaptureTool", "platform": "AndroidMobile", "file": "Capture_Tool.apk"},
+        {"project": "CaptureTool", "platform": "AndroidMobile"},
         {"project": "capture-tool", "platform": "images-lock", "name": "images-lock-zed.lock"},
     ]
 
@@ -165,6 +165,17 @@ def test_load_config_rejects_app_without_builds(tmp_path: Path):
     del payload["apps"]["capture-tool"]["builds"]
 
     with pytest.raises(ValidationError, match="builds"):
+        load_config(write_config(tmp_path, payload))
+
+
+def test_load_config_rejects_file_selection_key(tmp_path: Path):
+    payload = base_payload()
+    assert isinstance(payload["apps"], dict)
+    payload["apps"]["capture-tool"]["builds"] = [
+        {"project": "CaptureTool", "platform": "AndroidMobile", "file": "Capture_Tool.apk"}
+    ]
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         load_config(write_config(tmp_path, payload))
 
 
