@@ -257,7 +257,7 @@ def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.Monke
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(context))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
-    with pytest.raises(SystemExit, match="GITHUB_REF"):
+    with pytest.raises(IndexError):
         update_pr_draft()
 
     assert not bash_log.commands

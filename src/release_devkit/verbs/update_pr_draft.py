@@ -28,12 +28,7 @@ def update_pr_draft(
     context = pr_head_context(config)
     settings = context.settings
     publish_config = context.publish_config
-    match = PR_REF_PATTERN.fullmatch(settings.github_ref)
-    if match is None:
-        raise SystemExit(
-            f"GITHUB_REF {settings.github_ref!r} is not a pull_request ref — this verb runs on pull_request events"
-        )
-    pr_number = int(match.group(1))
+    pr_number = int(PR_REF_PATTERN.findall(settings.github_ref)[0][0])
     repository = settings.github_repository
     manifest = context.manifest
 
