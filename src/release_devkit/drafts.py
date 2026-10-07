@@ -11,20 +11,29 @@ from tempfile import NamedTemporaryFile, mkdtemp
 from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.builds import pull_artifact
 from ci_devkit.setup import configure_git, install_dotnet, install_node
+from pydantic import BaseModel
 
-from release_devkit.builds import DIGEST_FILE_NAME, DIGEST_PLATFORM, DIGEST_PROJECT, DigestEntry
 from release_devkit.config import Settings, load_config
 from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, compute_release_plan
 from release_devkit.publishing import build_registries
 from release_devkit.tags import create_and_push_tag, get_latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
+DIGEST_PROJECT = "images-digests"
+DIGEST_PLATFORM = "all"
+DIGEST_FILE_NAME = "images-digests.json"
 
 
 class ReleaseChannel(StrEnum):
     STABLE = "stable"
     DEV = "dev"
     PR = "pr"
+
+
+class DigestEntry(BaseModel):
+    ref: str
+    digest: str
+    tags: list[str]
 
 
 def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
