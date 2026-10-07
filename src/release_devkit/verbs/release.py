@@ -24,13 +24,10 @@ def main(
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
     context = merge_push_context(config)
-    settings = context.settings
-    publish_config = context.publish_config
-    repository = settings.github_repository
 
-    packages = publish_config.packages
+    packages = context.publish_config.packages
 
-    release_plan = compute_release_plan(publish_config)
+    release_plan = compute_release_plan(context.publish_config)
 
     if not release_plan.publishing and not release_plan.app_versions:
         return
@@ -40,9 +37,9 @@ def main(
         published = publish_packages(
             packages,
             release_plan,
-            settings.nuget_api_key,
+            context.settings.nuget_api_key,
             StableStrategy(),
-            settings.github_workspace,
+            context.settings.github_workspace,
         )
 
     for name in packages:
@@ -55,21 +52,22 @@ def main(
 
     year_month = datetime.now(UTC).strftime("%Y.%m")
     existing = bash_output(
-        f"gh release list --repo {repository} --json tagName"
+        f"gh release list --repo {context.settings.github_repository} --json tagName"
         f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
     ).strip()
     release_tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
-    staged = stage_build_assets(context, publish_config.apps, None)
+    staged = stage_build_assets(context, context.publish_config.apps, None)
     assets = [target for _, _, target in staged]
-    app_versions = {app_name: latest_version(f"{app_name}-v") for app_name in publish_config.apps}
-    app_rows = collect_app_rows(staged, app_versions, repository, release_tag)
+    app_versions = {app_name: latest_version(f"{app_name}-v") for app_name in context.publish_config.apps}
+    app_rows = collect_app_rows(staged, app_versions, context.settings.github_repository, release_tag)
 
     rows = package_rows(packages, package_version_overrides(packages, published))
 
     notes = render_release_body(None, rows, app_rows, context.manifest, level=2) + "\n"
     run_with_notes_file(
-        f"gh release create {release_tag} --title {release_tag} --repo {repository} {' '.join(f'{asset}' for asset in assets)}",
+        f"gh release create {release_tag} --title {release_tag} --repo {context.settings.github_repository}"
+        f" {' '.join(f'{asset}' for asset in assets)}",
         notes,
     )
 
-    delete_draft_release(DEV_DRAFT_TAG, repository)
+    delete_draft_release(DEV_DRAFT_TAG, context.settings.github_repository)
