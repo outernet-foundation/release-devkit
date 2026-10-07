@@ -12,7 +12,6 @@ from release_devkit.context import merge_push_context
 from release_devkit.drafts import (
     DEV_DRAFT_TAG,
     DraftRelease,
-    asset_stem,
     publish_draft_assets,
 )
 from release_devkit.plan import apps_with_changes, compute_release_plan, package_rows
@@ -70,13 +69,7 @@ def main(
             f"[{context.short}]({context.commit_url})",
             f"[PR #{pr_number}: {groups[1]}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
         ],
-        (
-            draft.asset_links(staged_assets)
-            + draft.carried_asset_links({
-                stem for stem in (asset_stem(name) for name, _ in staged_assets) if stem is not None
-            })
-        )
-        or None,
+        staged_assets,
         context.manifest,
         package_rows(
             packages,
@@ -86,6 +79,5 @@ def main(
                 ]: version
                 for _, identity, version in published
             },
-        )
-        or None,
+        ),
     )

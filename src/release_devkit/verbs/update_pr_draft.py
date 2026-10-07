@@ -41,6 +41,6 @@ def update_pr_draft(
             f"[{context.short}]({context.commit_url})",
             f"[PR #{pr_number}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
         ],
-        draft.asset_links(publish_draft_assets(context, context.publish_config.apps, draft)) or None,
+        publish_draft_assets(context, context.publish_config.apps, draft),
         context.manifest,
     )

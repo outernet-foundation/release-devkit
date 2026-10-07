@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
 
@@ -38,27 +39,28 @@ class DraftRelease:
         existing = self.existing_digests()
         return any(entry.digest not in existing for entry in manifest.values())
 
-    def asset_url(self, name: str) -> str:
-        return f"https://github.com/{self.repository}/releases/download/{self.tag}/{name}"
-
-    def asset_links(self, staged: list[tuple[str, Path]]) -> list[AssetLink]:
-        return [AssetLink(name, self.asset_url(name)) for name, _ in staged]
-
-    def carried_asset_links(self, exclude_stems: set[str]) -> list[AssetLink]:
-        if not self.sections:
-            return []
-        content = self.sections[0][1]
-        return [link for link in parse_asset_links(content) if asset_stem(link.name) not in exclude_stems]
-
     def upsert_section(
         self,
         anchor: str,
         heading_fragments: list[str],
-        assets: list[AssetLink] | None = None,
-        images: dict[str, DigestEntry] | None = None,
+        staged: Sequence[tuple[str, Path]] = (),
+        manifest: dict[str, DigestEntry] | None = None,
         packages: list[PackageRow] | None = None,
     ) -> None:
-        new_entry = (anchor, render_draft_section(heading_fragments, assets, images, packages).strip())
+        fresh = [
+            AssetLink(name, f"https://github.com/{self.repository}/releases/download/{self.tag}/{name}")
+            for name, _ in staged
+        ]
+        staged_stems = {stem for stem in (asset_stem(name) for name, _ in staged) if stem is not None}
+        carried = (
+            [link for link in parse_asset_links(self.sections[0][1]) if asset_stem(link.name) not in staged_stems]
+            if self.sections
+            else []
+        )
+        new_entry = (
+            anchor,
+            render_draft_section(heading_fragments, fresh + carried or None, manifest, packages or None).strip(),
+        )
         for index, (existing_anchor, _) in enumerate(self.sections):
             if existing_anchor == anchor:
                 self.sections[index] = new_entry

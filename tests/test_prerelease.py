@@ -12,7 +12,7 @@ from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig,
 from release_devkit.builds import DigestEntry
 from release_devkit.context import VerbContext
 from release_devkit.plan import PackagePlan, ReleasePlan
-from release_devkit.rendering import AssetLink, PackageRow, render_draft_section
+from release_devkit.rendering import PackageRow, render_draft_section
 from release_devkit.verbs import prerelease
 
 
@@ -158,11 +158,11 @@ def run_prerelease(
         instance: drafts.DraftRelease,
         anchor: str,
         heading_fragments: list[str],
-        assets: list[AssetLink] | None = None,
-        images: dict[str, DigestEntry] | None = None,
-        packages: list[PackageRow] | None = None,
+        staged: list[tuple[str, Path]],
+        manifest: dict[str, DigestEntry] | None,
+        packages: list[PackageRow] | None,
     ) -> None:
-        upserts.append((anchor, render_draft_section(heading_fragments, assets, images, packages)))
+        upserts.append((anchor, render_draft_section(heading_fragments, None, manifest, packages)))
 
     monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
 
@@ -262,11 +262,11 @@ def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: py
         instance: drafts.DraftRelease,
         anchor: str,
         heading_fragments: list[str],
-        assets: list[AssetLink] | None = None,
-        images: dict[str, DigestEntry] | None = None,
-        packages: list[PackageRow] | None = None,
+        staged: list[tuple[str, Path]],
+        manifest: dict[str, DigestEntry] | None,
+        packages: list[PackageRow] | None,
     ) -> None:
-        sections.append(render_draft_section(heading_fragments, assets, images, packages))
+        sections.append(render_draft_section(heading_fragments, None, manifest, packages))
 
     monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
 
@@ -301,11 +301,11 @@ def test_unchanged_images_only_run_skips_the_section(monkeypatch: pytest.MonkeyP
         instance: drafts.DraftRelease,
         anchor: str,
         heading_fragments: list[str],
-        assets: list[AssetLink] | None = None,
-        images: dict[str, DigestEntry] | None = None,
-        packages: list[PackageRow] | None = None,
+        staged: list[tuple[str, Path]],
+        manifest: dict[str, DigestEntry] | None,
+        packages: list[PackageRow] | None,
     ) -> None:
-        upserts.append((anchor, render_draft_section(heading_fragments, assets, images, packages)))
+        upserts.append((anchor, render_draft_section(heading_fragments, None, manifest, packages)))
 
     monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
 
@@ -338,11 +338,11 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
         instance: drafts.DraftRelease,
         anchor: str,
         heading_fragments: list[str],
-        assets: list[AssetLink] | None = None,
-        images: dict[str, DigestEntry] | None = None,
-        packages: list[PackageRow] | None = None,
+        staged: list[tuple[str, Path]],
+        manifest: dict[str, DigestEntry] | None,
+        packages: list[PackageRow] | None,
     ) -> None:
-        upserts.append((anchor, render_draft_section(heading_fragments, assets, images, packages)))
+        upserts.append((anchor, render_draft_section(heading_fragments, None, manifest, packages)))
 
     monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
 
@@ -372,24 +372,20 @@ def test_snapshot_section_carries_forward_unchanged_app_assets(monkeypatch: pyte
         "bash_output",
         FixedReturn(json.dumps({"body": draft_body, "url": "https://github.com/owner/repo/releases/untagged-abc"})),
     )
-    upserts: list[tuple[str, str]] = []
+    written: list[str] = []
 
-    def record_upsert(
-        instance: drafts.DraftRelease,
-        anchor: str,
-        heading_fragments: list[str],
-        assets: list[AssetLink] | None = None,
-        images: dict[str, DigestEntry] | None = None,
-        packages: list[PackageRow] | None = None,
-    ) -> None:
-        upserts.append((anchor, render_draft_section(heading_fragments, assets, images, packages)))
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
 
-    monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
 
     prerelease.main()
 
-    assert len(upserts) == 1
-    assert old_link in upserts[0][1]
+    assert written
+    section = written[0].split(f'<a id="sha-{SHORT_SHA}"></a>', 1)[1].split('<a id="sha-999999999999"></a>', 1)[0]
+    assert old_link in section
 
 
 def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch) -> None:

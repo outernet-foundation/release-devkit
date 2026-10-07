@@ -312,7 +312,7 @@ def test_upsert_section_replaces_same_anchor_and_preserves_others(monkeypatch: p
     assert "### New v1" not in written[0]
 
 
-def test_carried_asset_links_take_newest_section_and_drop_excluded_stems(
+def test_upsert_section_carries_assets_from_newest_section_and_drops_staged_stems(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     old_link = "- [MyApp-AndroidMobile-111111111111.apk](https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-111111111111.apk)"
@@ -326,13 +326,28 @@ def test_carried_asset_links_take_newest_section_and_drop_excluded_stems(
     patch_bash(monkeypatch, check_returns=True)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
 
-    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
+    written: list[str] = []
 
-    carried = draft.carried_asset_links({"OtherApp-Android"})
-    assert [link.name for link in carried] == ["MyApp-AndroidMobile-111111111111.apk"]
-    assert carried[0].url == (
-        "https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-111111111111.apk"
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
+
+    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
+    draft.upsert_section(
+        "sha-run",
+        ["Run"],
+        [("OtherApp-Android-444444444444.apk", Path("staged/OtherApp-Android-444444444444.apk"))],
     )
+
+    assert written
+    section = written[0].split('<a id="sha-run"></a>', 1)[1].split('<a id="sha-newest"></a>', 1)[0]
+    assert old_link in section
+    assert "OtherApp-Android-444444444444.apk" in section
+    assert "OtherApp-Android-222222222222.apk" not in section
+    assert "OtherApp-Android-333333333333.apk" not in section
 
 
 def test_has_new_digests_compares_manifest_against_body(monkeypatch: pytest.MonkeyPatch) -> None:
