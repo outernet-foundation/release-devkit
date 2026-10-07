@@ -26,11 +26,12 @@ def main(
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
     context = merge_push_context(config)
-    repository = context.settings.github_repository
     settings = context.settings
     publish_config = context.publish_config
     certified = context.certified
+    repository = settings.github_repository
 
+    packages = publish_config.packages
     tags = GitTags()
 
     release_plan = compute_release_plan(publish_config, tags)
@@ -39,16 +40,16 @@ def main(
         print("Nothing to publish")
         return
 
-    if publish_config.packages:
+    if packages:
         publish_packages(
-            publish_config.packages,
+            packages,
             release_plan,
             settings.nuget_api_key,
             StableStrategy(),
             settings.github_workspace,
         )
 
-    for name in publish_config.packages:
+    for name in packages:
         plan = release_plan.plans[name]
         if plan.publish:
             tag = f"{name}-v{plan.version}"
@@ -77,7 +78,7 @@ def main(
         shutil.copy2(source, asset)
         assets.append(asset)
 
-    rows = package_rows(publish_config.packages, tags)
+    rows = package_rows(packages, tags)
 
     for app_name in publish_config.apps:
         version = tags.latest_version(f"{app_name}-v")

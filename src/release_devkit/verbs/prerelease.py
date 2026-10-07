@@ -39,18 +39,18 @@ def main(
     repository = settings.github_repository
     manifest = context.manifest
 
-    draft = DraftRelease(DEV_DRAFT_TAG, repository, head)
-
-    has_image_changes = manifest is not None and draft.has_new_digests(manifest)
-
     packages = publish_config.packages
     tags = GitTags()
 
     release_plan = compute_release_plan(publish_config, tags)
 
+    draft = DraftRelease(DEV_DRAFT_TAG, repository, head)
+
     changed_apps = apps_with_changes(publish_config, tags)
 
     has_app_changes = bool(changed_apps)
+
+    has_image_changes = manifest is not None and draft.has_new_digests(manifest)
 
     if not release_plan.publishing and not has_app_changes and not has_image_changes:
         print("Nothing to publish")
@@ -75,6 +75,16 @@ def main(
             print("Consume these by exact version pin - there is no discovery tooling by design")
             write_step_summary(settings.github_step_summary, recap)
 
+    merge_message = bash_output(f"git log -1 --format=%B {head}").strip()
+    merge_match = _MERGE_PR_PATTERN.search(merge_message)
+    pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
+
+    heading_fragments: list[str] = [f"[{short}]({commit_url})"]
+    if pr_info is not None:
+        pr_number, pr_title = pr_info
+        pr_url = f"https://github.com/{repository}/pull/{pr_number}"
+        heading_fragments.append(f"[PR #{pr_number}: {pr_title}]({pr_url})")
+
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
         draft_config = publish_config.model_copy(update={"apps": changed_apps})
@@ -85,16 +95,6 @@ def main(
             settings.github_token,
             draft,
         )
-
-    merge_message = bash_output(f"git log -1 --format=%B {head}").strip()
-    merge_match = _MERGE_PR_PATTERN.search(merge_message)
-    pr_info = (int(merge_match.group(1)), merge_match.group(2)) if merge_match is not None else None
-
-    heading_fragments: list[str] = [f"[{short}]({commit_url})"]
-    if pr_info is not None:
-        pr_number, pr_title = pr_info
-        pr_url = f"https://github.com/{repository}/pull/{pr_number}"
-        heading_fragments.append(f"[PR #{pr_number}: {pr_title}]({pr_url})")
 
     identity_to_name = {
         identity: name for name, package in packages.items() for identity in package.registries.values()

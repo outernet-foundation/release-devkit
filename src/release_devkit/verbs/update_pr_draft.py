@@ -28,42 +28,48 @@ def update_pr_draft(
 ) -> None:
     context = pr_head_context(config)
     settings = context.settings
-    repository = settings.github_repository
+    publish_config = context.publish_config
     pr_number = pr_number_from_ref(settings.github_ref)
+    head = context.head
     certified = context.certified
+    short = context.short
+    commit_url = context.commit_url
+    repository = settings.github_repository
+    manifest = context.manifest
 
-    if not any(app.builds for app in context.publish_config.apps.values()):
+    if not any(app.builds for app in publish_config.apps.values()):
         return
 
     tag = f"{PR_DRAFT_TAG_PREFIX}{pr_number}"
-    draft = DraftRelease(tag, repository, certified)
+    draft = DraftRelease(tag, repository, head)
 
-    has_app_changes = bool(apps_with_changes(context.publish_config, GitTags()))
-    has_image_changes = context.manifest is not None and draft.has_new_digests(context.manifest)
+    has_app_changes = bool(apps_with_changes(publish_config, GitTags()))
+    has_image_changes = manifest is not None and draft.has_new_digests(manifest)
     if not has_app_changes and not has_image_changes:
         print("Nothing to publish")
         return
 
+    pr_url = f"https://github.com/{repository}/pull/{pr_number}"
+    heading_fragments = [
+        f"[{short}]({commit_url})",
+        f"[PR #{pr_number}]({pr_url})",
+    ]
+
     staged = publish_draft_assets(
-        context.publish_config,
+        publish_config,
         certified,
         settings.github_actor,
         settings.github_token,
         draft,
     )
 
-    pr_url = f"https://github.com/{repository}/pull/{pr_number}"
-
     assets = draft.asset_links(staged)
 
     section = render_draft_section(
         DraftSection(
-            heading_fragments=[
-                f"[{context.short}]({context.commit_url})",
-                f"[PR #{pr_number}]({pr_url})",
-            ],
+            heading_fragments=heading_fragments,
             assets=assets or None,
-            images=context.manifest,
+            images=manifest,
         )
     )
 
