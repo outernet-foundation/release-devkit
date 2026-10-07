@@ -9,7 +9,7 @@ from ci_devkit.ci_step import ci_step
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from release_devkit.config import Settings
-from release_devkit.drafts import delete_draft_release
+from release_devkit.verbs.release import delete_draft_release
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
