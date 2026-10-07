@@ -26,8 +26,5 @@ def update_pr_draft(
     write_draft_section(
         context,
         f"{PR_DRAFT_TAG_PREFIX}{pr_number}",
-        [
-            f"[{context.short}]({context.commit_url})",
-            f"[PR #{pr_number}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
-        ],
+        [f"[{context.short}]({context.commit_url})"],
     )
