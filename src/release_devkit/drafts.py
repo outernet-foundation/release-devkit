@@ -13,7 +13,7 @@ from ci_devkit.builds import pull_build
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from release_devkit.context import build_context
-from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, ReleasePlan, compute_release_plan
+from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, compute_release_plan
 from release_devkit.publishing import build_registries
 from release_devkit.tags import create_and_push_tag, get_latest_version
 
@@ -36,7 +36,6 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         # Take HEAD as-is — the merge commit is not fetched in this channel and must not be resolved
         head = bash_output("git rev-parse HEAD").strip()
         context = build_context(head, head, config)
-        release_plan = ReleasePlan.empty()
         blocks.append(f"### [{context.short}]({context.commit_url})")
     else:
         # The certified tree is the merge's second parent, the merged PR head
@@ -44,23 +43,32 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         parents = bash_output(f"git log -1 --format=%P {head}").strip().split()
         context = build_context(head, parents[1] if len(parents) >= 2 else head, config)
 
-        # Head the snapshot section with the merge's PR title
-        if channel == ReleaseChannel.DEV:
-            pr_number, pr_title = re.findall(
-                r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
-            )[0]
-            blocks.append(
-                f"### [{context.short}]({context.commit_url})"
-                f" — [PR #{pr_number}: {pr_title}]"
-                f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
-            )
+    # Head the snapshot section with the merge's PR title
+    if channel == ReleaseChannel.DEV:
+        pr_number, pr_title = re.findall(
+            r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
+        )[0]
+        blocks.append(
+            f"### [{context.short}]({context.commit_url})"
+            f" — [PR #{pr_number}: {pr_title}]"
+            f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
+        )
 
+    if channel == ReleaseChannel.PR:
+        versions = {name: get_latest_version(f"{name}-v") for name in context.publish_config.apps}
+    else:
         # Publish every changed package to its registry and tag the stable versions
         release_plan = compute_release_plan(context.publish_config)
 
+        # Stop a dev run with nothing to ship
         # Stop a stable run with nothing to ship
         if channel == ReleaseChannel.STABLE and not release_plan.publishing and not release_plan.app_versions:
             return
+
+        if channel == ReleaseChannel.STABLE:
+            versions = {**release_plan.app_last_versions, **release_plan.app_versions}
+        else:
+            versions = release_plan.app_last_versions
 
         configure_git(context.settings.github_workspace)
         install_dotnet("8.0")
@@ -111,10 +119,10 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
-    # Tag the bumped app versions before cutting the stable release
-    if channel == ReleaseChannel.STABLE:
-        for app_name, app_version in release_plan.app_versions.items():
-            create_and_push_tag(f"{app_name}-v{app_version}")
+        # Tag the bumped app versions before cutting the stable release
+        if channel == ReleaseChannel.STABLE:
+            for app_name, app_version in release_plan.app_versions.items():
+                create_and_push_tag(f"{app_name}-v{app_version}")
 
     # Compose the channel's release tag
     match channel:
@@ -184,15 +192,6 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
         # Upload the staged assets
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
-
-        # Compose the channel's app version table
-        match channel:
-            case ReleaseChannel.STABLE:
-                versions = {**release_plan.app_last_versions, **release_plan.app_versions}
-            case ReleaseChannel.DEV:
-                versions = release_plan.app_last_versions
-            case ReleaseChannel.PR:
-                versions = {name: get_latest_version(f"{name}-v") for name in context.publish_config.apps}
 
         # List staged apps with their asset links
         table_rows = [
