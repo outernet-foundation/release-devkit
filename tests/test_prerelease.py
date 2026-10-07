@@ -90,6 +90,7 @@ def make_plan(publishing: set[str], unchanged: set[str] | None = None) -> Releas
     return ReleasePlan(
         plans=plans,
         publishing=publishing,
+        publishing_registries=set(),
         resolved_versions={name: {} for name in publishing},
         app_last_versions={},
         app_versions={},

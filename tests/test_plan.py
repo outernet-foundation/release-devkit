@@ -203,6 +203,30 @@ def test_release_plan_leaves_everything_unchanged_when_nothing_changed(monkeypat
     assert release_plan.app_versions == {}
 
 
+def test_release_plan_unions_registries_of_publishing_packages_only(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    changed_path = tmp_path / "changed"
+    changed_path.mkdir()
+    (changed_path / "package.json").write_text("{}", encoding="utf-8")
+    unchanged_path = tmp_path / "unchanged"
+    unchanged_path.mkdir()
+    (unchanged_path / "un.csproj").write_text("<Project />", encoding="utf-8")
+    config = PublishConfig(
+        packages={
+            "changed": PackageConfig(path=changed_path, major_minor="1.0", registries={"npm": "changed-id"}),
+            "unchanged": PackageConfig(path=unchanged_path, major_minor="1.0", registries={"nuget": "unchanged-id"}),
+        },
+        apps={"app": AppConfig(path=Path("app"), major_minor="0.2")},
+    )
+    patch_plan_tags(monkeypatch, FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={changed_path.as_posix(): True}))
+
+    release_plan = compute_release_plan(config)
+
+    assert release_plan.publishing == {"changed"}
+    assert release_plan.publishing_registries == {"npm"}
+
+
 def test_release_plan_bumps_app_on_its_own_path_change(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_plan_tags(monkeypatch, FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": False, "app": True}))
 

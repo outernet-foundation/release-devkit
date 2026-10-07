@@ -25,13 +25,10 @@ def deliver_changed_packages(
     if not release_plan.publishing:
         return context, release_plan, published
 
-    registries_to_publish = {
-        registry_name for name in release_plan.publishing for registry_name in packages[name].registries
-    }
     configure_git(context.settings.github_workspace)
-    if "nuget" in registries_to_publish:
+    if "nuget" in release_plan.publishing_registries:
         install_dotnet("8.0")
-    if "npm" in registries_to_publish:
+    if "npm" in release_plan.publishing_registries:
         install_node("24", "https://registry.npmjs.org")
 
     registries = build_registries(context.settings.nuget_api_key)
