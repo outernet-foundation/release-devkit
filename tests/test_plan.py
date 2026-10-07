@@ -192,7 +192,6 @@ def test_release_plan_bumps_apps_when_any_package_publishes(monkeypatch: pytest.
     assert release_plan.publishing == {"pkg"}
     assert release_plan.plans["pkg"].version == "0.1.0"
     assert release_plan.app_versions == {"app": "0.2.4"}
-    assert release_plan.anything_releases() is True
 
 
 def test_release_plan_leaves_everything_unchanged_when_nothing_changed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -202,7 +201,6 @@ def test_release_plan_leaves_everything_unchanged_when_nothing_changed(monkeypat
 
     assert release_plan.publishing == set()
     assert release_plan.app_versions == {}
-    assert release_plan.anything_releases() is False
 
 
 def test_release_plan_bumps_app_on_its_own_path_change(monkeypatch: pytest.MonkeyPatch) -> None:

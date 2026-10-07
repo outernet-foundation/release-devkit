@@ -32,7 +32,7 @@ def main(
 
     release_plan = compute_release_plan(publish_config)
 
-    if not release_plan.anything_releases():
+    if not release_plan.publishing and not release_plan.app_versions:
         return
 
     if packages:

@@ -37,9 +37,6 @@ class ReleasePlan:
     app_last_versions: dict[str, str | None]
     app_versions: dict[str, str]
 
-    def anything_releases(self) -> bool:
-        return bool(self.publishing) or bool(self.app_versions)
-
 
 def compute_release_plan(publish_config: PublishConfig) -> ReleasePlan:
     packages = publish_config.packages
