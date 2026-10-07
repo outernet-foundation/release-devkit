@@ -27,23 +27,39 @@ class ReleaseChannel(StrEnum):
 
 
 def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
+    # Assemble the release notes from the heading and the artifact tables
+    prefix = "#" * (2 if channel == ReleaseChannel.STABLE else 4)
+    blocks: list[str] = []
+
     # Resolve the run's identity and publish packages on the delivery channels
     match channel:
         case ReleaseChannel.PR:
             # Take HEAD as-is — the merge commit is not fetched in this channel and must not be resolved
             head = bash_output("git rev-parse HEAD").strip()
             context = build_context(head, head, config)
-            release_plan, published = ReleasePlan.empty(), None
+            release_plan = ReleasePlan.empty()
+            blocks.append(f"### [{context.short}]({context.commit_url})")
         case ReleaseChannel.STABLE | ReleaseChannel.DEV:
             # The certified tree is the merge's second parent, the merged PR head
             head = bash_output("git rev-parse HEAD").strip()
             parents = bash_output(f"git log -1 --format=%P {head}").strip().split()
             context = build_context(head, parents[1] if len(parents) >= 2 else head, config)
+            dev = channel == ReleaseChannel.DEV
+
+            # Head the snapshot section with the merge's PR title
+            if dev:
+                pr_number, pr_title = re.findall(
+                    r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
+                )[0]
+                blocks.append(
+                    f"### [{context.short}]({context.commit_url})"
+                    f" — [PR #{pr_number}: {pr_title}]"
+                    f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
+                )
 
             # Publish every changed package to its registries and tag the stable versions
-            dev = channel == ReleaseChannel.DEV
             release_plan = compute_release_plan(context.publish_config)
-            published: list[tuple[str, str]] | None = []
+            published: list[tuple[str, str]] = []
             if release_plan.publishing:
                 configure_git(context.settings.github_workspace)
                 if "nuget" in release_plan.publishing_registries:
@@ -64,6 +80,31 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                         ))
                     if not dev:
                         create_and_push_tag(f"{name}-v{plan.version}")
+
+            # List published packages with their registry links
+            table_rows: list[list[str]] = []
+            for name, package in context.publish_config.packages.items():
+                version = (
+                    next(
+                        (
+                            published_version
+                            for identity, published_version in reversed(published)
+                            if identity in package.registries.values()
+                        ),
+                        None,
+                    )
+                    or latest_version(f"{name}-v")
+                    or UNCHANGED_FALLBACK_VERSION
+                )
+                registry_cells = [
+                    f"[{registry_name}]({build_registries('')[registry_name].url(identity, version)})"
+                    if version != UNCHANGED_FALLBACK_VERSION
+                    else registry_name
+                    for registry_name, identity in package.registries.items()
+                ]
+                table_rows.append([name, version, ", ".join(registry_cells) or "—"])
+            if table_rows:
+                blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
     # Prepare the channel's release surface
     match channel:
@@ -100,49 +141,6 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         body = json.loads(bash_output(f"{view_command} --json body"))["body"]
     else:
         bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
-
-    # Assemble the notes section from the heading and the artifact tables
-    prefix = "#" * (2 if channel == ReleaseChannel.STABLE else 4)
-    blocks: list[str] = []
-    if channel == ReleaseChannel.DEV:
-        # Head the snapshot section with the merge's PR title
-        pr_number, pr_title = re.findall(
-            r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
-        )[0]
-        blocks.append(
-            f"### [{context.short}]({context.commit_url})"
-            f" — [PR #{pr_number}: {pr_title}]"
-            f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
-        )
-    elif channel == ReleaseChannel.PR:
-        blocks.append(f"### [{context.short}]({context.commit_url})")
-
-    # List published packages with their registry links
-    if published is not None:
-        configured = context.publish_config.packages
-        table_rows: list[list[str]] = []
-        for name, package in configured.items():
-            version = (
-                next(
-                    (
-                        published_version
-                        for identity, published_version in reversed(published)
-                        if identity in package.registries.values()
-                    ),
-                    None,
-                )
-                or latest_version(f"{name}-v")
-                or UNCHANGED_FALLBACK_VERSION
-            )
-            registry_cells = [
-                f"[{registry_name}]({build_registries('')[registry_name].url(identity, version)})"
-                if version != UNCHANGED_FALLBACK_VERSION
-                else registry_name
-                for registry_name, identity in package.registries.items()
-            ]
-            table_rows.append([name, version, ", ".join(registry_cells) or "—"])
-        if table_rows:
-            blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
     # Stage every app's build artifacts as release assets
     apps_with_builds = {name: app.builds for name, app in context.publish_config.apps.items() if app.builds}
