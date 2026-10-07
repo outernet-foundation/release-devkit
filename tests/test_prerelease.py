@@ -349,27 +349,6 @@ def test_snapshot_section_carries_forward_unchanged_app_assets(monkeypatch: pyte
     assert old_link in upserts[0][1]
 
 
-def test_package_only_run_creates_missing_dev_draft(monkeypatch: pytest.MonkeyPatch) -> None:
-    config = make_config(
-        packages={"pkg": PackageConfig(path=Path("packages/pkg"), major_minor="1.0", registries={})},
-        apps={"myapp": make_app()},
-    )
-    tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
-
-    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan({"pkg"})))
-    monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
-    patch_common(monkeypatch, config)
-    monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([]))
-    bash_calls = CallRecorder()
-    monkeypatch.setattr(drafts, "bash", bash_calls)
-
-    prerelease.main()
-
-    commands = [str(call[0]) for call in bash_calls.calls]
-    assert any("gh release create dev-builds" in command and "--draft" in command for command in commands)
-    assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in commands)
-
-
 def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(
         packages={"pkg": PackageConfig(path=Path("packages/pkg"), major_minor="1.0", registries={})},

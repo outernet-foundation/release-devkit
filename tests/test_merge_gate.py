@@ -199,6 +199,27 @@ def reject_ls_remote(command: str) -> bool:
     return "ls-remote" not in command
 
 
+def reject_merge_base(command: str) -> bool:
+    return "merge-base" not in command
+
+
+def test_gate_refuses_when_checkout_is_not_the_pr_head(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = gate_responses(pr_view_payload(["ready-to-merge"], GREEN_ROLLUP))
+    responses["git rev-parse HEAD"] = "b" * 40 + "\n"
+    exit_request, bash_log = run_gate(monkeypatch, responses)
+    assert exit_request is not None
+    assert "is not the PR head" in exit_message(exit_request)
+    assert not any("push" in command for command in bash_log.commands)
+
+
+def test_gate_refuses_a_pr_not_rebased_onto_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = gate_responses(pr_view_payload(["ready-to-merge"], GREEN_ROLLUP))
+    exit_request, bash_log = run_gate(monkeypatch, responses, bash_check_fn=reject_merge_base)
+    assert exit_request is not None
+    assert "rebase the PR onto dev" in exit_message(exit_request)
+    assert not any("push origin HEAD:refs/heads/dev" in command for command in bash_log.commands)
+
+
 def test_gate_deletes_merged_branch_after_merge(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP)
     exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))

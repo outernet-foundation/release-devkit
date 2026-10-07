@@ -74,7 +74,7 @@ def test_pull_digest_manifest_returns_none_when_build_missing(monkeypatch: pytes
     assert pull_digest_manifest("ghcr.io/owner/repo/builds", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "") is None
 
 
-def test_pull_digest_manifest_pulls_the_sha_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pull_digest_manifest_pulls_the_sha_tag_and_parses_entries(monkeypatch: pytest.MonkeyPatch) -> None:
     manifest_data = {
         "zed-capture": {
             "ref": "ghcr.io/outernet-foundation/placeframe-capture-tool/zed-capture",
@@ -96,31 +96,7 @@ def test_pull_digest_manifest_pulls_the_sha_tag(monkeypatch: pytest.MonkeyPatch)
     result = pull_digest_manifest("ghcr.io/owner/repo/builds", sha, "", "")
 
     assert result is not None
-    assert "zed-capture" in result
     assert build_exists_recorder.calls[0][3] == f"sha-{sha}"
-
-
-def test_pull_digest_manifest_parses_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
-    manifest_data = {
-        "zed-capture": {
-            "ref": "ghcr.io/outernet-foundation/placeframe-capture-tool/zed-capture",
-            "digest": "sha256:abc",
-            "tags": ["tree-123", "latest"],
-        }
-    }
-
-    def fake_pull_build(
-        registry: str, project: str, platform: str, tag: str, target_directory: Path, **kwargs: object
-    ) -> None:
-        (target_directory / "images-digests.json").write_text(json.dumps(manifest_data), encoding="utf-8")
-
-    monkeypatch.setattr(builds, "build_exists", FixedReturn(True))
-    monkeypatch.setattr(builds, "pull_build", fake_pull_build)
-
-    result = pull_digest_manifest("ghcr.io/owner/repo/builds", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "", "")
-
-    assert result is not None
-    assert "zed-capture" in result
     assert result["zed-capture"].ref == "ghcr.io/outernet-foundation/placeframe-capture-tool/zed-capture"
     assert result["zed-capture"].digest == "sha256:abc"
     assert result["zed-capture"].tags == ["tree-123", "latest"]

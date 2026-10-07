@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from release_devkit.plan import (
     package_rows,
     resolve_dependency_versions,
 )
+from release_devkit.registries import SENTINEL_VERSION
 
 
 def test_latest_version_skips_prerelease_tags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,6 +153,24 @@ def test_resolve_dependency_versions_first_release_pair_co_publishes():
     )
 
     assert resolved == {"org.outernet.placeframe": ResolvedDependency(version="1.0.0", co_publishing=True)}
+
+
+def test_release_plan_refuses_cyclic_dependencies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    for name, dependency in (("first", "org.example.second"), ("second", "org.example.first")):
+        package_dir = tmp_path / name
+        package_dir.mkdir()
+        (package_dir / "package.json").write_text(
+            json.dumps({"name": name, "version": "0.0.0-local", "dependencies": {dependency: SENTINEL_VERSION}}),
+            encoding="utf-8",
+        )
+    packages = {
+        "first": PackageConfig(path=Path("first"), major_minor="1.0", registries={"npm": "org.example.first"}),
+        "second": PackageConfig(path=Path("second"), major_minor="1.0", registries={"npm": "org.example.second"}),
+    }
+
+    with pytest.raises(ValueError, match="cyclic dependency edge"):
+        compute_release_plan(PublishConfig(packages=packages), FakeTagSource(versions={}, changed={}))
 
 
 RELEASE_CONFIG = PublishConfig(

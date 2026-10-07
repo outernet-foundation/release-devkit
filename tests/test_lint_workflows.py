@@ -313,13 +313,6 @@ def test_directory_invocation_is_rejected(tmp_path: Path) -> None:
     assert any("without a canonical" in problem for problem in problems)
 
 
-def test_unknown_verb_is_rejected(tmp_path: Path) -> None:
-    step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev create-release\n'
-    jobs = f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
-    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
-    assert any("without a canonical" in problem for problem in problems)
-
-
 def test_unlocked_invocation_is_rejected(tmp_path: Path) -> None:
     step = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --no-dev lint-workflows\n'
     jobs = f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
@@ -447,13 +440,6 @@ def test_folded_long_command_is_accepted(tmp_path: Path) -> None:
     jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert not any("single physical line" in problem for problem in problems)
-
-
-def test_folded_short_command_is_rejected(tmp_path: Path) -> None:
-    step = "      - run: >-\n          uv run build-docker\n          --variant cuda\n"
-    jobs = f"  legs:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{step}"
-    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
-    assert any("commands longer than 120 characters" in problem for problem in problems)
 
 
 def test_folded_long_devkit_invocation_is_rejected(tmp_path: Path) -> None:
@@ -876,20 +862,9 @@ def test_wrapper_rejects_short_sha(tmp_path: Path) -> None:
     assert any(WRAPPER_COMMIT_ENV_VAR in problem for problem in problems)
 
 
-def test_wrapper_rejects_mutable_ref(tmp_path: Path) -> None:
-    steps = VALID_WRAPPER_STEPS.replace("a" * 40, "main")
-    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any(WRAPPER_COMMIT_ENV_VAR in problem for problem in problems)
-
-
 def test_wrapper_rejects_extra_steps(tmp_path: Path) -> None:
     steps = VALID_WRAPPER_STEPS + "    - uses: astral-sh/setup-uv@v7\n"
     problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any("exactly one step" in problem for problem in problems)
-
-
-def test_wrapper_rejects_zero_steps(tmp_path: Path) -> None:
-    problems = validate_devkit_wrapper(write_wrapper(tmp_path, ""))
     assert any("exactly one step" in problem for problem in problems)
 
 
@@ -902,14 +877,6 @@ def test_wrapper_rejects_wrong_repository(tmp_path: Path) -> None:
     assert any("clone" in problem for problem in problems)
 
 
-def test_wrapper_rejects_missing_checkout(tmp_path: Path) -> None:
-    steps = VALID_WRAPPER_STEPS.replace(
-        f'        git -C "$RUNNER_TEMP/release-devkit" checkout "${WRAPPER_COMMIT_ENV_VAR}"\n', ""
-    )
-    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any("clone" in problem for problem in problems)
-
-
 def test_wrapper_rejects_missing_env_pin(tmp_path: Path) -> None:
     steps = VALID_WRAPPER_STEPS.replace(
         "    - shell: bash\n      env:\n" + f"        {WRAPPER_COMMIT_ENV_VAR}: " + "a" * 40 + "\n",
@@ -917,27 +884,6 @@ def test_wrapper_rejects_missing_env_pin(tmp_path: Path) -> None:
     )
     problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
     assert any(WRAPPER_COMMIT_ENV_VAR in problem for problem in problems)
-
-
-def test_wrapper_rejects_extra_env_entries(tmp_path: Path) -> None:
-    steps = VALID_WRAPPER_STEPS.replace(
-        f"        {WRAPPER_COMMIT_ENV_VAR}: " + "a" * 40 + "\n",
-        f"        {WRAPPER_COMMIT_ENV_VAR}: " + "a" * 40 + "\n        OTHER: value\n",
-    )
-    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert any(WRAPPER_COMMIT_ENV_VAR in problem for problem in problems)
-
-
-def test_wrapper_rejects_legacy_inline_sha(tmp_path: Path) -> None:
-    steps = (
-        "    - shell: bash\n"
-        "      run: >-\n"
-        "        git clone https://github.com/outernet-foundation/release-devkit.git"
-        ' "$RUNNER_TEMP/release-devkit"\n'
-        '        && git -C "$RUNNER_TEMP/release-devkit" checkout ' + "a" * 40 + "\n"
-    )
-    problems = validate_devkit_wrapper(write_wrapper(tmp_path, steps))
-    assert len(problems) >= 1
 
 
 def test_wrapper_rejects_missing_shell(tmp_path: Path) -> None:

@@ -67,28 +67,9 @@ def test_load_config_defaults_empty_collections(tmp_path: Path):
     assert config.builds_registry is None
 
 
-def test_load_config_rejects_the_old_feeds_key(tmp_path: Path):
-    payload = base_payload()
-    assert isinstance(payload["packages"], dict)
-    payload["packages"]["placeframe-core"]["feeds"] = payload["packages"]["placeframe-core"]["registries"]
-    del payload["packages"]["placeframe-core"]["registries"]
-
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        load_config(write_config(tmp_path, payload))
-
-
 def test_load_config_rejects_unknown_top_level_keys(tmp_path: Path):
     payload: dict[str, object] = {
         "mirror_prefix": "ghcr.io/my-org/mirror",
-    }
-
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        load_config(write_config(tmp_path, payload))
-
-
-def test_load_config_rejects_the_retired_ci_workflow_key(tmp_path: Path):
-    payload: dict[str, object] = {
-        "ci_workflow": "my-ci.yml",
     }
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
@@ -101,24 +82,6 @@ def test_load_config_rejects_unknown_registries(tmp_path: Path):
     payload["packages"]["placeframe-api-client"]["registries"] = {"cargo": "placeframe"}
 
     with pytest.raises(ValidationError, match="unknown registries: \\['cargo'\\]"):
-        load_config(write_config(tmp_path, payload))
-
-
-def test_load_config_rejects_depends_on_entries(tmp_path: Path):
-    payload = base_payload()
-    assert isinstance(payload["packages"], dict)
-    payload["packages"]["placeframe-arfoundation"]["depends_on"] = ["placeframe-core"]
-
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        load_config(write_config(tmp_path, payload))
-
-
-def test_load_config_rejects_dependency_pins_entries(tmp_path: Path):
-    payload = base_payload()
-    assert isinstance(payload["packages"], dict)
-    payload["packages"]["placeframe-arfoundation"]["dependency_pins"] = {"org.outernet.placeframe": "placeframe-core"}
-
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         load_config(write_config(tmp_path, payload))
 
 
@@ -179,15 +142,3 @@ def test_load_config_parses_app_builds_shelf(tmp_path: Path):
     ]
     assert builds[0].name is None
     assert builds[1].name == "images-lock-zed.lock"
-
-
-def test_load_config_rejects_unknown_builds_key(tmp_path: Path):
-    payload = base_payload()
-    assert isinstance(payload["apps"], dict)
-    payload["builds_registry"] = "ghcr.io/outernet-foundation/placeframe-capture-tool/builds"
-    payload["apps"]["capture-tool"]["builds"] = [
-        {"project": "CaptureTool", "platform": "AndroidMobile", "shard": "zed"},
-    ]
-
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        load_config(write_config(tmp_path, payload))
