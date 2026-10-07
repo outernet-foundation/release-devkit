@@ -1,11 +1,10 @@
-from enum import Enum
 from pathlib import Path
 
 from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from release_devkit.context import VerbContext, merge_push_context
-from release_devkit.plan import PackagePlan, ReleasePlan, ResolvedDependency, compute_release_plan
+from release_devkit.plan import ReleasePlan, compute_release_plan
 from release_devkit.registries import (
     DEV_VERSION_FORMATS,
     NPM_DEV_DIST_TAG,
@@ -14,44 +13,11 @@ from release_devkit.registries import (
 )
 
 
-class Channel(Enum):
-    STABLE = "stable"
-    DEV = "dev"
-
-
-class StableStrategy:
-    def package_version(self, registry_name: str, plan: PackagePlan) -> str:
-        return plan.version
-
-    def dependency_version(self, resolved: ResolvedDependency, registry_name: str) -> str:
-        return resolved.version
-
-    def dist_tag(self, registry_name: str) -> str | None:
-        return None
-
-
-class DevStrategy:
-    def __init__(self, build_sha: str) -> None:
-        self._build_sha = build_sha
-
-    def package_version(self, registry_name: str, plan: PackagePlan) -> str:
-        return DEV_VERSION_FORMATS[registry_name](plan.version, self._build_sha)
-
-    def dependency_version(self, resolved: ResolvedDependency, registry_name: str) -> str:
-        if resolved.co_publishing:
-            return DEV_VERSION_FORMATS[registry_name](resolved.version, self._build_sha)
-        return resolved.version
-
-    def dist_tag(self, registry_name: str) -> str | None:
-        return NPM_DEV_DIST_TAG if registry_name == "npm" else None
-
-
 def deliver_changed_packages(
     config: Path,
-    channel: Channel,
+    dev: bool,
 ) -> tuple[VerbContext, ReleasePlan, list[tuple[str, str, str]]]:
     context = merge_push_context(config)
-    strategy = DevStrategy(context.short) if channel is Channel.DEV else StableStrategy()
     packages = context.publish_config.packages
     release_plan = compute_release_plan(context.publish_config)
 
@@ -75,10 +41,14 @@ def deliver_changed_packages(
         if not plan.publish:
             continue
         for registry_name, identity in package.registries.items():
-            version = strategy.package_version(registry_name, plan)
+            version = DEV_VERSION_FORMATS[registry_name](plan.version, context.short) if dev else plan.version
             with ci_step(f"Publish {registry_name} ({name}) {version}"):
                 dependency_versions = {
-                    dep_identity: strategy.dependency_version(resolved, registry_name)
+                    dep_identity: (
+                        DEV_VERSION_FORMATS[registry_name](resolved.version, context.short)
+                        if dev and resolved.co_publishing
+                        else resolved.version
+                    )
                     for dep_identity, resolved in release_plan.resolved_versions[name].items()
                 }
                 registries[registry_name].publish(
@@ -87,7 +57,7 @@ def deliver_changed_packages(
                         identity=identity,
                         version=version,
                         dependency_versions=dependency_versions,
-                        dist_tag=strategy.dist_tag(registry_name),
+                        dist_tag=NPM_DEV_DIST_TAG if dev and registry_name == "npm" else None,
                     )
                 )
             published.append((registry_name, identity, version))

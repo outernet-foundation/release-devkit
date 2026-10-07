@@ -11,7 +11,7 @@ from release_devkit.builds import stage_build_assets
 from release_devkit.config import DEFAULT_CONFIG_PATH
 from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release, run_with_notes_file
 from release_devkit.plan import package_rows, package_version_overrides
-from release_devkit.publishing import Channel, deliver_changed_packages
+from release_devkit.publishing import deliver_changed_packages
 from release_devkit.rendering import collect_app_rows, render_release_body
 from release_devkit.tags import create_and_push_tag, latest_version
 
@@ -22,7 +22,7 @@ app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 def main(
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
-    context, release_plan, published = deliver_changed_packages(config, Channel.STABLE)
+    context, release_plan, published = deliver_changed_packages(config, dev=False)
 
     if not release_plan.publishing and not release_plan.app_versions:
         return
