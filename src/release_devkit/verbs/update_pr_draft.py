@@ -9,7 +9,7 @@ import typer
 from release_devkit.config import DEFAULT_CONFIG_PATH, write_step_summary
 from release_devkit.context import pr_head_context
 from release_devkit.drafts import (
-    append_draft_section,
+    DraftRelease,
     publish_draft_assets,
 )
 from release_devkit.rendering import AssetLink, DraftSection, render_asset_links, render_draft_section
@@ -34,14 +34,13 @@ def update_pr_draft(
         return
 
     tag = f"{PR_DRAFT_TAG_PREFIX}{pr_number}"
+    draft = DraftRelease(tag, repository, certified)
     staged = publish_draft_assets(
         context.publish_config,
         certified,
         settings.github_actor,
         settings.github_token,
-        tag,
-        repository,
-        certified,
+        draft,
     )
 
     pr_url = f"https://github.com/{repository}/pull/{pr_number}"
@@ -59,7 +58,7 @@ def update_pr_draft(
         )
     )
 
-    append_draft_section(tag, repository, f"sha-{context.short}", section)
+    draft.upsert_section(f"sha-{context.short}", section)
 
     summary_lines = [f"### Draft release `{tag}`", ""]
     summary_lines.extend(render_asset_links(assets))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import nullcontext
 from pathlib import Path
 from tempfile import mkdtemp
@@ -12,10 +13,12 @@ from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig,
 from release_devkit.builds import DigestEntry, pull_build_assets
 from release_devkit.context import VerbContext
 from release_devkit.drafts import (
-    append_draft_section,
     delete_draft_release,
 )
 from release_devkit.verbs.update_pr_draft import update_pr_draft
+
+DRAFT_URL = "https://github.com/owner/repo/releases/untagged-abc"
+DRAFT_VIEW_JSON = json.dumps({"body": "", "url": DRAFT_URL})
 
 
 def null_ci_step(label: str) -> object:
@@ -125,7 +128,7 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
     update_pr_draft()
@@ -146,7 +149,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
     written: list[str] = []
 
@@ -186,10 +189,50 @@ def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.Monke
     assert not bash_log.commands
 
 
-def test_append_draft_section_writes_notes_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    bash_log = patch_bash(monkeypatch, check_returns=False)
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
+def test_upsert_section_writes_notes_file_without_recreating(monkeypatch: pytest.MonkeyPatch) -> None:
+    bash_log = patch_bash(monkeypatch, check_returns=True)
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
-    append_draft_section("dev-builds", "owner/repo", "run-42", "### Heading")
+    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
+    draft.upsert_section("run-42", "### Heading")
 
     assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
+    assert not any("gh release create" in command for command in bash_log.commands)
+
+
+def test_upsert_section_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) -> None:
+    bash_log = patch_bash(monkeypatch, check_returns=False)
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+
+    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
+    draft.upsert_section("run-42", "### Heading")
+
+    assert any(
+        "gh release create dev-builds" in command and "--draft" in command and f"--target {CERTIFIED_SHA}" in command
+        for command in bash_log.commands
+    )
+    assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
+
+
+def test_upsert_section_replaces_same_anchor_and_preserves_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = '<a id="sha-old"></a>\n### Old\n\n<a id="sha-new"></a>\n### New v1'
+    view_json = json.dumps({"body": body, "url": DRAFT_URL})
+    patch_bash(monkeypatch, check_returns=True)
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
+
+    written: list[str] = []
+
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
+
+    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
+    draft.upsert_section("sha-new", "### New v2")
+
+    assert written
+    assert "### Old" in written[0]
+    assert "### New v2" in written[0]
+    assert "### New v1" not in written[0]

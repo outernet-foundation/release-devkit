@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from bashrun.bash import bash_check, bash_output
+from bashrun.bash import bash_output
 from ci_devkit.ci_step import ci_step
 
 from release_devkit.builds import DigestEntry
@@ -13,7 +13,7 @@ from release_devkit.config import DEFAULT_CONFIG_PATH, write_step_summary
 from release_devkit.context import merge_push_context
 from release_devkit.drafts import (
     DEV_DRAFT_TAG,
-    append_draft_section,
+    DraftRelease,
     publish_draft_assets,
 )
 from release_devkit.plan import compute_release_plan
@@ -41,12 +41,11 @@ def main(
     repository = settings.github_repository
     manifest = context.manifest
 
+    draft = DraftRelease(DEV_DRAFT_TAG, repository, head)
+
     new_image_manifest: dict[str, DigestEntry] = {}
     if manifest is not None:
-        existing_digests: set[str] = set()
-        if bash_check(f"gh release view {DEV_DRAFT_TAG} --repo {repository}"):
-            draft_body = bash_output(f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json body --jq .body")
-            existing_digests = set(re.findall(r"sha256:[a-f0-9]{64}", draft_body))
+        existing_digests = draft.existing_digests()
         new_image_manifest = {
             target: entry for target, entry in manifest.items() if entry.digest not in existing_digests
         }
@@ -101,9 +100,7 @@ def main(
             certified,
             settings.github_actor,
             settings.github_token,
-            DEV_DRAFT_TAG,
-            repository,
-            head,
+            draft,
         )
 
     merge_message = bash_output(f"git log -1 --format=%B {head}").strip()
@@ -148,9 +145,8 @@ def main(
         )
     )
     anchor = f"sha-{short}"
-    append_draft_section(DEV_DRAFT_TAG, repository, anchor, section)
+    draft.upsert_section(anchor, section)
 
-    draft_url = bash_output(f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json url --jq .url").strip()
-    backlink_text = f"### Draft release `{DEV_DRAFT_TAG}` updated\n- [Section `{anchor}`]({draft_url}#{anchor})"
+    backlink_text = f"### Draft release `{DEV_DRAFT_TAG}` updated\n- [Section `{anchor}`]({draft.url}#{anchor})"
     print(backlink_text)
     write_step_summary(settings.github_step_summary, backlink_text)

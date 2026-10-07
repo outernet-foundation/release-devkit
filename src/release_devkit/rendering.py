@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from release_devkit.builds import DigestEntry
+
+DIGEST_PATTERN = re.compile(r"sha256:[a-f0-9]{64}")
 
 
 @dataclass
