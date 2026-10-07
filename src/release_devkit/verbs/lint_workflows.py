@@ -157,6 +157,12 @@ class Problem:
     line_number: int | None = None
 
 
+@dataclass(frozen=True)
+class RepoContext:
+    publishing: bool
+    nuget: bool
+
+
 @app.command()
 def main(
     workflows: Annotated[
@@ -168,9 +174,10 @@ def main(
     ] = None,
 ) -> None:
     workflow_paths = workflows or default_workflows()
+    context = RepoContext(publishing=is_publishing(), nuget=declares_nuget())
     problems: list[str] = []
     for workflow_path in workflow_paths:
-        problems.extend(validate_workflow_file(workflow_path, publishing=is_publishing(), nuget=declares_nuget()))
+        problems.extend(validate_workflow_file(workflow_path, context))
     problems.extend(validate_devkit_wrapper())
     for problem in problems:
         print(problem)
@@ -242,6 +249,7 @@ def validate_devkit_wrapper(path: Path = DEVKIT_WRAPPER_PATH) -> list[str]:
 def validate_workflow_file(path: Path, publishing: bool = True, nuget: bool = False) -> list[str]:
     if not path.is_file():
         return rendered([file_problem(path, "workflow file not found")])
+    context = RepoContext(publishing=publishing, nuget=nuget)
     raw_lines = path.read_text(encoding="utf-8").splitlines()
     document: object = yaml.safe_load("\n".join(raw_lines))
     workflow, problems = parse_workflow(path, document)
@@ -249,12 +257,12 @@ def validate_workflow_file(path: Path, publishing: bool = True, nuget: bool = Fa
         return rendered(problems)
     verbs_by_job: dict[str, list[str]] = {}
     for job_name, job in workflow.jobs.items():
-        job_problems, verb_steps = validate_job(job_name, job, path, nuget)
+        job_problems, verb_steps = validate_job(job_name, job, path, context)
         problems.extend(job_problems)
         verbs_by_job[job_name] = [verb.name for verb in verb_steps]
     problems.extend(validate_run_steps_single_line(raw_lines, path))
     if path.name == "integrate.yml":
-        problems.extend(validate_integrate_contract(workflow, verbs_by_job, publishing, path))
+        problems.extend(validate_integrate_contract(workflow, verbs_by_job, context, path))
     if path.name == "release.yml":
         problems.extend(validate_release_contract(workflow, verbs_by_job, path))
     if path.name == "merge-gate.yml":
@@ -341,11 +349,11 @@ def parse_needs(needs_value: object) -> list[str]:
 
 
 def validate_integrate_contract(
-    workflow: WorkflowView, verbs_by_job: dict[str, list[str]], publishing: bool, path: Path
+    workflow: WorkflowView, verbs_by_job: dict[str, list[str]], context: RepoContext, path: Path
 ) -> list[Problem]:
     problems: list[Problem] = []
     jobs = workflow.jobs
-    if publishing and VALIDATE_RELEASE_PLAN_JOB not in jobs:
+    if context.publishing and VALIDATE_RELEASE_PLAN_JOB not in jobs:
         problems.append(
             file_problem(
                 path,
@@ -438,14 +446,14 @@ def validate_merge_gate_concurrency(workflow: WorkflowView, path: Path) -> list[
     return []
 
 
-def validate_job(job_name: str, job: JobView, path: Path, nuget: bool = False) -> tuple[list[Problem], list[VerbStep]]:
+def validate_job(job_name: str, job: JobView, path: Path, context: RepoContext) -> tuple[list[Problem], list[VerbStep]]:
     problems: list[Problem] = []
     if job.has_environment:
         problems.append(job_problem(path, job_name, "environment: key is forbidden (the fleet runs environment-less)"))
     steps = job.steps
     checkout_steps, checkout_problems = collect_checkout_steps(job_name, steps, path)
     problems.extend(checkout_problems)
-    verb_steps, verb_problems = collect_verb_steps(job_name, steps, path, nuget)
+    verb_steps, verb_problems = collect_verb_steps(job_name, steps, path, context)
     problems.extend(verb_problems)
     problems.extend(collect_dead_uses(job_name, steps, path))
     if not verb_steps:
@@ -522,7 +530,7 @@ def validate_job(job_name: str, job: JobView, path: Path, nuget: bool = False) -
         nuget_login_indexes.append(step.index)
     if (
         is_delivery_job
-        and nuget
+        and context.nuget
         and not any(earliest_wrapper_index < index < first_verb_index for index in nuget_login_indexes)
     ):
         problems.append(
@@ -533,7 +541,7 @@ def validate_job(job_name: str, job: JobView, path: Path, nuget: bool = False) -
                 " between the wrapper and the verb",
             )
         )
-    if not is_delivery_job or not nuget:
+    if not is_delivery_job or not context.nuget:
         if any(step.uses == NUGET_LOGIN_USES for step in steps):
             problems.append(
                 job_problem(
@@ -657,7 +665,7 @@ def collect_dead_uses(job_name: str, steps: list[StepView], path: Path) -> list[
 
 
 def collect_verb_steps(
-    job_name: str, steps: list[StepView], path: Path, nuget: bool = False
+    job_name: str, steps: list[StepView], path: Path, context: RepoContext
 ) -> tuple[list[VerbStep], list[Problem]]:
     verb_steps: list[VerbStep] = []
     problems: list[Problem] = []
@@ -686,13 +694,13 @@ def collect_verb_steps(
                     step_problem(path, job_name, step.index, f"{verb} carries rejected arguments ({args.strip()})")
                 )
                 continue
-            problems.extend(validate_verb_env(job_name, step.index, verb, step, path, nuget))
+            problems.extend(validate_verb_env(job_name, step.index, verb, step, path, context))
             verb_steps.append(VerbStep(step_index=step.index, name=verb))
     return verb_steps, problems
 
 
 def validate_verb_env(
-    job_name: str, step_index: int, verb: str, step: StepView, path: Path, nuget: bool = False
+    job_name: str, step_index: int, verb: str, step: StepView, path: Path, context: RepoContext
 ) -> list[Problem]:
     problems: list[Problem] = []
     env = step.env if step.env is not None else {}
@@ -701,7 +709,7 @@ def validate_verb_env(
             problems.append(step_problem(path, job_name, step_index, f"{verb} requires env {key}: {value}"))
     if verb in NUGET_DELIVERY_VERBS:
         api_key_value = env.get(NUGET_API_KEY_ENV)
-        if nuget and api_key_value != NUGET_API_KEY_SOURCE:
+        if context.nuget and api_key_value != NUGET_API_KEY_SOURCE:
             problems.append(
                 step_problem(
                     path,
@@ -710,7 +718,7 @@ def validate_verb_env(
                     f"{verb} requires env {NUGET_API_KEY_ENV}: {NUGET_API_KEY_SOURCE}",
                 )
             )
-        if not nuget and api_key_value is not None:
+        if not context.nuget and api_key_value is not None:
             problems.append(
                 step_problem(
                     path,
