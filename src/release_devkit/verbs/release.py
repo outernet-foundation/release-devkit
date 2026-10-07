@@ -8,7 +8,6 @@ from typing import Annotated
 
 import typer
 from bashrun.bash import bash, bash_output
-from ci_devkit.ci_step import ci_step
 
 from release_devkit.builds import pull_build_assets
 from release_devkit.config import DEFAULT_CONFIG_PATH
@@ -35,8 +34,7 @@ def main(
 
     tags = GitTags()
 
-    with ci_step("Compute publish plan"):
-        release_plan = compute_and_print_plan(publish_config, tags, settings.github_step_summary)
+    release_plan = compute_and_print_plan(publish_config, tags, settings.github_step_summary)
 
     if not release_plan.anything_releases():
         print("Nothing to publish")
@@ -51,18 +49,17 @@ def main(
             settings.github_workspace,
         )
 
-    with ci_step("Create version tags"):
-        for name in publish_config.packages:
-            plan = release_plan.plans[name]
-            if plan.publish:
-                tag = f"{name}-v{plan.version}"
-                tags.create_and_push_tag(tag)
-                print(f"  Tagged: {tag}")
-
-        for app_name, app_version in release_plan.app_versions.items():
-            tag = f"{app_name}-v{app_version}"
+    for name in publish_config.packages:
+        plan = release_plan.plans[name]
+        if plan.publish:
+            tag = f"{name}-v{plan.version}"
             tags.create_and_push_tag(tag)
             print(f"  Tagged: {tag}")
+
+    for app_name, app_version in release_plan.app_versions.items():
+        tag = f"{app_name}-v{app_version}"
+        tags.create_and_push_tag(tag)
+        print(f"  Tagged: {tag}")
 
     year_month = datetime.now(UTC).strftime("%Y.%m")
     existing = bash_output(
@@ -81,39 +78,38 @@ def main(
         shutil.copy2(source, asset)
         assets.append(asset)
 
-    with ci_step("Create GitHub Release"):
-        rows: list[PackageRow] = []
-        for name, package in publish_config.packages.items():
-            version = tags.latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
-            registries = [
-                RegistryLink(
-                    registry_name,
-                    version,
-                    registry_url(registry_name, identity, version) if version != UNCHANGED_FALLBACK_VERSION else None,
-                )
-                for registry_name, identity in package.registries.items()
-            ]
-            rows.append(PackageRow(name, version, registries))
+    rows: list[PackageRow] = []
+    for name, package in publish_config.packages.items():
+        version = tags.latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
+        registries = [
+            RegistryLink(
+                registry_name,
+                version,
+                registry_url(registry_name, identity, version) if version != UNCHANGED_FALLBACK_VERSION else None,
+            )
+            for registry_name, identity in package.registries.items()
+        ]
+        rows.append(PackageRow(name, version, registries))
 
-        for app_name in publish_config.apps:
-            version = tags.latest_version(f"{app_name}-v")
-            if version:
-                rows.append(PackageRow(app_name, version))
+    for app_name in publish_config.apps:
+        version = tags.latest_version(f"{app_name}-v")
+        if version:
+            rows.append(PackageRow(app_name, version))
 
-        notes = render_release_body(rows, context.manifest)
-        print(notes)
+    notes = render_release_body(rows, context.manifest)
+    print(notes)
 
-        asset_args = " ".join(f'"{asset}"' for asset in assets)
-        with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
-            file.write(notes)
-            notes_path = file.name
-        bash(
-            f"gh release create {release_tag} --title {release_tag}"
-            f" --notes-file {notes_path}"
-            f" --repo {repository}"
-            f" {asset_args}"
-        )
-        Path(notes_path).unlink()
-        print(f"  Release created: {release_tag}")
+    asset_args = " ".join(f'"{asset}"' for asset in assets)
+    with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
+        file.write(notes)
+        notes_path = file.name
+    bash(
+        f"gh release create {release_tag} --title {release_tag}"
+        f" --notes-file {notes_path}"
+        f" --repo {repository}"
+        f" {asset_args}"
+    )
+    Path(notes_path).unlink()
+    print(f"  Release created: {release_tag}")
 
     delete_draft_release(DEV_DRAFT_TAG, repository)

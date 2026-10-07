@@ -117,7 +117,7 @@ def patch_common(
     config: PublishConfig,
     manifest: dict[str, DigestEntry] | None = None,
 ) -> CallRecorder:
-    monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
+    monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())

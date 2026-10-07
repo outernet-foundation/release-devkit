@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -34,10 +33,6 @@ class FakeTags:
 
     def create_and_push_tag(self, tag: str) -> None:
         pass
-
-
-def null_ci_step(label: str) -> object:
-    return nullcontext()
 
 
 def noop(*args: object, **kwargs: object) -> None:
@@ -76,7 +71,6 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(release, "merge_push_context", FixedReturn(make_context(config)))
     monkeypatch.setattr(release, "compute_and_print_plan", FixedReturn(release_plan))
     monkeypatch.setattr(release, "GitTags", FixedReturn(FakeTags()))
-    monkeypatch.setattr(release, "ci_step", null_ci_step)
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
     monkeypatch.setattr(release, "pull_build_assets", FixedReturn([]))
     monkeypatch.setattr(release, "bash", noop)

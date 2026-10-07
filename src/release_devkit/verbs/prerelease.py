@@ -6,7 +6,6 @@ from typing import Annotated
 
 import typer
 from bashrun.bash import bash_output
-from ci_devkit.ci_step import ci_step
 
 from release_devkit.builds import DigestEntry
 from release_devkit.config import DEFAULT_CONFIG_PATH, write_step_summary
@@ -54,24 +53,23 @@ def main(
     packages = publish_config.packages
     tags = GitTags()
 
-    with ci_step("Compute dev publish plan"):
-        release_plan = compute_release_plan(publish_config, tags)
+    release_plan = compute_release_plan(publish_config, tags)
 
-        changed_apps = {
-            name: app
-            for name, app in publish_config.apps.items()
-            if app.builds is not None
-            and tags.has_changes_since(
-                f"{name}-v{v}" if (v := tags.latest_version(f"{name}-v")) else None,
-                app.path,
-            )
-        }
+    changed_apps = {
+        name: app
+        for name, app in publish_config.apps.items()
+        if app.builds is not None
+        and tags.has_changes_since(
+            f"{name}-v{v}" if (v := tags.latest_version(f"{name}-v")) else None,
+            app.path,
+        )
+    }
 
-        has_app_changes = bool(changed_apps)
+    has_app_changes = bool(changed_apps)
 
-        if not release_plan.publishing and not has_app_changes and not has_image_changes:
-            print("Nothing to publish")
-            return
+    if not release_plan.publishing and not has_app_changes and not has_image_changes:
+        print("Nothing to publish")
+        return
 
     published: list[tuple[str, str, str]] = []
     if release_plan.publishing:
