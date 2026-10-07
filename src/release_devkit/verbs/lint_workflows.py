@@ -53,6 +53,12 @@ VALIDATE_RELEASE_PLAN_JOB = "validate-release-plan"
 PREFLIGHT_JOB = "preflight"
 MIRROR_IMAGES_JOB = "mirror-images"
 RELEASE_JOB = "release"
+PRERELEASE_JOB = "prerelease"
+UPDATE_PR_DRAFT_JOB = "update-pr-draft-release"
+RELEASE_VERB = "release"
+PR_CHANNEL = "pr"
+DEV_CHANNEL = "dev"
+STABLE_CHANNEL = "stable"
 
 DEAD_USES_PREFIXES = ("./.release-devkit/", "./.github/actions/checkout-release-devkit")
 
@@ -82,6 +88,16 @@ class VerbSpec:
     delivery: bool
 
 
+@dataclass(frozen=True)
+class ChannelSpec:
+    args: re.Pattern[str]
+    env: dict[str, str]
+    checkout: str
+    delivery: bool
+    workflow: Path
+    job: str
+
+
 VERB_SPECS: dict[str, VerbSpec] = {
     "get-app-version": VerbSpec(
         name="get-app-version",
@@ -89,20 +105,6 @@ VERB_SPECS: dict[str, VerbSpec] = {
         env={},
         checkout=CHECKOUT_WITH_TAGS,
         delivery=False,
-    ),
-    "release": VerbSpec(
-        name="release",
-        args=re.compile(r"^$"),
-        env={"GITHUB_TOKEN": "${{ github.token }}"},
-        checkout=CHECKOUT_WITH_TAGS_PUSH,
-        delivery=True,
-    ),
-    "prerelease": VerbSpec(
-        name="prerelease",
-        args=re.compile(r"^$"),
-        env={"GITHUB_TOKEN": "${{ github.token }}"},
-        checkout=CHECKOUT_WITH_TAGS,
-        delivery=True,
     ),
     "lint-workflows": VerbSpec(
         name="lint-workflows",
@@ -125,18 +127,42 @@ VERB_SPECS: dict[str, VerbSpec] = {
         checkout=CHECKOUT_WITH_TAGS,
         delivery=False,
     ),
-    "update-pr-draft-release": VerbSpec(
-        name="update-pr-draft-release",
-        args=re.compile(r"^$"),
+}
+
+RELEASE_CHANNELS: dict[str, ChannelSpec] = {
+    PR_CHANNEL: ChannelSpec(
+        args=re.compile(r"^ --channel pr$"),
         env={"GITHUB_TOKEN": "${{ github.token }}"},
         checkout=CHECKOUT_WITH_TAGS,
         delivery=False,
+        workflow=INTEGRATE_WORKFLOW,
+        job=UPDATE_PR_DRAFT_JOB,
+    ),
+    DEV_CHANNEL: ChannelSpec(
+        args=re.compile(r"^ --channel dev$"),
+        env={"GITHUB_TOKEN": "${{ github.token }}"},
+        checkout=CHECKOUT_WITH_TAGS,
+        delivery=True,
+        workflow=RELEASE_WORKFLOW,
+        job=PRERELEASE_JOB,
+    ),
+    STABLE_CHANNEL: ChannelSpec(
+        args=re.compile(r"^ --channel stable$"),
+        env={"GITHUB_TOKEN": "${{ github.token }}"},
+        checkout=CHECKOUT_WITH_TAGS_PUSH,
+        delivery=True,
+        workflow=RELEASE_WORKFLOW,
+        job=RELEASE_JOB,
     ),
 }
 
-# the invocation grammar derives from the spec table, so the regex can never drift from the verbs it validates
+# the invocation grammar derives from the spec tables, so the regex can never drift from the verbs it validates
 DEVKIT_INVOCATION = re.compile(
-    re.escape(DEVKIT_INVOCATION_PREFIX) + r"(?P<verb>" + "|".join(sorted(VERB_SPECS)) + r")" + r'(?P<args>(?: [^)"]*)?)'
+    re.escape(DEVKIT_INVOCATION_PREFIX)
+    + r"(?P<verb>"
+    + "|".join(sorted([*VERB_SPECS, RELEASE_VERB]))
+    + r")"
+    + r'(?P<args>(?: [^)"]*)?)'
 )
 
 RUN_STEP_LINE = re.compile(r"^(?P<prefix>\s*(?:- )?)run:(?:\s*(?P<value>.*))?$")
@@ -180,6 +206,8 @@ class CheckoutStep:
 class VerbStep:
     step_index: int
     name: str
+    channel: str | None
+    spec: VerbSpec | ChannelSpec
 
 
 @dataclass(frozen=True)
@@ -288,12 +316,13 @@ def validate_workflow_file(path: Path, publishing: bool = True, nuget: bool = Fa
     workflow, problems = parse_workflow(path, document)
     if workflow is None:
         return rendered(problems)
-    verbs_by_job: dict[str, list[str]] = {}
+    verbs_by_job: dict[str, list[VerbStep]] = {}
     for job_name, job in workflow.jobs.items():
         job_problems, verb_steps = validate_job(job_name, job, path, context)
         problems.extend(job_problems)
-        verbs_by_job[job_name] = [verb.name for verb in verb_steps]
+        verbs_by_job[job_name] = verb_steps
     problems.extend(validate_run_steps_single_line(raw_lines, path))
+    # contract checks dispatch on the canonical filenames; a --workflow under any other name gets signature checks only
     if path.name == "integrate.yml":
         problems.extend(validate_integrate_contract(workflow, verbs_by_job, context, path))
     if path.name == "release.yml":
@@ -382,7 +411,7 @@ def parse_needs(needs_value: object) -> list[str]:
 
 
 def validate_integrate_contract(
-    workflow: WorkflowView, verbs_by_job: dict[str, list[str]], context: RepoContext, path: Path
+    workflow: WorkflowView, verbs_by_job: dict[str, list[VerbStep]], context: RepoContext, path: Path
 ) -> list[Problem]:
     problems: list[Problem] = []
     jobs = workflow.jobs
@@ -396,9 +425,22 @@ def validate_integrate_contract(
     if LINT_WORKFLOWS_JOB not in jobs:
         problems.append(file_problem(path, f"integrate.yml must run the {LINT_WORKFLOWS_JOB} job (the lint root)"))
     for verb_job in (LINT_WORKFLOWS_JOB, VALIDATE_RELEASE_PLAN_JOB):
-        carrying = [job_name for job_name, verbs in verbs_by_job.items() if verb_job in verbs]
+        carrying = [
+            job_name for job_name, steps in verbs_by_job.items() if any(step.name == verb_job for step in steps)
+        ]
         if carrying and carrying != [verb_job]:
             problems.append(file_problem(path, f"the {verb_job} verb must run in the '{verb_job}' job, got {carrying}"))
+    pr_carriers = [
+        job_name for job_name, steps in verbs_by_job.items() if any(step.channel == PR_CHANNEL for step in steps)
+    ]
+    if pr_carriers and pr_carriers != [UPDATE_PR_DRAFT_JOB]:
+        problems.append(
+            file_problem(
+                path,
+                f"the release verb's {PR_CHANNEL} channel must run in the '{UPDATE_PR_DRAFT_JOB}' job,"
+                f" got {pr_carriers}",
+            )
+        )
     for root in (LINT_WORKFLOWS_JOB, VALIDATE_RELEASE_PLAN_JOB, MIRROR_IMAGES_JOB):
         needs = jobs[root].needs if root in jobs else []
         if needs:
@@ -433,7 +475,9 @@ def validate_integrate_contract(
     return problems
 
 
-def validate_release_contract(workflow: WorkflowView, verbs_by_job: dict[str, list[str]], path: Path) -> list[Problem]:
+def validate_release_contract(
+    workflow: WorkflowView, verbs_by_job: dict[str, list[VerbStep]], path: Path
+) -> list[Problem]:
     problems: list[Problem] = []
     if workflow.name != RELEASE_WORKFLOW_NAME:
         problems.append(file_problem(path, f"workflow name must be {RELEASE_WORKFLOW_NAME}"))
@@ -446,9 +490,27 @@ def validate_release_contract(workflow: WorkflowView, verbs_by_job: dict[str, li
         problems.append(
             file_problem(path, "concurrency must omit cancel-in-progress — the queue is the delivery mutex")
         )
-    carrying = [job_name for job_name, verbs in verbs_by_job.items() if RELEASE_JOB in verbs]
-    if carrying and carrying != [RELEASE_JOB]:
-        problems.append(file_problem(path, f"the release verb must run in the '{RELEASE_JOB}' job, got {carrying}"))
+    dev_carriers = [
+        job_name for job_name, steps in verbs_by_job.items() if any(step.channel == DEV_CHANNEL for step in steps)
+    ]
+    if dev_carriers and dev_carriers != [PRERELEASE_JOB]:
+        problems.append(
+            file_problem(
+                path,
+                f"the release verb's {DEV_CHANNEL} channel must run in the '{PRERELEASE_JOB}' job, got {dev_carriers}",
+            )
+        )
+    stable_carriers = [
+        job_name for job_name, steps in verbs_by_job.items() if any(step.channel == STABLE_CHANNEL for step in steps)
+    ]
+    if stable_carriers and stable_carriers != [RELEASE_JOB]:
+        problems.append(
+            file_problem(
+                path,
+                f"the release verb's {STABLE_CHANNEL} channel must run in the '{RELEASE_JOB}' job,"
+                f" got {stable_carriers}",
+            )
+        )
     return problems
 
 
@@ -512,10 +574,12 @@ def validate_reserved_checkouts(
     job_name: str, checkout_steps: list[CheckoutStep], verb_steps: list[VerbStep], path: Path
 ) -> list[Problem]:
     problems: list[Problem] = []
-    is_release_job = any(verb.name == "release" for verb in verb_steps)
-    is_merge_gate_job = any(verb.name == "merge-gate" for verb in verb_steps)
-    if not is_release_job and any(step.signature == CHECKOUT_WITH_TAGS_PUSH for step in checkout_steps):
-        problems.append(job_problem(path, job_name, "checkout-with-tags-push is reserved for release jobs"))
+    is_stable_release_job = any(verb_step.channel == STABLE_CHANNEL for verb_step in verb_steps)
+    is_merge_gate_job = any(verb_step.name == "merge-gate" for verb_step in verb_steps)
+    if not is_stable_release_job and any(step.signature == CHECKOUT_WITH_TAGS_PUSH for step in checkout_steps):
+        problems.append(
+            job_problem(path, job_name, "checkout-with-tags-push is reserved for stable-channel release jobs")
+        )
     if not is_merge_gate_job and any(step.signature == MERGE_BOT for step in checkout_steps):
         problems.append(job_problem(path, job_name, "merge-bot checkout is reserved for merge-gate jobs"))
     return problems
@@ -549,7 +613,7 @@ def validate_checkouts_precede_wrapper(
     path: Path,
 ) -> list[Problem]:
     problems: list[Problem] = []
-    required_checkouts = {VERB_SPECS[verb.name].checkout for verb in verb_steps}
+    required_checkouts = {verb_step.spec.checkout for verb_step in verb_steps}
     for required in sorted(required_checkouts):
         if not any(step.signature == required and step.step_index < earliest_wrapper_index for step in checkout_steps):
             problems.append(
@@ -583,8 +647,8 @@ def validate_mint_window(
     context: RepoContext,
 ) -> list[Problem]:
     problems: list[Problem] = []
-    is_merge_gate_job = any(verb.name == "merge-gate" for verb in verb_steps)
-    is_delivery_job = any(VERB_SPECS[verb.name].delivery for verb in verb_steps)
+    is_merge_gate_job = any(verb_step.name == "merge-gate" for verb_step in verb_steps)
+    is_delivery_job = any(verb_step.spec.delivery for verb_step in verb_steps)
     mint_indexes, mint_problems = canonical_mint_steps(
         job_name,
         steps,
@@ -794,33 +858,58 @@ def collect_verb_steps(
         for match in matches:
             verb = match.group("verb")
             args = match.group("args")
-            if not VERB_SPECS[verb].args.fullmatch(args):
-                problems.append(
-                    step_problem(path, job_name, step.index, f"{verb} carries rejected arguments ({args.strip()})")
-                )
-                continue
-            problems.extend(validate_verb_env(job_name, step.index, verb, step, path, context))
-            verb_steps.append(VerbStep(step_index=step.index, name=verb))
+            if verb == RELEASE_VERB:
+                channel, spec = resolve_channel(args)
+                if spec is None:
+                    problems.append(
+                        step_problem(path, job_name, step.index, f"{verb} carries rejected arguments ({args.strip()})")
+                    )
+                    continue
+            else:
+                channel = None
+                spec = VERB_SPECS[verb]
+                if not spec.args.fullmatch(args):
+                    problems.append(
+                        step_problem(path, job_name, step.index, f"{verb} carries rejected arguments ({args.strip()})")
+                    )
+                    continue
+            verb_step = VerbStep(step_index=step.index, name=verb, channel=channel, spec=spec)
+            problems.extend(validate_verb_env(job_name, verb_step, step, path, context))
+            verb_steps.append(verb_step)
     return verb_steps, problems
 
 
+def resolve_channel(args: str) -> tuple[str | None, ChannelSpec | None]:
+    for channel, spec in RELEASE_CHANNELS.items():
+        if spec.args.fullmatch(args):
+            return channel, spec
+    return None, None
+
+
+def verb_label(verb_step: VerbStep) -> str:
+    if verb_step.channel is None:
+        return verb_step.name
+    return f"{verb_step.name} --channel {verb_step.channel}"
+
+
 def validate_verb_env(
-    job_name: str, step_index: int, verb: str, step: StepView, path: Path, context: RepoContext
+    job_name: str, verb_step: VerbStep, step: StepView, path: Path, context: RepoContext
 ) -> list[Problem]:
     problems: list[Problem] = []
+    label = verb_label(verb_step)
     env = step.env if step.env is not None else {}
-    for key, value in VERB_SPECS[verb].env.items():
+    for key, value in verb_step.spec.env.items():
         if env.get(key) != value:
-            problems.append(step_problem(path, job_name, step_index, f"{verb} requires env {key}: {value}"))
-    if VERB_SPECS[verb].delivery:
+            problems.append(step_problem(path, job_name, verb_step.step_index, f"{label} requires env {key}: {value}"))
+    if verb_step.spec.delivery:
         api_key_value = env.get(NUGET_API_KEY_ENV)
         if context.nuget and api_key_value != NUGET_API_KEY_SOURCE:
             problems.append(
                 step_problem(
                     path,
                     job_name,
-                    step_index,
-                    f"{verb} requires env {NUGET_API_KEY_ENV}: {NUGET_API_KEY_SOURCE}",
+                    verb_step.step_index,
+                    f"{label} requires env {NUGET_API_KEY_ENV}: {NUGET_API_KEY_SOURCE}",
                 )
             )
         if not context.nuget and api_key_value is not None:
@@ -828,8 +917,8 @@ def validate_verb_env(
                 step_problem(
                     path,
                     job_name,
-                    step_index,
-                    f"{verb} must not carry {NUGET_API_KEY_ENV} env"
+                    verb_step.step_index,
+                    f"{label} must not carry {NUGET_API_KEY_ENV} env"
                     " (the release-devkit.yaml declares no nuget registry)",
                 )
             )
