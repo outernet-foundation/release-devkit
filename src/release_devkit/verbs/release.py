@@ -10,7 +10,13 @@ from bashrun.bash import bash_output
 from release_devkit.builds import stage_build_assets
 from release_devkit.config import DEFAULT_CONFIG_PATH
 from release_devkit.context import merge_push_context
-from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release, gh_release_with_notes
+from release_devkit.drafts import (
+    DEV_DRAFT_TAG,
+    delete_draft_release,
+    ensure_draft_release,
+    gh_release_with_notes,
+    upload_release_assets,
+)
 from release_devkit.plan import package_rows, package_version_overrides
 from release_devkit.publishing import publish_packages
 from release_devkit.rendering import collect_app_rows, render_release_body
@@ -44,9 +50,11 @@ def main(
     ).strip()
     release_tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
 
+    ensure_draft_release(context, release_tag)
+    upload_release_assets(context, release_tag, staged)
+
     gh_release_with_notes(
-        f"gh release create {release_tag} --title {release_tag} --repo {context.settings.github_repository}"
-        f" {' '.join(f'{asset}' for asset in [target for _, _, target in staged])}",
+        f"gh release edit {release_tag} --draft=false --repo {context.settings.github_repository}",
         render_release_body(
             None,
             package_rows(packages, package_version_overrides(packages, published)),

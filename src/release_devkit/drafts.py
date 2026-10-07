@@ -25,23 +25,10 @@ def write_draft_section(
     # Read the app versions for the table's version column
     app_last_versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
 
-    # Read the current body, treating a missing draft as empty
-    repository = context.settings.github_repository
-    draft_exists = bash_check(f"gh release view {tag} --repo {repository}")
-    body = (
-        json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body"))["body"]
-        if draft_exists
-        else ""
-    )
+    body = ensure_draft_release(context, tag)
 
-    # Ensure the draft release exists
-    if not draft_exists:
-        bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
-
-    # Stage every app's shelf build at this SHA and upload it onto the draft
     staged = stage_build_assets(context, context.publish_config.apps, context.short)
-    if staged:
-        bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
+    upload_release_assets(context, tag, staged)
 
     # Split the body into anchor-keyed sections
     anchor = f"sha-{context.short}"
@@ -51,7 +38,7 @@ def write_draft_section(
     ]
 
     # Build the section's app table rows
-    app_rows = collect_app_rows(staged, app_last_versions, repository, tag)
+    app_rows = collect_app_rows(staged, app_last_versions, context.settings.github_repository, tag)
 
     # Render the new section body
     body = render_release_body(f"### {' — '.join(heading_fragments)}", packages, app_rows, context.manifest, level=4)
@@ -67,9 +54,23 @@ def write_draft_section(
 
     # Write the merged body back to the release
     gh_release_with_notes(
-        f"gh release edit {tag} --repo {repository}",
+        f"gh release edit {tag} --repo {context.settings.github_repository}",
         "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]) + "\n",
     )
+
+
+def ensure_draft_release(context: VerbContext, tag: str) -> str:
+    repository = context.settings.github_repository
+    if not bash_check(f"gh release view {tag} --repo {repository}"):
+        bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
+        return ""
+    return json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body"))["body"]
+
+
+def upload_release_assets(context: VerbContext, tag: str, staged: list[tuple[str, str, Path]]) -> None:
+    if staged:
+        repository = context.settings.github_repository
+        bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
 
 
 def gh_release_with_notes(command: str, body: str) -> None:
