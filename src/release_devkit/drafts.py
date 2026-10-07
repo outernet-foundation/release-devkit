@@ -44,36 +44,37 @@ def write_release(
     apps_with_builds = {name: app.builds for name, app in context.publish_config.apps.items() if app.builds}
     if apps_with_builds:
         staging = Path(mkdtemp(prefix="release-builds-"))
-        for app_name, artifacts in apps_with_builds.items():
-            for artifact in artifacts:
-                layer = staging / f"{artifact.project}-{artifact.platform}"
-                pull_build(
-                    context.publish_config.builds_registry or "",
-                    artifact.project,
-                    artifact.platform,
-                    f"sha-{context.certified}",
-                    layer,
-                    registry_username=context.settings.github_actor,
-                    registry_token=context.settings.github_token,
+        for app_name, artifact in [
+            (app_name, artifact) for app_name, artifacts in apps_with_builds.items() for artifact in artifacts
+        ]:
+            layer = staging / f"{artifact.project}-{artifact.platform}"
+            pull_build(
+                context.publish_config.builds_registry or "",
+                artifact.project,
+                artifact.platform,
+                f"sha-{context.certified}",
+                layer,
+                registry_username=context.settings.github_actor,
+                registry_token=context.settings.github_token,
+            )
+            files = sorted(path for path in layer.rglob("*") if path.is_file())
+            if artifact.file is not None:
+                source = next((path for path in files if path.name == artifact.file), None)
+                if source is None:
+                    raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {layer}")
+            elif len(files) == 1:
+                source = files[0]
+            else:
+                raise SystemExit(
+                    f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
+                    f"({', '.join(path.name for path in files)}); declare which one with 'file'"
                 )
-                files = sorted(path for path in layer.rglob("*") if path.is_file())
-                if artifact.file is not None:
-                    source = next((path for path in files if path.name == artifact.file), None)
-                    if source is None:
-                        raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {layer}")
-                elif len(files) == 1:
-                    source = files[0]
-                else:
-                    raise SystemExit(
-                        f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
-                        f"({', '.join(path.name for path in files)}); declare which one with 'file'"
-                    )
-                named = Path(artifact.name) if artifact.name else source
-                name = named.name if publish else f"{named.stem}-{context.short}{named.suffix}"
-                target = staging / name
-                shutil.copy2(source, target)
-                staged.append((app_name, name, target))
-                print(f"  Asset: {name}")
+            named = Path(artifact.name) if artifact.name else source
+            name = named.name if publish else f"{named.stem}-{context.short}{named.suffix}"
+            target = staging / name
+            shutil.copy2(source, target)
+            staged.append((app_name, name, target))
+            print(f"  Asset: {name}")
 
     if staged:
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
