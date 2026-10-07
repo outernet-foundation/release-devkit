@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import platform
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,13 +8,12 @@ from typing import Annotated, TypeGuard
 
 import typer
 import yaml
-from bashrun.bash import CalledProcessError, bash, bash_output
 
+from release_devkit.actionlint import run_actionlint
 from release_devkit.config import load_config
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
-ACTIONLINT_VERSION = "1.7.12"
 CHECKOUT_USES = "actions/checkout@v5"
 DEVKIT_WRAPPER_USES = "./.github/actions/setup-release-devkit"
 DEVKIT_WRAPPER_PATH = Path(".github/actions/setup-release-devkit/action.yml")
@@ -105,13 +103,6 @@ VERB_ENV: dict[str, dict[str, str]] = {
 RUN_STEP_LINE = re.compile(r"^(?P<prefix>\s*(?:- )?)run:(?:\s*(?P<value>.*))?$")
 BLOCK_SCALAR_HEADS = {"|", ">", "|-", ">-", "|+", ">+", "|1", ">1", "|2", ">2", "|3", ">3", "|4", ">4"}
 RUN_STEP_FOLD_THRESHOLD = 120
-
-PLATFORMS = {
-    ("Linux", "x86_64"): "linux_amd64",
-    ("Linux", "aarch64"): "linux_arm64",
-    ("Darwin", "x86_64"): "darwin_amd64",
-    ("Darwin", "arm64"): "darwin_arm64",
-}
 
 
 @dataclass
@@ -628,50 +619,3 @@ def signatures_for(path: Path) -> dict[str, dict[str, object]]:
         },
         MERGE_BOT: {"ref": MERGE_BOT_REF, "fetch-depth": 0, "persist-credentials": False},
     }
-
-
-def run_actionlint() -> None:
-    workflows_directory = Path(".github/workflows")
-    workflow_files = sorted(workflows_directory.glob("*.yml")) if workflows_directory.is_dir() else []
-    if not workflow_files:
-        raise SystemExit("no .github/workflows/*.yml files found")
-    command = " ".join(str(part) for part in [ensure_actionlint(), *workflow_files])
-    try:
-        bash(command)
-    except CalledProcessError as error:
-        raise SystemExit(error.returncode) from error
-
-
-def ensure_actionlint() -> Path:
-    cache_directory = Path.home() / ".cache" / "release-devkit" / f"actionlint-v{ACTIONLINT_VERSION}"
-    binary = cache_directory / "actionlint"
-    if binary.is_file():
-        return binary
-    cache_directory.mkdir(parents=True, exist_ok=True)
-    platform_key = (platform.system(), platform.machine())
-    if platform_key not in PLATFORMS:
-        raise SystemExit(f"no actionlint build for {platform.system()}/{platform.machine()}")
-    build = PLATFORMS[platform_key]
-    release_base = f"https://github.com/rhysd/actionlint/releases/download/v{ACTIONLINT_VERSION}"
-    tarball_name = f"actionlint_{ACTIONLINT_VERSION}_{build}.tar.gz"
-    tarball = cache_directory / tarball_name
-    bash(f"curl -fsSL {release_base}/{tarball_name} -o {tarball}")
-    checksums = bash_output(f"curl -fsSL {release_base}/actionlint_{ACTIONLINT_VERSION}_checksums.txt")
-    expected = expected_checksum(checksums, tarball_name)
-    actual = bash_output(f"sha256sum {tarball}").split(maxsplit=1)[0]
-    if actual != expected:
-        raise SystemExit(
-            f"actionlint {ACTIONLINT_VERSION} checksum mismatch for {tarball_name}: expected {expected}, got {actual}"
-        )
-    bash(f"tar -xzf {tarball} -C {cache_directory}")
-    if not binary.is_file():
-        raise SystemExit(f"actionlint binary missing after extracting {tarball_name}")
-    return binary
-
-
-def expected_checksum(checksums: str, tarball_name: str) -> str:
-    for line in checksums.splitlines():
-        fields = line.split()
-        if len(fields) == 2 and fields[1] == tarball_name:
-            return fields[0]
-    raise SystemExit(f"actionlint checksums file has no entry for {tarball_name}")
