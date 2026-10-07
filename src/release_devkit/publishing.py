@@ -8,50 +8,15 @@ from subprocess import CalledProcessError
 from typing import Protocol
 
 from bashrun.bash import bash, bash_output
-from ci_devkit.setup import configure_git, install_dotnet, install_node
 
-from release_devkit.context import VerbContext
 from release_devkit.csproj import load_project_roots, read_package_references
 from release_devkit.manifests import NpmManifest, SENTINEL_VERSION
-from release_devkit.plan import ReleasePlan, ResolvedDependency, compute_release_plan
-from release_devkit.tags import create_and_push_tag
+from release_devkit.plan import ResolvedDependency
 
 NUGET_SOURCE = "https://api.nuget.org/v3/index.json"
 PYPI_SIMPLE_INDEX = "https://pypi.org/simple/"
 PYPROJECT_VERSION_PATTERN = re.compile(r'^version\s*=\s*"[^"]*"')
 NPM_DEV_DIST_TAG = "dev"
-
-
-def publish_packages(context: VerbContext, dev: bool) -> tuple[ReleasePlan, list[tuple[str, str]]]:
-    packages = context.publish_config.packages
-    release_plan = compute_release_plan(context.publish_config)
-
-    published: list[tuple[str, str]] = []
-    if not release_plan.publishing:
-        return release_plan, published
-
-    configure_git(context.settings.github_workspace)
-    if "nuget" in release_plan.publishing_registries:
-        install_dotnet("8.0")
-    if "npm" in release_plan.publishing_registries:
-        install_node("24", "https://registry.npmjs.org")
-
-    registries = build_registries(context.settings.nuget_api_key)
-    for name, package in packages.items():
-        plan = release_plan.plans[name]
-        if not plan.publish:
-            continue
-        for registry_name, identity in package.registries.items():
-            published.append((
-                identity,
-                registries[registry_name].publish(
-                    package.path, plan.version, release_plan.resolved_versions[name], dev, context.short
-                ),
-            ))
-        if not dev:
-            create_and_push_tag(f"{name}-v{plan.version}")
-
-    return release_plan, published
 
 
 class Registry(Protocol):

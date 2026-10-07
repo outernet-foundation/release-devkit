@@ -5,11 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import mkdtemp
 
-from bashrun.bash import bash_output
 from ci_devkit.builds import build_exists, pull_build
 
 from release_devkit.builds import DIGEST_FILE_NAME, DIGEST_PLATFORM, DIGEST_PROJECT, DigestEntry
-from release_devkit.config import DEFAULT_CONFIG_PATH, PublishConfig, Settings, load_config
+from release_devkit.config import PublishConfig, Settings, load_config
 
 
 @dataclass
@@ -27,17 +26,6 @@ class VerbContext:
     @property
     def commit_url(self) -> str:
         return f"https://github.com/{self.settings.github_repository}/commit/{self.certified}"
-
-
-def merge_push_context(config: Path = DEFAULT_CONFIG_PATH) -> VerbContext:
-    head = bash_output("git rev-parse HEAD").strip()
-    parents = bash_output(f"git log -1 --format=%P {head}").strip().split()
-    return build_context(head, parents[1] if len(parents) >= 2 else head, config)
-
-
-def pr_head_context(config: Path = DEFAULT_CONFIG_PATH) -> VerbContext:
-    head = bash_output("git rev-parse HEAD").strip()
-    return build_context(head, head, config)
 
 
 def build_context(head: str, certified: str, config: Path) -> VerbContext:

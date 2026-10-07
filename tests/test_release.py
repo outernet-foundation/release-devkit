@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from release_devkit import drafts
-from release_devkit import publishing as publishing_module
 from release_devkit.verbs import release
 from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig, Settings
 from release_devkit.context import VerbContext
@@ -91,8 +90,8 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
         app_last_versions={"myapp": None},
         app_versions={"myapp": "1.0.0"},
     )
-    monkeypatch.setattr(drafts, "merge_push_context", FixedReturn(make_context(config)))
-    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(release_plan))
+    monkeypatch.setattr(drafts, "build_context", FixedReturn(make_context(config)))
+    monkeypatch.setattr(drafts, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(drafts, "create_and_push_tag", noop)
 
     def counting_bash_output(command: str) -> str:

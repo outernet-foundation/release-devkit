@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from release_devkit import context as context_module
-from release_devkit.context import build_context, merge_push_context
+from release_devkit.context import build_context
 
 
 class FixedReturn:
@@ -35,40 +35,6 @@ def write_config(tmp_path: Path, content: str = "") -> Path:
     config = tmp_path / "release-devkit.yaml"
     config.write_text(content, encoding="utf-8")
     return config
-
-
-def dispatching_bash_output(command: str) -> str:
-    if "rev-parse" in command:
-        return "cccccccccccccccccccccccccccccccccccccccc\n"
-    if "%P" in command:
-        return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
-    return ""
-
-
-def single_parent_bash_output(command: str) -> str:
-    if "rev-parse" in command:
-        return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-    return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-
-
-def test_merge_push_context_resolves_the_second_parent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    make_env(monkeypatch)
-    monkeypatch.setattr(context_module, "bash_output", dispatching_bash_output)
-
-    result = merge_push_context(write_config(tmp_path))
-
-    assert result.head == "cccccccccccccccccccccccccccccccccccccccc"
-    assert result.certified == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    assert result.manifest is None
-
-
-def test_merge_push_context_falls_back_to_head_on_non_merge(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    make_env(monkeypatch)
-    monkeypatch.setattr(context_module, "bash_output", single_parent_bash_output)
-
-    result = merge_push_context(write_config(tmp_path))
-
-    assert result.certified == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def test_build_context_manifest_is_none_when_no_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

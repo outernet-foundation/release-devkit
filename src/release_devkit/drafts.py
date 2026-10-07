@@ -10,10 +10,11 @@ from tempfile import NamedTemporaryFile, mkdtemp
 
 from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.builds import pull_build
+from ci_devkit.setup import configure_git, install_dotnet, install_node
 
-from release_devkit.context import merge_push_context, pr_head_context
-from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, ReleasePlan
-from release_devkit.publishing import build_registries, publish_packages
+from release_devkit.context import build_context
+from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, ReleasePlan, compute_release_plan
+from release_devkit.publishing import build_registries
 from release_devkit.tags import create_and_push_tag, latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
@@ -29,11 +30,40 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     # Resolve the run's identity and publish packages on the delivery channels
     match channel:
         case ReleaseChannel.PR:
-            context = pr_head_context(config)
+            # Take HEAD as-is — the merge commit is not fetched in this channel and must not be resolved
+            head = bash_output("git rev-parse HEAD").strip()
+            context = build_context(head, head, config)
             release_plan, published = ReleasePlan.empty(), None
         case ReleaseChannel.STABLE | ReleaseChannel.DEV:
-            context = merge_push_context(config)
-            release_plan, published = publish_packages(context, dev=channel == ReleaseChannel.DEV)
+            # The certified tree is the merge's second parent, the merged PR head
+            head = bash_output("git rev-parse HEAD").strip()
+            parents = bash_output(f"git log -1 --format=%P {head}").strip().split()
+            context = build_context(head, parents[1] if len(parents) >= 2 else head, config)
+
+            # Publish every changed package to its registries and tag the stable versions
+            dev = channel == ReleaseChannel.DEV
+            release_plan = compute_release_plan(context.publish_config)
+            published: list[tuple[str, str]] | None = []
+            if release_plan.publishing:
+                configure_git(context.settings.github_workspace)
+                if "nuget" in release_plan.publishing_registries:
+                    install_dotnet("8.0")
+                if "npm" in release_plan.publishing_registries:
+                    install_node("24", "https://registry.npmjs.org")
+                registries = build_registries(context.settings.nuget_api_key)
+                for name, package in context.publish_config.packages.items():
+                    plan = release_plan.plans[name]
+                    if not plan.publish:
+                        continue
+                    for registry_name, identity in package.registries.items():
+                        published.append((
+                            identity,
+                            registries[registry_name].publish(
+                                package.path, plan.version, release_plan.resolved_versions[name], dev, context.short
+                            ),
+                        ))
+                    if not dev:
+                        create_and_push_tag(f"{name}-v{plan.version}")
 
     # Prepare the channel's release surface
     match channel:

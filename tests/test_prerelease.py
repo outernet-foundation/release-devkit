@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from release_devkit import drafts
-from release_devkit import publishing as publishing_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig, Settings
 from release_devkit.builds import DigestEntry
 from release_devkit.context import VerbContext
@@ -54,6 +53,9 @@ class CallRecorder:
 class FakePublishRegistry:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+
+    def url(self, identity: object, version: object) -> str:
+        return f"https://registry.example/{identity}/{version}"
 
     def publish(
         self,
@@ -173,7 +175,7 @@ def patch_common(
     config: PublishConfig,
     manifest: dict[str, DigestEntry] | None = None,
 ) -> FakePullBuild:
-    monkeypatch.setattr(drafts, "merge_push_context", FixedReturn(make_context(config, manifest)))
+    monkeypatch.setattr(drafts, "build_context", FixedReturn(make_context(config, manifest)))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())
 
@@ -195,11 +197,11 @@ def patch_common(
 def patch_publish_internals(monkeypatch: pytest.MonkeyPatch) -> tuple[FakePublishRegistry, CallRecorder]:
     npm_registry = FakePublishRegistry()
     create_and_push_tag = CallRecorder()
-    monkeypatch.setattr(publishing_module, "configure_git", noop)
-    monkeypatch.setattr(publishing_module, "install_dotnet", noop)
-    monkeypatch.setattr(publishing_module, "install_node", noop)
-    monkeypatch.setattr(publishing_module, "build_registries", FixedReturn({"npm": npm_registry}))
-    monkeypatch.setattr(publishing_module, "create_and_push_tag", create_and_push_tag)
+    monkeypatch.setattr(drafts, "configure_git", noop)
+    monkeypatch.setattr(drafts, "install_dotnet", noop)
+    monkeypatch.setattr(drafts, "install_node", noop)
+    monkeypatch.setattr(drafts, "build_registries", FixedReturn({"npm": npm_registry}))
+    monkeypatch.setattr(drafts, "create_and_push_tag", create_and_push_tag)
     return npm_registry, create_and_push_tag
 
 
@@ -209,7 +211,7 @@ def run_prerelease(
     release_plan: ReleasePlan,
     tags: FakeTags,
 ) -> tuple[FakePublishRegistry, CallRecorder, FakePullBuild, list[str]]:
-    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(release_plan))
+    monkeypatch.setattr(drafts, "compute_release_plan", FixedReturn(release_plan))
     patch_plan_tags(monkeypatch, tags)
     pull_assets = patch_common(monkeypatch, config)
     npm_registry, create_and_push_tag = patch_publish_internals(monkeypatch)
@@ -263,7 +265,7 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"})
 
     monkeypatch.setattr(
-        publishing_module, "compute_release_plan", FixedReturn(make_plan(set(), app_last_versions={"myapp": "1.0.0"}))
+        drafts, "compute_release_plan", FixedReturn(make_plan(set(), app_last_versions={"myapp": "1.0.0"}))
     )
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
@@ -321,7 +323,7 @@ def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: py
         "other-capture": DigestEntry(ref="ghcr.io/owner/repo/other-capture", digest=digest_existing, tags=["tree-2"]),
     }
 
-    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(make_plan(set())))
+    monkeypatch.setattr(drafts, "compute_release_plan", FixedReturn(make_plan(set())))
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config, manifest=manifest)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
@@ -367,9 +369,7 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
     )
     tags = FakeTags(versions={"myapp": "1.0.0", "settled": "2.1.0"}, changed=set())
 
-    monkeypatch.setattr(
-        publishing_module, "compute_release_plan", FixedReturn(make_plan({"fresh"}, {"settled", "never"}))
-    )
+    monkeypatch.setattr(drafts, "compute_release_plan", FixedReturn(make_plan({"fresh"}, {"settled", "never"})))
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
     patch_publish_internals(monkeypatch)
@@ -397,7 +397,7 @@ def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch)
     )
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
-    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(make_plan({"pkg"})))
+    monkeypatch.setattr(drafts, "compute_release_plan", FixedReturn(make_plan({"pkg"})))
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
     patch_publish_internals(monkeypatch)
@@ -405,6 +405,8 @@ def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch)
     view_calls = CallRecorder('{"body": "", "url": "https://github.com/owner/repo/releases/untagged-abc"}')
 
     def counting_bash_output(command: str) -> str:
+        if command == "git rev-parse HEAD":
+            return MERGE_SHA
         if command.startswith("git log"):
             return "Merge PR #7: Add the thing\n"
         return str(view_calls(command))
@@ -415,3 +417,41 @@ def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch)
     prerelease.main()
 
     assert len(view_calls.calls) == 1
+
+
+def run_merge_identity(monkeypatch: pytest.MonkeyPatch, parents_output: str) -> CallRecorder:
+    config = make_config(apps={"myapp": make_app()})
+    monkeypatch.setattr(drafts, "compute_release_plan", FixedReturn(make_plan(set())))
+    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
+    build_context = CallRecorder(make_context(config))
+    monkeypatch.setattr(drafts, "build_context", build_context)
+    monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
+    monkeypatch.setattr(drafts, "bash", CallRecorder())
+
+    def dispatching_bash_output(command: str) -> str:
+        if command == "git rev-parse HEAD":
+            return MERGE_SHA
+        if "%P" in command:
+            return parents_output
+        if command.startswith("git log"):
+            return "Merge PR #7: Add the thing\n"
+        return '{"body": "", "url": "https://github.com/owner/repo/releases/untagged-abc"}'
+
+    monkeypatch.setattr(drafts, "bash_output", dispatching_bash_output)
+    patch_pull_build(monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp.apk"]})
+
+    prerelease.main()
+
+    return build_context
+
+
+def test_merge_identity_resolves_the_second_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+    build_context = run_merge_identity(monkeypatch, f"{MERGE_SHA} {CERTIFIED_SHA}\n")
+
+    assert build_context.calls[0][:2] == (MERGE_SHA, CERTIFIED_SHA)
+
+
+def test_merge_identity_falls_back_to_head_on_non_merge(monkeypatch: pytest.MonkeyPatch) -> None:
+    build_context = run_merge_identity(monkeypatch, f"{MERGE_SHA}\n")
+
+    assert build_context.calls[0][:2] == (MERGE_SHA, MERGE_SHA)
