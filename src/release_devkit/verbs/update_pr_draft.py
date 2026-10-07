@@ -13,9 +13,6 @@ from release_devkit.tags import latest_version
 
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
-PR_DRAFT_TAG_PREFIX = "pr-"
-PR_REF_PATTERN = re.compile(r"^refs/pull/(\d+)/merge$")
-
 
 @update_pr_app.command()
 def update_pr_draft(
@@ -23,7 +20,7 @@ def update_pr_draft(
 ) -> None:
     context = pr_head_context(config)
 
-    tag = f"{PR_DRAFT_TAG_PREFIX}{PR_REF_PATTERN.findall(context.settings.github_ref)[0][0]}"
+    tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
 
     write_release(
         context,

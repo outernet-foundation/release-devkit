@@ -14,8 +14,6 @@ from release_devkit.publishing import publish_packages
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
-_MERGE_PR_PATTERN = re.compile(r"Merge PR #(\d+): (.+)")
-
 
 @app.command()
 def main(
@@ -25,7 +23,9 @@ def main(
 
     release_plan, published = publish_packages(context, dev=True)
 
-    pr_number, pr_title = _MERGE_PR_PATTERN.findall(bash_output(f"git log -1 --format=%B {context.head}").strip())[0]
+    pr_number, pr_title = re.findall(
+        r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
+    )[0]
 
     write_release(
         context,
