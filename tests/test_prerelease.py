@@ -386,8 +386,9 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
     prerelease.main()
 
     assert len(written) == 1
-    assert f"| fresh | 1.0.0-dev.{SHORT_SHA} |" in written[0]
-    assert "| settled | 2.1.0 |" in written[0]
+    fresh_version = f"1.0.0-dev.{SHORT_SHA}"
+    assert f"| fresh | {fresh_version} | [npm](https://registry.example/fresh-id/{fresh_version}) |" in written[0]
+    assert "| settled | 2.1.0 | [npm](https://registry.example/settled-id/2.1.0) |" in written[0]
     assert "| never | 0.0.0 | npm |" in written[0]
 
 

@@ -77,15 +77,20 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                     channel == ReleaseChannel.DEV,
                     context.short,
                 )
+                registry_cell = f"[{package.registry}]({registries[package.registry].url(package.identity, version)})"
                 if channel == ReleaseChannel.STABLE:
                     create_and_push_tag(f"{name}-v{plan.version}")
             else:
-                version = latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
-            registry_cell = (
-                f"[{package.registry}]({registries[package.registry].url(package.identity, version)})"
-                if version != UNCHANGED_FALLBACK_VERSION
-                else package.registry
-            )
+                latest = latest_version(f"{name}-v")
+                if latest:
+                    version = latest
+                    registry_cell = (
+                        f"[{package.registry}]({registries[package.registry].url(package.identity, version)})"
+                    )
+                else:
+                    version = UNCHANGED_FALLBACK_VERSION
+                    registry_cell = package.registry
+
             table_rows.append([name, version, registry_cell])
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
