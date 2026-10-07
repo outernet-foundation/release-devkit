@@ -154,8 +154,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             staged.append((app_name, name, target))
             print(f"  Asset: {name}")
 
-    # Upload the staged assets
-    if staged:
+        # Upload the staged assets
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
 
     # Assemble the notes section from the heading and the artifact tables
