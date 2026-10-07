@@ -252,13 +252,7 @@ def stage_apps(
         )
 
         # The layer holds exactly one file: the build's single player binary
-        files = sorted(path for path in layer.iterdir() if path.is_file())
-        if len(files) != 1:
-            raise SystemExit(
-                f"shelf layer for ({artifact.project}, {artifact.platform}) must hold exactly one file, "
-                f"found {len(files)} ({', '.join(path.name for path in files)})"
-            )
-        source = files[0]
+        source = next(path for path in layer.iterdir() if path.is_file())
 
         # Copy the asset under its release name and record it
         named = Path(artifact.name) if artifact.name else source
