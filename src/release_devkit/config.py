@@ -22,7 +22,8 @@ class PackageConfig(BaseModel):
 
     path: Path
     major_minor: str = Field(pattern=r"^\d+\.\d+$")
-    registries: dict[str, str] = Field(default_factory=dict)
+    registry: str
+    identity: str
 
 
 class BuildArtifactConfig(BaseModel):
@@ -52,9 +53,8 @@ class PublishConfig(BaseModel):
     @model_validator(mode="after")
     def validate_registry_names(self) -> "PublishConfig":
         for name, package in self.packages.items():
-            unknown_registries = set(package.registries) - KNOWN_REGISTRIES
-            if unknown_registries:
-                raise ValueError(f"package '{name}' declares unknown registries: {sorted(unknown_registries)}")
+            if package.registry not in KNOWN_REGISTRIES:
+                raise ValueError(f"package '{name}' declares unknown registry '{package.registry}'")
         if self.builds_registry is None and any(app.builds for app in self.apps.values()):
             raise ValueError("builds_registry is required when any app declares builds")
         return self

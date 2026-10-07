@@ -106,7 +106,6 @@ def make_plan(
     return ReleasePlan(
         plans=plans,
         publishing=publishing,
-        publishing_registries=set(),
         resolved_versions={name: {} for name in publishing},
         app_last_versions=app_last_versions or {},
         app_versions={},
@@ -242,7 +241,9 @@ def test_noop_merge_publishes_nothing_but_writes_section(monkeypatch: pytest.Mon
 
 def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(
-        packages={"pkg": PackageConfig(path=Path("packages/pkg"), major_minor="1.0", registries={"npm": "pkg-id"})},
+        packages={
+            "pkg": PackageConfig(path=Path("packages/pkg"), major_minor="1.0", registry="npm", identity="pkg-id")
+        },
         apps={"myapp": make_app()},
     )
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
@@ -359,11 +360,11 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
 ) -> None:
     config = make_config(
         packages={
-            "fresh": PackageConfig(path=Path("packages/fresh"), major_minor="1.0", registries={"npm": "fresh-id"}),
+            "fresh": PackageConfig(path=Path("packages/fresh"), major_minor="1.0", registry="npm", identity="fresh-id"),
             "settled": PackageConfig(
-                path=Path("packages/settled"), major_minor="1.0", registries={"npm": "settled-id"}
+                path=Path("packages/settled"), major_minor="1.0", registry="npm", identity="settled-id"
             ),
-            "never": PackageConfig(path=Path("packages/never"), major_minor="1.0", registries={"npm": "never-id"}),
+            "never": PackageConfig(path=Path("packages/never"), major_minor="1.0", registry="npm", identity="never-id"),
         },
         apps={"myapp": make_app()},
     )
@@ -392,7 +393,9 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
 
 def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(
-        packages={"pkg": PackageConfig(path=Path("packages/pkg"), major_minor="1.0", registries={})},
+        packages={
+            "pkg": PackageConfig(path=Path("packages/pkg"), major_minor="1.0", registry="npm", identity="pkg-id")
+        },
         apps={"myapp": make_app()},
     )
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())

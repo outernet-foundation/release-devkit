@@ -33,7 +33,6 @@ class ResolvedDependency:
 class ReleasePlan:
     plans: dict[str, PackagePlan]
     publishing: set[str]
-    publishing_registries: set[str]
     resolved_versions: dict[str, dict[str, ResolvedDependency]]
     app_last_versions: dict[str, str | None]
     app_versions: dict[str, str]
@@ -43,7 +42,6 @@ class ReleasePlan:
         return cls(
             plans={},
             publishing=set(),
-            publishing_registries=set(),
             resolved_versions={},
             app_last_versions={},
             app_versions={},
@@ -85,7 +83,6 @@ def compute_release_plan(publish_config: PublishConfig) -> ReleasePlan:
         )
 
     publishing = {name for name in packages if plans[name].publish}
-    publishing_registries = {registry_name for name in publishing for registry_name in packages[name].registries}
     resolved_versions = {
         name: resolve_dependency_versions(edges[name], plans, publishing) for name in packages if name in publishing
     }
@@ -105,7 +102,6 @@ def compute_release_plan(publish_config: PublishConfig) -> ReleasePlan:
     return ReleasePlan(
         plans=plans,
         publishing=publishing,
-        publishing_registries=publishing_registries,
         resolved_versions=resolved_versions,
         app_last_versions=app_last_versions,
         app_versions=app_versions,

@@ -169,8 +169,8 @@ def test_release_plan_refuses_cyclic_dependencies(tmp_path: Path, monkeypatch: p
             encoding="utf-8",
         )
     packages = {
-        "first": PackageConfig(path=Path("first"), major_minor="1.0", registries={"npm": "org.example.first"}),
-        "second": PackageConfig(path=Path("second"), major_minor="1.0", registries={"npm": "org.example.second"}),
+        "first": PackageConfig(path=Path("first"), major_minor="1.0", registry="npm", identity="org.example.first"),
+        "second": PackageConfig(path=Path("second"), major_minor="1.0", registry="npm", identity="org.example.second"),
     }
 
     with pytest.raises(ValueError, match="cyclic dependency edge"):
@@ -178,58 +178,49 @@ def test_release_plan_refuses_cyclic_dependencies(tmp_path: Path, monkeypatch: p
 
 
 RELEASE_CONFIG = PublishConfig(
-    packages={"pkg": PackageConfig(path=Path("pkg"), major_minor="0.1")},
+    packages={"pkg": PackageConfig(path=Path("pkg"), major_minor="0.1", registry="npm", identity="pkg")},
     apps={"app": AppConfig(path=Path("app"), major_minor="0.2")},
 )
 
 
-def test_release_plan_bumps_apps_when_any_package_publishes(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def release_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PublishConfig:
+    monkeypatch.chdir(tmp_path)
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    (package_dir / "package.json").write_text("{}", encoding="utf-8")
+    return RELEASE_CONFIG
+
+
+def test_release_plan_bumps_apps_when_any_package_publishes(
+    release_config: PublishConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
     patch_plan_tags(monkeypatch, FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": True, "app": False}))
 
-    release_plan = compute_release_plan(RELEASE_CONFIG)
+    release_plan = compute_release_plan(release_config)
 
     assert release_plan.publishing == {"pkg"}
     assert release_plan.plans["pkg"].version == "0.1.0"
     assert release_plan.app_versions == {"app": "0.2.4"}
 
 
-def test_release_plan_leaves_everything_unchanged_when_nothing_changed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_release_plan_leaves_everything_unchanged_when_nothing_changed(
+    release_config: PublishConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
     patch_plan_tags(monkeypatch, FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": False, "app": False}))
 
-    release_plan = compute_release_plan(RELEASE_CONFIG)
+    release_plan = compute_release_plan(release_config)
 
     assert release_plan.publishing == set()
     assert release_plan.app_versions == {}
 
 
-def test_release_plan_unions_registries_of_publishing_packages_only(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_release_plan_bumps_app_on_its_own_path_change(
+    release_config: PublishConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    changed_path = tmp_path / "changed"
-    changed_path.mkdir()
-    (changed_path / "package.json").write_text("{}", encoding="utf-8")
-    unchanged_path = tmp_path / "unchanged"
-    unchanged_path.mkdir()
-    (unchanged_path / "un.csproj").write_text("<Project />", encoding="utf-8")
-    config = PublishConfig(
-        packages={
-            "changed": PackageConfig(path=changed_path, major_minor="1.0", registries={"npm": "changed-id"}),
-            "unchanged": PackageConfig(path=unchanged_path, major_minor="1.0", registries={"nuget": "unchanged-id"}),
-        },
-        apps={"app": AppConfig(path=Path("app"), major_minor="0.2")},
-    )
-    patch_plan_tags(monkeypatch, FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={changed_path.as_posix(): True}))
-
-    release_plan = compute_release_plan(config)
-
-    assert release_plan.publishing == {"changed"}
-    assert release_plan.publishing_registries == {"npm"}
-
-
-def test_release_plan_bumps_app_on_its_own_path_change(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_plan_tags(monkeypatch, FakeTagSource(versions={"app-v": ["0.2.3"]}, changed={"pkg": False, "app": True}))
 
-    release_plan = compute_release_plan(RELEASE_CONFIG)
+    release_plan = compute_release_plan(release_config)
 
     assert release_plan.publishing == set()
     assert release_plan.app_versions == {"app": "0.2.4"}

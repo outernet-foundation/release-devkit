@@ -9,11 +9,11 @@ from release_devkit.manifests import SENTINEL_VERSION, resolve_edges
 
 
 def npm_package(name: str, identity: str) -> PackageConfig:
-    return PackageConfig(path=Path(name), major_minor="1.0", registries={"npm": identity})
+    return PackageConfig(path=Path(name), major_minor="1.0", registry="npm", identity=identity)
 
 
 def nuget_package(name: str, identity: str) -> PackageConfig:
-    return PackageConfig(path=Path(name), major_minor="1.0", registries={"nuget": identity})
+    return PackageConfig(path=Path(name), major_minor="1.0", registry="nuget", identity=identity)
 
 
 def write_npm_manifest(root: Path, package_name: str, dependencies: dict[str, str]) -> None:
@@ -38,7 +38,7 @@ def write_pypi_manifest(root: Path, package_name: str, dependencies: list[str]) 
 
 
 def pypi_package(name: str) -> PackageConfig:
-    return PackageConfig(path=Path(name), major_minor="0.1", registries={"pypi": name})
+    return PackageConfig(path=Path(name), major_minor="0.1", registry="pypi", identity=name)
 
 
 NUGET_LIBRARY_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
@@ -290,37 +290,13 @@ def test_identity_resolution_is_scoped_per_registry_kind(tmp_path: Path, monkeyp
     write_npm_manifest(tmp_path, "npm-pkg", {})
     write_pypi_manifest(tmp_path, "pypi-pkg", ["npm-pkg>=1.0"])
     packages = {
-        "npm-pkg": PackageConfig(path=Path("npm-pkg"), major_minor="1.0", registries={"npm": "npm-pkg"}),
-        "pypi-pkg": PackageConfig(path=Path("pypi-pkg"), major_minor="0.1", registries={"pypi": "pypi-pkg"}),
+        "npm-pkg": PackageConfig(path=Path("npm-pkg"), major_minor="1.0", registry="npm", identity="npm-pkg"),
+        "pypi-pkg": PackageConfig(path=Path("pypi-pkg"), major_minor="0.1", registry="pypi", identity="pypi-pkg"),
     }
 
     edges = resolve_edges(packages)
 
     assert edges["pypi-pkg"] == []
-
-
-def test_multi_registry_package_unions_edges_across_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    write_npm_manifest(tmp_path, "npm-sibling", {})
-    write_pypi_manifest(tmp_path, "pypi-sibling", [])
-    write_npm_manifest(tmp_path, "dual", {"org.example.npm-sibling": SENTINEL_VERSION})
-    write_pypi_manifest(tmp_path, "dual", [f"pypi-sibling=={SENTINEL_VERSION}"])
-    packages = {
-        "npm-sibling": PackageConfig(
-            path=Path("npm-sibling"),
-            major_minor="1.0",
-            registries={"npm": "org.example.npm-sibling"},
-        ),
-        "pypi-sibling": pypi_package("pypi-sibling"),
-        "dual": PackageConfig(
-            path=Path("dual"), major_minor="1.0", registries={"npm": "org.example.dual", "pypi": "dual"}
-        ),
-    }
-
-    edges = resolve_edges(packages)
-
-    assert {edge.dependency_package for edge in edges["dual"]} == {"npm-sibling", "pypi-sibling"}
-    assert {edge.identity for edge in edges["dual"]} == {"org.example.npm-sibling", "pypi-sibling"}
 
 
 def test_duplicate_identity_across_packages_is_loud(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

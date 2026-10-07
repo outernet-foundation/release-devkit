@@ -22,17 +22,20 @@ def base_payload() -> dict[str, object]:
             "placeframe-api-client": {
                 "path": "packages/generated/csharp/api-client/src/PlaceframeApiClient",
                 "major_minor": "0.1",
-                "registries": {"nuget": "PlaceframeApiClient"},
+                "registry": "nuget",
+                "identity": "PlaceframeApiClient",
             },
             "placeframe-core": {
                 "path": "packages/unity/Placeframe/Assets/Package/Core",
                 "major_minor": "1.0",
-                "registries": {"npm": "org.outernet.placeframe"},
+                "registry": "npm",
+                "identity": "org.outernet.placeframe",
             },
             "placeframe-arfoundation": {
                 "path": "packages/unity/Placeframe/Assets/Package/ARFoundation",
                 "major_minor": "1.0",
-                "registries": {"npm": "org.outernet.placeframe.arfoundation"},
+                "registry": "npm",
+                "identity": "org.outernet.placeframe.arfoundation",
             },
         },
         "apps": {
@@ -52,7 +55,8 @@ def test_load_config_parses_packages(tmp_path: Path):
         "placeframe-core",
         "placeframe-arfoundation",
     ]
-    assert config.packages["placeframe-arfoundation"].registries == {"npm": "org.outernet.placeframe.arfoundation"}
+    assert config.packages["placeframe-arfoundation"].registry == "npm"
+    assert config.packages["placeframe-arfoundation"].identity == "org.outernet.placeframe.arfoundation"
     assert list(config.apps) == ["capture-tool"]
 
 
@@ -79,9 +83,18 @@ def test_load_config_rejects_unknown_top_level_keys(tmp_path: Path):
 def test_load_config_rejects_unknown_registries(tmp_path: Path):
     payload = base_payload()
     assert isinstance(payload["packages"], dict)
-    payload["packages"]["placeframe-api-client"]["registries"] = {"cargo": "placeframe"}
+    payload["packages"]["placeframe-api-client"]["registry"] = "cargo"
 
-    with pytest.raises(ValidationError, match="unknown registries: \\['cargo'\\]"):
+    with pytest.raises(ValidationError, match="unknown registry 'cargo'"):
+        load_config(write_config(tmp_path, payload))
+
+
+def test_load_config_rejects_missing_identity(tmp_path: Path):
+    payload = base_payload()
+    assert isinstance(payload["packages"], dict)
+    del payload["packages"]["placeframe-api-client"]["identity"]
+
+    with pytest.raises(ValidationError, match="identity"):
         load_config(write_config(tmp_path, payload))
 
 

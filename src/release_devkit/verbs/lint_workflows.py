@@ -164,7 +164,7 @@ def declares_nuget() -> bool:
     if not CONFIG_PATH.is_file():
         return False
     config = load_config(CONFIG_PATH)
-    return any("nuget" in package.registries for package in config.packages.values())
+    return any(package.registry == "nuget" for package in config.packages.values())
 
 
 def is_mapping(value: object) -> TypeGuard[dict[object, object]]:

@@ -55,7 +55,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
             )
 
-        # Publish every changed package to its registries and tag the stable versions
+        # Publish every changed package to its registry and tag the stable versions
         release_plan = compute_release_plan(context.publish_config)
 
         # Stop a stable run with nothing to ship
@@ -69,32 +69,24 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         table_rows: list[list[str]] = []
         for name, package in context.publish_config.packages.items():
             plan = release_plan.plans[name]
-            registry_names: list[str] = []
-
             if plan.publish:
-                version = UNCHANGED_FALLBACK_VERSION
-                for registry_name, identity in package.registries.items():
-                    version = registries[registry_name].publish(
-                        package.path,
-                        plan.version,
-                        release_plan.resolved_versions[name],
-                        channel == ReleaseChannel.DEV,
-                        context.short,
-                    )
-                    registry_names.append(f"[{registry_name}]({registries[registry_name].url(identity, version)})")
+                version = registries[package.registry].publish(
+                    package.path,
+                    plan.version,
+                    release_plan.resolved_versions[name],
+                    channel == ReleaseChannel.DEV,
+                    context.short,
+                )
                 if channel == ReleaseChannel.STABLE:
                     create_and_push_tag(f"{name}-v{plan.version}")
             else:
                 version = latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
-                if version != UNCHANGED_FALLBACK_VERSION:
-                    registry_names = [
-                        f"[{registry_name}]({registries[registry_name].url(identity, version)})"
-                        for registry_name, identity in package.registries.items()
-                    ]
-                else:
-                    registry_names = list(package.registries)
-
-            table_rows.append([name, version, ", ".join(registry_names) or "—"])
+            registry_cell = (
+                f"[{package.registry}]({registries[package.registry].url(package.identity, version)})"
+                if version != UNCHANGED_FALLBACK_VERSION
+                else package.registry
+            )
+            table_rows.append([name, version, registry_cell])
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 

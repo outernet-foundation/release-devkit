@@ -85,7 +85,6 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     release_plan = ReleasePlan(
         plans={},
         publishing=set(),
-        publishing_registries=set(),
         resolved_versions={},
         app_last_versions={"myapp": None},
         app_versions={"myapp": "1.0.0"},
