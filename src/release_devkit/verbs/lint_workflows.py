@@ -174,10 +174,9 @@ def main(
     ] = None,
 ) -> None:
     workflow_paths = workflows or default_workflows()
-    context = RepoContext(publishing=is_publishing(), nuget=declares_nuget())
     problems: list[str] = []
     for workflow_path in workflow_paths:
-        problems.extend(validate_workflow_file(workflow_path, context))
+        problems.extend(validate_workflow_file(workflow_path, publishing=is_publishing(), nuget=declares_nuget()))
     problems.extend(validate_devkit_wrapper())
     for problem in problems:
         print(problem)
