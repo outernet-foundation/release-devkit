@@ -13,7 +13,7 @@ from release_devkit.context import merge_push_context
 from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release, run_with_notes_file
 from release_devkit.plan import compute_release_plan, package_rows
 from release_devkit.publishing import StableStrategy, publish_packages
-from release_devkit.rendering import AppRow, render_app_table, render_images_table, render_packages_table
+from release_devkit.rendering import AppRow, app_row, render_release_body
 from release_devkit.tags import create_and_push_tag, latest_version
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -69,31 +69,15 @@ def main(
     asset_by_app = {app_name: asset_name for app_name, asset_name, _ in staged}
 
     rows = package_rows(packages)
-
     app_rows: list[AppRow] = []
     for app_name in publish_config.apps:
         version = latest_version(f"{app_name}-v")
         if not version:
             continue
-        asset_name = asset_by_app.get(app_name)
-        app_rows.append(
-            AppRow(
-                app_name,
-                version,
-                asset_name,
-                f"https://github.com/{repository}/releases/download/{release_tag}/{asset_name}" if asset_name else None,
-            )
-        )
+        app_rows.append(app_row(app_name, version, asset_by_app.get(app_name), repository, release_tag))
 
-    notes = "\n".join(
-        ["## Packages", ""]
-        + render_packages_table(rows)
-        + (["", "## Apps"] + render_app_table(app_rows) if app_rows else [])
-        + (["", "## Built images"] + render_images_table(context.manifest) if context.manifest else [])
-        + [""]
-    )
+    notes = render_release_body(None, rows, app_rows, context.manifest, level=2) + "\n"
     print(notes)
-
     run_with_notes_file(
         f"gh release create {release_tag} --title {release_tag} --repo {repository} {' '.join(f'{asset}' for asset in assets)}",
         notes,

@@ -85,3 +85,4 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     assert len(written) == 1
     assert "## Apps" in written[0]
     assert "| myapp | 1.0.0 | — |" in written[0]
+    assert "## Packages" not in written[0]

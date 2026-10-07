@@ -31,6 +31,41 @@ class AppRow:
     asset_url: str | None
 
 
+def app_row(
+    name: str,
+    version: str | None,
+    asset_name: str | None,
+    repository: str,
+    tag: str,
+) -> AppRow:
+    return AppRow(
+        name,
+        version,
+        asset_name,
+        f"https://github.com/{repository}/releases/download/{tag}/{asset_name}" if asset_name is not None else None,
+    )
+
+
+def render_release_body(
+    heading: str | None,
+    packages: list[PackageRow] | None,
+    app_rows: list[AppRow],
+    manifest: dict[str, DigestEntry] | None,
+    level: int,
+) -> str:
+    prefix = "#" * level
+    blocks: list[list[str]] = []
+    if heading is not None:
+        blocks.append([heading])
+    if packages:
+        blocks.append([f"{prefix} Packages", *render_packages_table(packages)])
+    if app_rows:
+        blocks.append([f"{prefix} Apps", *render_app_table(app_rows)])
+    if manifest:
+        blocks.append([f"{prefix} Built images", *render_images_table(manifest)])
+    return "\n\n".join("\n".join(block) for block in blocks)
+
+
 def render_packages_table(rows: list[PackageRow]) -> list[str]:
     lines = ["| Package | Version | Registry |", "|---|---|---|"]
     for row in rows:

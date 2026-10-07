@@ -14,9 +14,8 @@ from release_devkit.rendering import (
     DIGEST_PATTERN,
     AppRow,
     PackageRow,
-    render_app_table,
-    render_images_table,
-    render_packages_table,
+    app_row,
+    render_release_body,
 )
 from release_devkit.tags import has_changes_since, latest_version
 
@@ -88,12 +87,7 @@ def write_draft_section(
 
     # Collect fresh app rows and carry forward rows not re-staged this run
     app_rows = [
-        AppRow(
-            app_name,
-            app_last_versions.get(app_name),
-            asset_name,
-            f"https://github.com/{repository}/releases/download/{tag}/{asset_name}",
-        )
+        app_row(app_name, app_last_versions.get(app_name), asset_name, repository, tag)
         for app_name, asset_name, _ in staged
     ] + (
         [
@@ -107,23 +101,10 @@ def write_draft_section(
     )
 
     # Render the new section body
-    section_lines = [f"### {' — '.join(heading_fragments)}"]
-
-    if packages:
-        section_lines.append("")
-        section_lines.extend(render_packages_table(packages))
-
-    if app_rows:
-        section_lines.append("")
-        section_lines.extend(render_app_table(app_rows))
-
-    if context.manifest:
-        section_lines.append("")
-        section_lines.append("#### Built images")
-        section_lines.extend(render_images_table(context.manifest))
+    body = render_release_body(f"### {' — '.join(heading_fragments)}", packages, app_rows, context.manifest, level=4)
 
     # Replace this SHA's section or prepend a new one
-    new_entry = (anchor, "\n".join(section_lines).strip())
+    new_entry = (anchor, body)
     for index, (existing_anchor, _) in enumerate(sections):
         if existing_anchor == anchor:
             sections[index] = new_entry

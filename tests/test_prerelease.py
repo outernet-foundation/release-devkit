@@ -227,6 +227,7 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     assert pull_assets.calls != []
     assert pull_assets.calls[0][2] == CERTIFIED_SHA
     assert len(written) == 1
+    assert "#### Apps" in written[0]
     assert "| App | Version | Asset |" in written[0]
     fresh_link = f"https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-{SHORT_SHA}.apk"
     assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk]({fresh_link}) |" in written[0]
