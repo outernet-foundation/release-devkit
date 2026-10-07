@@ -68,7 +68,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
 
     short_sha = sha[:12]
-    commit_url = f"https://github.com/{settings.github_repository}/commit/{sha}"
+    heading = f"### [{short_sha}](https://github.com/{settings.github_repository}/commit/{sha})"
 
     # Assemble the release notes from the heading and the artifact tables
     prefix = "#" * (2 if channel == ReleaseChannel.STABLE else 4)
@@ -78,7 +78,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         case ReleaseChannel.PR:
             tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', settings.github_ref)[0][0]}"
             versions = {name: get_latest_version(f"{name}-v") for name in publish_config.apps}
-            blocks.append(f"### [{short_sha}]({commit_url})")
+            blocks.append(heading)
         case ReleaseChannel.DEV:
             tag = DEV_DRAFT_TAG
             versions = release_plan.app_last_versions
@@ -87,8 +87,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {head}").strip()
             )[0]
             blocks.append(
-                f"### [{short_sha}]({commit_url})"
-                f" — [PR #{pr_number}: {pr_title}]"
+                f"{heading} — [PR #{pr_number}: {pr_title}]"
                 f"(https://github.com/{settings.github_repository}/pull/{pr_number})"
             )
         case ReleaseChannel.STABLE:
