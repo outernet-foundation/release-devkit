@@ -156,7 +156,7 @@ def patch_common(
     config: PublishConfig,
     manifest: dict[str, DigestEntry] | None = None,
 ) -> CallRecorder:
-    monkeypatch.setattr(publishing_module, "merge_push_context", FixedReturn(make_context(config, manifest)))
+    monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())
     monkeypatch.setattr(
@@ -164,7 +164,7 @@ def patch_common(
         "bash_output",
         FixedReturn('{"body": "", "url": "https://github.com/owner/repo/releases/untagged-abc"}'),
     )
-    monkeypatch.setattr(publishing_module, "merge_push_context", FixedReturn(make_context(config, manifest)))
+    monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
     pull_assets = CallRecorder([])
     monkeypatch.setattr(builds_module, "pull_build_assets", pull_assets)
     monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Merge PR #7: Add the thing\n"))

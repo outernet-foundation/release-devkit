@@ -10,7 +10,7 @@ from typing import Protocol
 from bashrun.bash import bash, bash_output
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
-from release_devkit.context import VerbContext, merge_push_context
+from release_devkit.context import VerbContext
 from release_devkit.csproj import load_project_roots, read_package_references
 from release_devkit.manifests import NpmManifest, SENTINEL_VERSION
 from release_devkit.plan import ReleasePlan, ResolvedDependency, compute_release_plan
@@ -22,17 +22,13 @@ PYPROJECT_VERSION_PATTERN = re.compile(r'^version\s*=\s*"[^"]*"')
 NPM_DEV_DIST_TAG = "dev"
 
 
-def deliver_changed_packages(
-    config: Path,
-    dev: bool,
-) -> tuple[VerbContext, ReleasePlan, list[tuple[str, str, str]]]:
-    context = merge_push_context(config)
+def publish_packages(context: VerbContext, dev: bool) -> tuple[ReleasePlan, list[tuple[str, str, str]]]:
     packages = context.publish_config.packages
     release_plan = compute_release_plan(context.publish_config)
 
     published: list[tuple[str, str, str]] = []
     if not release_plan.publishing:
-        return context, release_plan, published
+        return release_plan, published
 
     configure_git(context.settings.github_workspace)
     if "nuget" in release_plan.publishing_registries:
@@ -56,7 +52,7 @@ def deliver_changed_packages(
         if not dev:
             create_and_push_tag(f"{name}-v{plan.version}")
 
-    return context, release_plan, published
+    return release_plan, published
 
 
 class Registry(Protocol):
