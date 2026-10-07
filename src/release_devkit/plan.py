@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from release_devkit.config import AppConfig, PackageConfig, PublishConfig, write_step_summary
+from release_devkit.config import AppConfig, PackageConfig, PublishConfig
 from release_devkit.manifests import DependencyEdge, resolve_edges
 from release_devkit.registries import registry_url
 from release_devkit.rendering import PackageRow, RegistryLink
@@ -43,26 +43,6 @@ class ReleasePlan:
 
     def anything_releases(self) -> bool:
         return bool(self.publishing) or bool(self.app_versions)
-
-
-def print_plan(release_plan: ReleasePlan, step_summary: str | None) -> None:
-    lines = [
-        "### Publish Plan",
-        "| Package | Publish | Version |",
-        "|---|---|---|",
-    ]
-    lines.extend(f"| {plan.name} | {plan.publish} | {plan.version} |" for plan in release_plan.plans.values())
-    lines.extend(["", "### App Versions"])
-    for app_name, last_version in release_plan.app_last_versions.items():
-        new_version = release_plan.app_versions.get(app_name)
-        if new_version is not None:
-            lines.append(f"- {app_name}: {last_version or '(none)'} -> {new_version}")
-        else:
-            lines.append(f"- {app_name}: {last_version or '0.0.0'} (unchanged)")
-    summary = "\n".join(lines)
-
-    print(summary)
-    write_step_summary(step_summary, summary)
 
 
 def compute_release_plan(publish_config: PublishConfig, tags: TagSource) -> ReleasePlan:

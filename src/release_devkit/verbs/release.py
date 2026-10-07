@@ -13,7 +13,7 @@ from release_devkit.builds import pull_build_assets
 from release_devkit.config import DEFAULT_CONFIG_PATH
 from release_devkit.context import merge_push_context
 from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release
-from release_devkit.plan import compute_release_plan, package_rows, print_plan
+from release_devkit.plan import compute_release_plan, package_rows
 from release_devkit.publishing import StableStrategy, publish_packages
 from release_devkit.rendering import PackageRow, render_release_body
 from release_devkit.tags import GitTags
@@ -34,7 +34,6 @@ def main(
     tags = GitTags()
 
     release_plan = compute_release_plan(publish_config, tags)
-    print_plan(release_plan, settings.github_step_summary)
 
     if not release_plan.anything_releases():
         print("Nothing to publish")
