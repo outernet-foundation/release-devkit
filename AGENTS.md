@@ -98,7 +98,7 @@ Asset naming: drafts use `{stem}-{short}.{ext}` where stem = the configured `nam
 
 ## The Registry seam
 
-One `Registry` adapter per registry (`registries.py`): `NuGetRegistry`, `NpmRegistry`, `PyPIRegistry`, each `publish(request)`. A registry's identity (nuget package id, npm name, PyPI distribution name) is config data, not code — the same package can publish to several registries at one version; config-declared registry names are validated against `registries.KNOWN_REGISTRIES` at load time.
+One `Registry` adapter per registry (`registries.py`): `NuGetRegistry`, `NpmRegistry`, `PyPIRegistry`, each `publish(path, version, dependency_versions, dist_tag)` — the adapters derive the package's registry identity from the package's own manifest (csproj/package.json/pyproject), so no identity is passed. A registry's identity (nuget package id, npm name, PyPI distribution name) is config data, not code — the same package can publish to several registries at one version; config-declared registry names are validated against `registries.KNOWN_REGISTRIES` at load time.
 
 All three are keyless from the consumer's secret store. PyPI authenticates via trusted publishing (OIDC): the consuming workflow needs `id-token: write` and the project a configured (or pending) publisher; idempotent re-publishing rides `uv publish --check-url`. npm authenticates the same way (`--provenance`, no token plumbing). nuget joins through the official `NuGet/login@v1` action, which exchanges the job's OIDC token for a ~1h API key it exports as `NUGET_API_KEY` (the `NUGET_USER` org secret is a public profile name and routing parameter, not a credential); the adapter consumes that minted key.
 
