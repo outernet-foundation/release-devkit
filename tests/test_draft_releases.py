@@ -201,13 +201,40 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     assert f"sha-{SHORT_SHA}" in written[0]
 
 
-def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.MonkeyPatch) -> None:
+    manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
+    config = PublishConfig(apps={}, builds_registry="ghcr.io/owner/repo/builds")
+    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(config, manifest=manifest)))
+    monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([]))
+    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
+    monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
+
+    written: list[str] = []
+
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
+
+    update_pr_draft()
+
+    assert written
+    assert "zed-capture" in written[0]
+    assert "sha256:abc" in written[0]
+
+
+def test_update_pr_draft_no_app_builds_uploads_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_empty_config())))
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
     update_pr_draft()
 
-    assert not bash_log.commands
+    assert not any("gh release upload" in command for command in bash_log.commands)
+    assert not any("gh release edit" in command for command in bash_log.commands)
 
 
 def test_update_pr_draft_skips_when_nothing_changed(monkeypatch: pytest.MonkeyPatch) -> None:

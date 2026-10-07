@@ -36,9 +36,6 @@ def update_pr_draft(
     repository = settings.github_repository
     manifest = context.manifest
 
-    if not any(app.builds for app in publish_config.apps.values()):
-        return
-
     tag = f"{PR_DRAFT_TAG_PREFIX}{pr_number}"
     draft = DraftRelease(tag, repository, head)
 
