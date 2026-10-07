@@ -35,7 +35,7 @@ def main(
     if not release_plan.publishing and not release_plan.app_versions:
         return
 
-    if packages:
+    if release_plan.publishing:
         publish_packages(
             packages,
             release_plan,
