@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import mkdtemp
 
 import pytest
 
 from release_devkit import drafts
 from release_devkit import publishing as publishing_module
 from release_devkit.verbs import release
-from release_devkit.builds import BuildArtifactConfig
-from release_devkit.config import AppConfig, PublishConfig, Settings
+from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig, Settings
 from release_devkit.context import VerbContext
 from release_devkit.drafts import DEV_DRAFT_TAG
 from release_devkit.plan import ReleasePlan
@@ -39,11 +38,24 @@ def noop(*args: object, **kwargs: object) -> None:
 CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
 
 
-def make_source_file(name: str) -> Path:
-    directory = Path(mkdtemp(prefix="test-source-"))
-    source = directory / name
-    source.write_text("build content", encoding="utf-8")
-    return source
+class FakePullBuild:
+    def __init__(self, layers: dict[tuple[str, str], list[str]]) -> None:
+        self.layers = layers
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(
+        self,
+        builds_registry: str,
+        project: str,
+        platform: str,
+        tag: str,
+        target: Path,
+        **kwargs: object,
+    ) -> None:
+        self.calls.append((builds_registry, project, platform, tag, target))
+        target.mkdir(parents=True, exist_ok=True)
+        for file_name in self.layers[(project, platform)]:
+            (target / file_name).write_text("build content", encoding="utf-8")
 
 
 def make_context(publish_config: PublishConfig) -> VerbContext:
@@ -80,14 +92,12 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
         app_last_versions={"myapp": None},
         app_versions={"myapp": "1.0.0"},
     )
-    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(release, "merge_push_context", FixedReturn(make_context(config)))
     monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(release, "create_and_push_tag", noop)
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
-    monkeypatch.setattr(
-        drafts, "pull_build_assets", FixedReturn([("myapp", artifact, make_source_file("MyApp-AndroidMobile.apk"))])
-    )
+    monkeypatch.setattr(drafts, "pull_build", FakePullBuild({("MyApp", "AndroidMobile"): ["MyApp-AndroidMobile.apk"]}))
+    monkeypatch.setattr(drafts, "ci_step", nullcontext)
     written: list[str] = []
 
     def capturing_bash(command: str) -> None:

@@ -7,13 +7,26 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
 
 from bashrun.bash import bash, bash_check, bash_output
+from ci_devkit.builds import pull_build
+from ci_devkit.ci_step import ci_step
 
-from release_devkit.builds import pull_build_assets
 from release_devkit.context import VerbContext
-from release_devkit.plan import package_rows
-from release_devkit.rendering import markdown_table, render_images_table
+from release_devkit.plan import UNCHANGED_FALLBACK_VERSION
+from release_devkit.tags import latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
+
+REGISTRY_URL_TEMPLATES: dict[str, str] = {
+    "nuget": "https://www.nuget.org/packages/{0}/{1}",
+    "npm": "https://www.npmjs.com/package/{0}/v/{1}",
+    "pypi": "https://pypi.org/project/{0}/{1}",
+}
+
+
+def markdown_table(headers: list[str], rows: list[list[str]]) -> str:
+    lines = [f"| {' | '.join(headers)} |", f"|{'|'.join('---' for _ in headers)}|"]
+    lines.extend(f"| {' | '.join(row)} |" for row in rows)
+    return "\n".join(lines)
 
 
 def write_release(
@@ -34,22 +47,44 @@ def write_release(
         bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
 
     staged: list[tuple[str, str, Path]] = []
-    if context.publish_config.apps:
+    apps_with_builds = {name: app.builds for name, app in context.publish_config.apps.items() if app.builds}
+    if apps_with_builds:
+        builds_registry = context.publish_config.builds_registry
+        if builds_registry is None:
+            raise ValueError("builds_registry is required when any app declares builds")
         short = None if publish else context.short
-        staging = Path(mkdtemp(prefix="build-assets-"))
-        for app_name, artifact, source in pull_build_assets(
-            context.publish_config.apps,
-            context.publish_config.builds_registry,
-            context.certified,
-            context.settings.github_actor,
-            context.settings.github_token,
-        ):
-            named = Path(artifact.name) if artifact.name else source
-            name = f"{named.stem}-{short}{named.suffix}" if short is not None else named.name
-            target = staging / name
-            shutil.copy2(source, target)
-            staged.append((app_name, name, target))
-            print(f"  Asset: {name}")
+        staging = Path(mkdtemp(prefix="release-builds-"))
+        for app_name, artifacts in apps_with_builds.items():
+            with ci_step(f"Pull build artifacts ({app_name})"):
+                for artifact in artifacts:
+                    layer = staging / f"{artifact.project}-{artifact.platform}"
+                    pull_build(
+                        builds_registry,
+                        artifact.project,
+                        artifact.platform,
+                        f"sha-{context.certified}",
+                        layer,
+                        registry_username=context.settings.github_actor,
+                        registry_token=context.settings.github_token,
+                    )
+                    files = sorted(path for path in layer.rglob("*") if path.is_file())
+                    if artifact.file is not None:
+                        source = next((path for path in files if path.name == artifact.file), None)
+                        if source is None:
+                            raise SystemExit(f"Build artifact layer '{artifact.file}' not found under {layer}")
+                    elif len(files) == 1:
+                        source = files[0]
+                    else:
+                        raise SystemExit(
+                            f"Build artifact for ({artifact.project}, {artifact.platform}) pulled multiple files "
+                            f"({', '.join(path.name for path in files)}); declare which one with 'file'"
+                        )
+                    named = Path(artifact.name) if artifact.name else source
+                    name = f"{named.stem}-{short}{named.suffix}" if short is not None else named.name
+                    target = staging / name
+                    shutil.copy2(source, target)
+                    staged.append((app_name, name, target))
+                    print(f"  Asset: {name}")
 
     if staged:
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
@@ -67,19 +102,16 @@ def write_release(
         }
         overrides = {names_by_identity[identity]: version for identity, version in published}
         table_rows: list[list[str]] = []
-        for package_row in package_rows(configured, overrides):
-            if not package_row.registries:
-                table_rows.append([package_row.name, package_row.version, "—"])
-                continue
-            registry_versions = {link.version for link in package_row.registries}
-            if len(registry_versions) == 1:
-                version_cell = next(iter(registry_versions))
-            else:
-                version_cell = ", ".join(f"{link.version} ({link.name})" for link in package_row.registries)
-            registries_cell = ", ".join(
-                f"[{link.name}]({link.url})" if link.url is not None else link.name for link in package_row.registries
-            )
-            table_rows.append([package_row.name, version_cell, registries_cell])
+        for name, package in configured.items():
+            version = overrides.get(name) or latest_version(f"{name}-v") or UNCHANGED_FALLBACK_VERSION
+            registry_cells: list[str] = []
+            for registry_name, identity in package.registries.items():
+                template = REGISTRY_URL_TEMPLATES.get(registry_name)
+                if template is not None and version != UNCHANGED_FALLBACK_VERSION:
+                    registry_cells.append(f"[{registry_name}]({template.format(identity, version)})")
+                else:
+                    registry_cells.append(registry_name)
+            table_rows.append([name, version, ", ".join(registry_cells) if registry_cells else "—"])
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
@@ -93,7 +125,23 @@ def write_release(
         blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], table_rows)}")
 
     if context.manifest:
-        blocks.append(f"{prefix} Built images\n{render_images_table(context.manifest)}")
+        table_rows = []
+        for image_name, entry in context.manifest.items():
+            tree_tag = next(
+                (tag_name for tag_name in entry.tags if tag_name.startswith("tree-")),
+                entry.tags[0] if entry.tags else "",
+            )
+            url = None
+            if entry.ref.startswith("ghcr.io/"):
+                remainder = entry.ref[len("ghcr.io/") :]
+                ref_parts = remainder.split("/", 1)
+                if len(ref_parts) >= 2:
+                    url = (
+                        f"https://github.com/orgs/{ref_parts[0]}/packages/container/{ref_parts[1].replace('/', '%2F')}"
+                    )
+            tag_cell = f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—")
+            table_rows.append([image_name, tag_cell, f"`{entry.digest}`"])
+        blocks.append(f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], table_rows)}")
 
     section = "\n\n".join(blocks)
 

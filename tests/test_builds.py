@@ -4,9 +4,7 @@ from pathlib import Path
 import pytest
 
 from release_devkit import context as context_module
-from release_devkit.builds import DigestEntry
 from release_devkit.context import build_context, merge_push_context
-from release_devkit.rendering import render_images_table
 
 
 class FixedReturn:
@@ -127,23 +125,3 @@ def test_build_context_pulls_the_sha_tag_and_parses_entries(monkeypatch: pytest.
     assert result.manifest["zed-capture"].ref == "ghcr.io/outernet-foundation/placeframe-capture-tool/zed-capture"
     assert result.manifest["zed-capture"].digest == "sha256:abc"
     assert result.manifest["zed-capture"].tags == ["tree-123", "latest"]
-
-
-def test_render_images_table_links_tree_tag_to_ghcr_url() -> None:
-    manifest = {
-        "zed-capture": DigestEntry(
-            ref="ghcr.io/outernet-foundation/placeframe-capture-tool/zed-capture",
-            digest="sha256:abc123",
-            tags=["tree-123", "latest"],
-        )
-    }
-
-    lines = render_images_table(manifest).splitlines()
-
-    assert lines[0] == "| Image | Tag | Digest |"
-    assert any(
-        "tree-123" in line
-        and "github.com/orgs/outernet-foundation/packages/container/placeframe-capture-tool%2Fzed-capture" in line
-        for line in lines
-    )
-    assert any("`sha256:abc123`" in line for line in lines)

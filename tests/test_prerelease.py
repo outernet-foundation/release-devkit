@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
-from tempfile import mkdtemp
 
 import pytest
 
 from release_devkit import drafts
-from release_devkit import plan as plan_module
 from release_devkit import publishing as publishing_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig, Settings
 from release_devkit.builds import DigestEntry
@@ -123,9 +122,7 @@ def noop(*args: object, **kwargs: object) -> None:
 
 
 def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
-    monkeypatch.setattr(plan_module, "latest_version", tags.latest_version)
-    monkeypatch.setattr(plan_module, "latest_version_in_line", tags.latest_version_in_line)
-    monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
+    monkeypatch.setattr(drafts, "latest_version", tags.latest_version)
 
 
 def make_context(
@@ -146,18 +143,38 @@ def make_context(
     )
 
 
-def make_source_file(name: str) -> Path:
-    directory = Path(mkdtemp(prefix="test-source-"))
-    source = directory / name
-    source.write_text("build content", encoding="utf-8")
-    return source
+class FakePullBuild:
+    def __init__(self, layers: dict[tuple[str, str], list[str]]) -> None:
+        self.layers = layers
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(
+        self,
+        builds_registry: str,
+        project: str,
+        platform: str,
+        tag: str,
+        target: Path,
+        **kwargs: object,
+    ) -> None:
+        self.calls.append((builds_registry, project, platform, tag, target))
+        target.mkdir(parents=True, exist_ok=True)
+        for file_name in self.layers[(project, platform)]:
+            (target / file_name).write_text("build content", encoding="utf-8")
+
+
+def patch_pull_build(monkeypatch: pytest.MonkeyPatch, layers: dict[tuple[str, str], list[str]]) -> FakePullBuild:
+    pull_build = FakePullBuild(layers)
+    monkeypatch.setattr(drafts, "pull_build", pull_build)
+    monkeypatch.setattr(drafts, "ci_step", nullcontext)
+    return pull_build
 
 
 def patch_common(
     monkeypatch: pytest.MonkeyPatch,
     config: PublishConfig,
     manifest: dict[str, DigestEntry] | None = None,
-) -> CallRecorder:
+) -> FakePullBuild:
     monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())
@@ -166,11 +183,14 @@ def patch_common(
         "bash_output",
         FixedReturn('{"body": "", "url": "https://github.com/owner/repo/releases/untagged-abc"}'),
     )
-    monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
-    pull_assets = CallRecorder([])
-    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
+    layers = {
+        (artifact.project, artifact.platform): [f"{artifact.project}.apk"]
+        for app in config.apps.values()
+        for artifact in app.builds or []
+    }
+    pull_build = patch_pull_build(monkeypatch, layers)
     monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Merge PR #7: Add the thing\n"))
-    return pull_assets
+    return pull_build
 
 
 def patch_publish_internals(monkeypatch: pytest.MonkeyPatch) -> tuple[FakePublishRegistry, CallRecorder]:
@@ -189,7 +209,7 @@ def run_prerelease(
     config: PublishConfig,
     release_plan: ReleasePlan,
     tags: FakeTags,
-) -> tuple[FakePublishRegistry, CallRecorder, CallRecorder, list[str]]:
+) -> tuple[FakePublishRegistry, CallRecorder, FakePullBuild, list[str]]:
     monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(release_plan))
     patch_plan_tags(monkeypatch, tags)
     pull_assets = patch_common(monkeypatch, config)
@@ -248,9 +268,7 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     )
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
-    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
-    pull_assets = CallRecorder([("myapp", artifact, make_source_file("MyApp-AndroidMobile.apk"))])
-    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
+    pull_build = patch_pull_build(monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp-AndroidMobile.apk"]})
     npm_registry, _ = patch_publish_internals(monkeypatch)
     written: list[str] = []
 
@@ -264,8 +282,8 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     prerelease.main()
 
     assert npm_registry.calls == []
-    assert pull_assets.calls != []
-    assert pull_assets.calls[0][2] == CERTIFIED_SHA
+    assert pull_build.calls != []
+    assert pull_build.calls[0][3] == f"sha-{CERTIFIED_SHA}"
     assert len(written) == 1
     assert "#### Apps" in written[0]
     assert "| App | Version | Asset |" in written[0]
@@ -276,8 +294,8 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
 def test_stages_all_apps_regardless_of_source_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(
         apps={
-            "changed-app": make_app("changed-app"),
-            "unchanged-app": make_app("unchanged-app"),
+            "changed-app": make_app("changed-app", [BuildArtifactConfig(project="AppA", platform="AndroidMobile")]),
+            "unchanged-app": make_app("unchanged-app", [BuildArtifactConfig(project="AppB", platform="AndroidMobile")]),
         }
     )
     tags = FakeTags(
@@ -285,10 +303,12 @@ def test_stages_all_apps_regardless_of_source_changes(monkeypatch: pytest.Monkey
         changed={"changed-app"},
     )
 
-    _, _, pull_assets, _ = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    _, _, pull_build, _ = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
-    assert len(pull_assets.calls) == 1
-    assert pull_assets.calls[0][0] == config.apps
+    assert {(call[1], call[2]) for call in pull_build.calls} == {
+        ("AppA", "AndroidMobile"),
+        ("AppB", "AndroidMobile"),
+    }
 
 
 def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -340,12 +360,15 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
             "settled": PackageConfig(
                 path=Path("packages/settled"), major_minor="1.0", registries={"npm": "settled-id"}
             ),
+            "never": PackageConfig(path=Path("packages/never"), major_minor="1.0", registries={"npm": "never-id"}),
         },
         apps={"myapp": make_app()},
     )
     tags = FakeTags(versions={"myapp": "1.0.0", "settled": "2.1.0"}, changed=set())
 
-    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(make_plan({"fresh"}, {"settled"})))
+    monkeypatch.setattr(
+        publishing_module, "compute_release_plan", FixedReturn(make_plan({"fresh"}, {"settled", "never"}))
+    )
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
     patch_publish_internals(monkeypatch)
@@ -363,6 +386,7 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
     assert len(written) == 1
     assert f"| fresh | 1.0.0-dev.{SHORT_SHA} |" in written[0]
     assert "| settled | 2.1.0 |" in written[0]
+    assert "| never | 0.0.0 | npm |" in written[0]
 
 
 def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch) -> None:

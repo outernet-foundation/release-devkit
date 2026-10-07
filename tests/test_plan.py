@@ -11,7 +11,6 @@ from release_devkit.plan import (
     ResolvedDependency,
     compute_release_plan,
     next_version,
-    package_rows,
     resolve_dependency_versions,
 )
 from release_devkit.manifests import SENTINEL_VERSION
@@ -234,22 +233,3 @@ def test_release_plan_bumps_app_on_its_own_path_change(monkeypatch: pytest.Monke
 
     assert release_plan.publishing == set()
     assert release_plan.app_versions == {"app": "0.2.4"}
-
-
-def test_package_rows_use_override_then_tag_then_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    packages = {
-        "published": PackageConfig(path=Path("pkg/a"), major_minor="1.0", registries={"npm": "a-id"}),
-        "tagged": PackageConfig(path=Path("pkg/b"), major_minor="1.0", registries={"npm": "b-id"}),
-        "never": PackageConfig(path=Path("pkg/c"), major_minor="1.0", registries={"npm": "c-id"}),
-    }
-    patch_plan_tags(monkeypatch, FakeTagSource(versions={"tagged-v": ["1.2.3"]}, changed={}))
-
-    overridden = package_rows(packages, {"published": "1.1.0-dev.abcdef123456"})
-    assert [(row.name, row.version) for row in overridden] == [
-        ("published", "1.1.0-dev.abcdef123456"),
-        ("tagged", "1.2.3"),
-        ("never", "0.0.0"),
-    ]
-    assert overridden[0].registries[0].url is not None
-    assert overridden[1].registries[0].url is not None
-    assert overridden[2].registries[0].url is None

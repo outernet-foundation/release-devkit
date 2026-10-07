@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from pathlib import Path
-from tempfile import mkdtemp
 
 import pytest
 
@@ -10,7 +10,7 @@ from release_devkit import drafts
 from release_devkit import plan as plan_module
 from release_devkit.verbs import update_pr_draft as update_pr_draft_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig, Settings
-from release_devkit.builds import DigestEntry, pull_build_assets
+from release_devkit.builds import DigestEntry
 from release_devkit.context import VerbContext
 from release_devkit.drafts import delete_draft_release
 from release_devkit.verbs.update_pr_draft import update_pr_draft
@@ -84,11 +84,31 @@ def make_empty_config() -> PublishConfig:
     )
 
 
-def make_source_file(name: str = "app.apk") -> Path:
-    directory = Path(mkdtemp(prefix="test-source-"))
-    source = directory / name
-    source.write_text("build content", encoding="utf-8")
-    return source
+class FakePullBuild:
+    def __init__(self, layers: dict[tuple[str, str], list[str]]) -> None:
+        self.layers = layers
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(
+        self,
+        builds_registry: str,
+        project: str,
+        platform: str,
+        tag: str,
+        target: Path,
+        **kwargs: object,
+    ) -> None:
+        self.calls.append((builds_registry, project, platform, tag, target))
+        target.mkdir(parents=True, exist_ok=True)
+        for file_name in self.layers[(project, platform)]:
+            (target / file_name).write_text("build content", encoding="utf-8")
+
+
+def patch_pull_build(monkeypatch: pytest.MonkeyPatch, layers: dict[tuple[str, str], list[str]]) -> FakePullBuild:
+    pull_build = FakePullBuild(layers)
+    monkeypatch.setattr(drafts, "pull_build", pull_build)
+    monkeypatch.setattr(drafts, "ci_step", nullcontext)
+    return pull_build
 
 
 DRAFT_REPOSITORY = "owner/repo"
@@ -122,11 +142,6 @@ def patch_bash(monkeypatch: pytest.MonkeyPatch, check_returns: object = False) -
     return bash_log
 
 
-def test_pull_build_assets_returns_empty_when_no_builds() -> None:
-    result = pull_build_assets(make_empty_config().apps, None, CERTIFIED_SHA, "", "")
-    assert result == []
-
-
 def test_delete_draft_release_deletes_with_cleanup_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=True)
 
@@ -147,11 +162,9 @@ def test_delete_draft_release_noop_when_absent(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
-    source = make_source_file("MyApp.apk")
-    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
-    monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([("myapp", artifact, source)]))
+    patch_pull_build(monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp.apk"]})
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
@@ -164,13 +177,11 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
 
 
 def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
-    source = make_source_file("MyApp.apk")
-    artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
     monkeypatch.setattr(
         update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config(), manifest=manifest))
     )
-    monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([("myapp", artifact, source)]))
+    patch_pull_build(monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp.apk"]})
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
@@ -189,6 +200,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     assert written
     assert "zed-capture" in written[0]
     assert "sha256:abc" in written[0]
+    assert "[tree-1](https://github.com/orgs/owner/packages/container/repo%2Fzed-capture)" in written[0]
     assert f"https://github.com/owner/repo/commit/{CERTIFIED_SHA}" in written[0]
     assert f"sha-{SHORT_SHA}" in written[0]
 
@@ -197,7 +209,6 @@ def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.Monke
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
     config = PublishConfig(apps={}, builds_registry="ghcr.io/owner/repo/builds")
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(config, manifest=manifest)))
-    monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([]))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
@@ -291,23 +302,23 @@ def test_update_pr_draft_replaces_same_anchor_and_preserves_others(monkeypatch: 
 def test_update_pr_draft_lists_one_row_per_staged_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_bash(monkeypatch, check_returns=False)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
-    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
+    config = PublishConfig(
+        apps={
+            "myapp": AppConfig(
+                path=Path("apps/myapp"),
+                major_minor="1.0",
+                builds=[
+                    BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk"),
+                    BuildArtifactConfig(project="MyApp", platform="IOS", name="MyApp-IOS.apk"),
+                ],
+            )
+        },
+        builds_registry="ghcr.io/owner/repo/builds",
+    )
+    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(config)))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
-    monkeypatch.setattr(
-        drafts,
-        "pull_build_assets",
-        FixedReturn([
-            (
-                "myapp",
-                BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk"),
-                make_source_file("MyApp-AndroidMobile.apk"),
-            ),
-            (
-                "myapp",
-                BuildArtifactConfig(project="MyApp", platform="IOS", name="MyApp-IOS.apk"),
-                make_source_file("MyApp-IOS.apk"),
-            ),
-        ]),
+    patch_pull_build(
+        monkeypatch, {("MyApp", "AndroidMobile"): ["MyApp-AndroidMobile.apk"], ("MyApp", "IOS"): ["MyApp-IOS.apk"]}
     )
 
     written: list[str] = []
