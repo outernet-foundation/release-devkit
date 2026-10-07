@@ -93,6 +93,9 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(drafts, "build_context", FixedReturn(make_context(config)))
     monkeypatch.setattr(drafts, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(drafts, "create_and_push_tag", noop)
+    monkeypatch.setattr(drafts, "configure_git", noop)
+    monkeypatch.setattr(drafts, "install_dotnet", noop)
+    monkeypatch.setattr(drafts, "install_node", noop)
 
     def counting_bash_output(command: str) -> str:
         if command.startswith("gh release list"):

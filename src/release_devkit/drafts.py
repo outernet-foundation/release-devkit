@@ -62,28 +62,25 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         if channel == ReleaseChannel.STABLE and not release_plan.publishing and not release_plan.app_versions:
             return
 
+        configure_git(context.settings.github_workspace)
+        install_dotnet("8.0")
+        install_node("24", "https://registry.npmjs.org")
+        registries = build_registries(context.settings.nuget_api_key)
         published: dict[str, str] = {}
-        if release_plan.publishing:
-            configure_git(context.settings.github_workspace)
-            if "nuget" in release_plan.publishing_registries:
-                install_dotnet("8.0")
-            if "npm" in release_plan.publishing_registries:
-                install_node("24", "https://registry.npmjs.org")
-            registries = build_registries(context.settings.nuget_api_key)
-            for name, package in context.publish_config.packages.items():
-                plan = release_plan.plans[name]
-                if not plan.publish:
-                    continue
-                for registry_name, identity in package.registries.items():
-                    published[identity] = registries[registry_name].publish(
-                        package.path,
-                        plan.version,
-                        release_plan.resolved_versions[name],
-                        channel == ReleaseChannel.DEV,
-                        context.short,
-                    )
-                if channel == ReleaseChannel.STABLE:
-                    create_and_push_tag(f"{name}-v{plan.version}")
+        for name, package in context.publish_config.packages.items():
+            plan = release_plan.plans[name]
+            if not plan.publish:
+                continue
+            for registry_name, identity in package.registries.items():
+                published[identity] = registries[registry_name].publish(
+                    package.path,
+                    plan.version,
+                    release_plan.resolved_versions[name],
+                    channel == ReleaseChannel.DEV,
+                    context.short,
+                )
+            if channel == ReleaseChannel.STABLE:
+                create_and_push_tag(f"{name}-v{plan.version}")
 
         # Tag the bumped app versions before cutting the stable release
         if channel == ReleaseChannel.STABLE:
