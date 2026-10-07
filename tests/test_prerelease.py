@@ -58,22 +58,22 @@ class FakePublishRegistry:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def dev_version(self, base_version: object, short_sha: object) -> object:
-        return f"{base_version}-dev.{short_sha}"
-
     def publish(
         self,
         path: object,
-        version: object,
-        dependency_versions: object,
+        base_version: object,
+        resolved_dependencies: object,
         dev: bool,
-    ) -> None:
+        short_sha: object,
+    ) -> object:
         self.calls.append({
             "path": path,
-            "version": version,
-            "dependency_versions": dependency_versions,
+            "base_version": base_version,
+            "resolved_dependencies": resolved_dependencies,
             "dev": dev,
+            "short_sha": short_sha,
         })
+        return f"{base_version}-dev.{short_sha}" if dev else base_version
 
 
 def make_builds() -> list[BuildArtifactConfig]:
@@ -228,8 +228,9 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
     npm_registry, create_and_push_tag, pull_assets, written = run_prerelease(monkeypatch, config, release_plan, tags)
 
     assert len(npm_registry.calls) == 1
-    assert npm_registry.calls[0]["version"] == f"1.0.0-dev.{SHORT_SHA}"
+    assert npm_registry.calls[0]["base_version"] == "1.0.0"
     assert npm_registry.calls[0]["dev"] is True
+    assert f"| pkg | 1.0.0-dev.{SHORT_SHA} |" in written[0]
     assert create_and_push_tag.calls == []
     assert pull_assets.calls != []
     assert written != []

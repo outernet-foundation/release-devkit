@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from release_devkit.config import PackageConfig, PublishConfig
 from release_devkit.manifests import DependencyEdge, resolve_edges
-from release_devkit.registries import registry_url
+from release_devkit.registries import ResolvedDependency, registry_url
 from release_devkit.rendering import PackageRow, RegistryLink
 from release_devkit.tags import (
     has_changes_since,
@@ -21,12 +21,6 @@ class PackagePlan:
     publish: bool
     version: str
     last_version: str | None
-
-
-@dataclass(frozen=True)
-class ResolvedDependency:
-    version: str
-    co_publishing: bool
 
 
 @dataclass(frozen=True)

@@ -3,6 +3,7 @@ import re
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CalledProcessError
 from typing import Protocol
@@ -18,6 +19,12 @@ PYPROJECT_VERSION_PATTERN = re.compile(r'^version\s*=\s*"[^"]*"')
 NPM_DEV_DIST_TAG = "dev"
 # Same-unit dependency sentinel: authored in manifests, injected with the event version at publish.
 SENTINEL_VERSION = "0.0.0+local"
+
+
+@dataclass(frozen=True)
+class ResolvedDependency:
+    version: str
+    co_publishing: bool
 
 
 class NpmManifest(BaseModel):
@@ -39,10 +46,11 @@ class Registry(Protocol):
     def publish(
         self,
         path: Path,
-        version: str,
-        dependency_versions: dict[str, str],
+        base_version: str,
+        resolved_dependencies: dict[str, ResolvedDependency],
         dev: bool,
-    ) -> None: ...
+        short_sha: str,
+    ) -> str: ...
 
 
 class NuGetRegistry:
@@ -55,10 +63,14 @@ class NuGetRegistry:
     def publish(
         self,
         path: Path,
-        version: str,
-        dependency_versions: dict[str, str],
+        base_version: str,
+        resolved_dependencies: dict[str, ResolvedDependency],
         dev: bool,
-    ) -> None:
+        short_sha: str,
+    ) -> str:
+        version, dependency_versions = resolve_publish_versions(
+            self, base_version, short_sha, dev, resolved_dependencies
+        )
         properties: dict[str, str] = {}
         found: set[str] = set()
         for root in load_project_roots(path):
@@ -98,6 +110,7 @@ class NuGetRegistry:
                 stderr_lines = [line.strip() for line in (error.stderr or "").splitlines() if line.strip()]
                 detail = stderr_lines[0] if stderr_lines else "no stderr output"
                 raise SystemExit(f"dotnet nuget push failed (exit {error.returncode}): {detail}") from None
+        return version
 
 
 class NpmRegistry:
@@ -107,10 +120,14 @@ class NpmRegistry:
     def publish(
         self,
         path: Path,
-        version: str,
-        dependency_versions: dict[str, str],
+        base_version: str,
+        resolved_dependencies: dict[str, ResolvedDependency],
         dev: bool,
-    ) -> None:
+        short_sha: str,
+    ) -> str:
+        version, dependency_versions = resolve_publish_versions(
+            self, base_version, short_sha, dev, resolved_dependencies
+        )
         command = "npm publish --access public --provenance --loglevel verbose"
         if dev:
             command += f" --tag {NPM_DEV_DIST_TAG}"
@@ -123,6 +140,7 @@ class NpmRegistry:
                     print("  Version already published, skipping (idempotent)")
                 else:
                     raise
+        return version
 
 
 class PyPIRegistry:
@@ -132,13 +150,35 @@ class PyPIRegistry:
     def publish(
         self,
         path: Path,
-        version: str,
-        dependency_versions: dict[str, str],
+        base_version: str,
+        resolved_dependencies: dict[str, ResolvedDependency],
         dev: bool,
-    ) -> None:
+        short_sha: str,
+    ) -> str:
+        version, dependency_versions = resolve_publish_versions(
+            self, base_version, short_sha, dev, resolved_dependencies
+        )
         with ephemeral_pyproject_patch(path, version, dependency_versions):
             bash("uv build --out-dir dist", cwd=path)
         bash(f"uv publish --check-url {PYPI_SIMPLE_INDEX}", cwd=path)
+        return version
+
+
+def resolve_publish_versions(
+    registry: Registry,
+    base_version: str,
+    short_sha: str,
+    dev: bool,
+    resolved_dependencies: dict[str, ResolvedDependency],
+) -> tuple[str, dict[str, str]]:
+    version = registry.dev_version(base_version, short_sha) if dev else base_version
+    dependency_versions = {
+        identity: registry.dev_version(resolved.version, short_sha)
+        if dev and resolved.co_publishing
+        else resolved.version
+        for identity, resolved in resolved_dependencies.items()
+    }
+    return version, dependency_versions
 
 
 @contextmanager
