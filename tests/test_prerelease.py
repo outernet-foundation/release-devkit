@@ -12,7 +12,6 @@ from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig,
 from release_devkit.builds import DigestEntry
 from release_devkit.context import VerbContext
 from release_devkit.plan import PackagePlan, ReleasePlan
-from release_devkit.rendering import PackageRow, render_draft_section
 from release_devkit.verbs import prerelease
 
 
@@ -146,40 +145,35 @@ def run_prerelease(
     config: PublishConfig,
     release_plan: ReleasePlan,
     tags: FakeTags,
-) -> tuple[CallRecorder, CallRecorder, list[tuple[str, str]]]:
+) -> tuple[CallRecorder, CallRecorder, list[str]]:
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(release_plan))
     patch_plan_tags(monkeypatch, tags)
     pull_assets = patch_common(monkeypatch, config)
     publish_packages = CallRecorder([])
     monkeypatch.setattr(prerelease, "publish_packages", publish_packages)
-    upserts: list[tuple[str, str]] = []
+    written: list[str] = []
 
-    def record_upsert(
-        instance: drafts.DraftRelease,
-        anchor: str,
-        heading_fragments: list[str],
-        staged: list[tuple[str, Path]],
-        manifest: dict[str, DigestEntry] | None,
-        packages: list[PackageRow] | None,
-    ) -> None:
-        upserts.append((anchor, render_draft_section(heading_fragments, None, manifest, packages)))
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
 
-    monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
 
     prerelease.main()
 
-    return publish_packages, pull_assets, upserts
+    return publish_packages, pull_assets, written
 
 
 def test_nothing_changed_returns_without_publishing_or_drafting(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
-    publish_packages, pull_assets, upserts = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    publish_packages, pull_assets, written = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert publish_packages.calls == []
     assert pull_assets.calls == []
-    assert upserts == []
+    assert written == []
 
 
 def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -190,12 +184,12 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
     release_plan = make_plan({"pkg"})
 
-    publish_packages, pull_assets, upserts = run_prerelease(monkeypatch, config, release_plan, tags)
+    publish_packages, pull_assets, written = run_prerelease(monkeypatch, config, release_plan, tags)
 
     assert publish_packages.calls != []
     assert pull_assets.calls == []
-    assert upserts != []
-    assert upserts[0][0] == f"sha-{SHORT_SHA}"
+    assert written != []
+    assert f'<a id="sha-{SHORT_SHA}"></a>' in written[0]
     strategy = publish_packages.calls[0][3]
     assert isinstance(strategy, prerelease.DevStrategy)
     assert strategy.package_version("npm", release_plan.plans["pkg"]) == f"1.0.0-dev.{SHORT_SHA}"
@@ -205,12 +199,12 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"})
 
-    publish_packages, pull_assets, upserts = run_prerelease(monkeypatch, config, make_plan(set()), tags)
+    publish_packages, pull_assets, written = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert publish_packages.calls == []
     assert pull_assets.calls != []
     assert pull_assets.calls[0][1] == CERTIFIED_SHA
-    assert upserts != []
+    assert written != []
 
 
 def test_dev_draft_surfaces_only_changed_apps(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -256,26 +250,21 @@ def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: py
         "bash_output",
         FixedReturn(json.dumps({"body": draft_body, "url": "https://github.com/owner/repo/releases/untagged-abc"})),
     )
-    sections: list[str] = []
+    written: list[str] = []
 
-    def record_upsert(
-        instance: drafts.DraftRelease,
-        anchor: str,
-        heading_fragments: list[str],
-        staged: list[tuple[str, Path]],
-        manifest: dict[str, DigestEntry] | None,
-        packages: list[PackageRow] | None,
-    ) -> None:
-        sections.append(render_draft_section(heading_fragments, None, manifest, packages))
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
 
-    monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
 
     prerelease.main()
 
-    assert len(sections) == 1
-    assert digest_new in sections[0]
-    assert digest_existing in sections[0]
-    assert f"[{SHORT_SHA}](https://github.com/owner/repo/commit/{CERTIFIED_SHA})" in sections[0]
+    assert len(written) == 1
+    assert digest_new in written[0]
+    assert digest_existing in written[0]
+    assert f"[{SHORT_SHA}](https://github.com/owner/repo/commit/{CERTIFIED_SHA})" in written[0]
 
 
 def test_unchanged_images_only_run_skips_the_section(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -295,23 +284,18 @@ def test_unchanged_images_only_run_skips_the_section(monkeypatch: pytest.MonkeyP
         "bash_output",
         FixedReturn(json.dumps({"body": draft_body, "url": "https://github.com/owner/repo/releases/untagged-abc"})),
     )
-    upserts: list[tuple[str, str]] = []
+    written: list[str] = []
 
-    def record_upsert(
-        instance: drafts.DraftRelease,
-        anchor: str,
-        heading_fragments: list[str],
-        staged: list[tuple[str, Path]],
-        manifest: dict[str, DigestEntry] | None,
-        packages: list[PackageRow] | None,
-    ) -> None:
-        upserts.append((anchor, render_draft_section(heading_fragments, None, manifest, packages)))
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
 
-    monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
 
     prerelease.main()
 
-    assert upserts == []
+    assert written == []
 
 
 def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
@@ -332,26 +316,20 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
     monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([("npm", "fresh-id", "1.0.1-dev.abcdef123456")]))
-    upserts: list[tuple[str, str]] = []
+    written: list[str] = []
 
-    def record_upsert(
-        instance: drafts.DraftRelease,
-        anchor: str,
-        heading_fragments: list[str],
-        staged: list[tuple[str, Path]],
-        manifest: dict[str, DigestEntry] | None,
-        packages: list[PackageRow] | None,
-    ) -> None:
-        upserts.append((anchor, render_draft_section(heading_fragments, None, manifest, packages)))
+    def capturing_bash(command: str) -> None:
+        if "--notes-file" in command:
+            path = command.split("--notes-file", 1)[1].strip().split()[0]
+            written.append(Path(path).read_text(encoding="utf-8"))
 
-    monkeypatch.setattr(drafts.DraftRelease, "upsert_section", record_upsert)
+    monkeypatch.setattr(drafts, "bash", capturing_bash)
 
     prerelease.main()
 
-    assert len(upserts) == 1
-    section = upserts[0][1]
-    assert "| fresh | 1.0.1-dev.abcdef123456 |" in section
-    assert "| settled | 2.1.0 |" in section
+    assert len(written) == 1
+    assert "| fresh | 1.0.1-dev.abcdef123456 |" in written[0]
+    assert "| settled | 2.1.0 |" in written[0]
 
 
 def test_snapshot_section_carries_forward_unchanged_app_assets(monkeypatch: pytest.MonkeyPatch) -> None:

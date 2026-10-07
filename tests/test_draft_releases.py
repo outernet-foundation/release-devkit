@@ -15,6 +15,7 @@ from release_devkit.builds import DigestEntry, pull_build_assets
 from release_devkit.context import VerbContext
 from release_devkit.drafts import (
     delete_draft_release,
+    write_draft_section,
 )
 from release_devkit.verbs.update_pr_draft import update_pr_draft
 
@@ -263,33 +264,33 @@ def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.Monke
     assert not bash_log.commands
 
 
-def test_upsert_section_writes_notes_file_without_recreating(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_write_draft_section_writes_notes_file_without_recreating(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=True)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
-    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
-    draft.upsert_section("run-42", ["Heading"])
+    context = make_context(PublishConfig())
+    write_draft_section(context, "dev-builds", ["Heading"], stage_changed_only=False, publishing=True)
 
     assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
     assert not any("gh release create" in command for command in bash_log.commands)
 
 
-def test_upsert_section_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_write_draft_section_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) -> None:
     bash_log = patch_bash(monkeypatch, check_returns=False)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
-    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
-    draft.upsert_section("run-42", ["Heading"])
+    context = make_context(PublishConfig())
+    write_draft_section(context, "dev-builds", ["Heading"], stage_changed_only=False, publishing=True)
 
     assert any(
-        "gh release create dev-builds" in command and "--draft" in command and f"--target {CERTIFIED_SHA}" in command
+        "gh release create dev-builds" in command and "--draft" in command and f"--target {context.head}" in command
         for command in bash_log.commands
     )
     assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
 
 
-def test_upsert_section_replaces_same_anchor_and_preserves_others(monkeypatch: pytest.MonkeyPatch) -> None:
-    body = '<a id="sha-old"></a>\n### Old\n\n<a id="sha-new"></a>\n### New v1'
+def test_write_draft_section_replaces_same_anchor_and_preserves_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = f'<a id="sha-old"></a>\n### Old\n\n<a id="sha-{SHORT_SHA}"></a>\n### New v1'
     view_json = json.dumps({"body": body, "url": DRAFT_URL})
     patch_bash(monkeypatch, check_returns=True)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
@@ -303,8 +304,9 @@ def test_upsert_section_replaces_same_anchor_and_preserves_others(monkeypatch: p
 
     monkeypatch.setattr(drafts, "bash", capturing_bash)
 
-    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
-    draft.upsert_section("sha-new", ["New v2"])
+    write_draft_section(
+        make_context(PublishConfig()), "dev-builds", ["New v2"], stage_changed_only=False, publishing=True
+    )
 
     assert written
     assert "### Old" in written[0]
@@ -312,7 +314,7 @@ def test_upsert_section_replaces_same_anchor_and_preserves_others(monkeypatch: p
     assert "### New v1" not in written[0]
 
 
-def test_upsert_section_carries_assets_from_newest_section_and_drops_staged_stems(
+def test_write_draft_section_carries_assets_from_newest_section_and_drops_staged_stems(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     old_link = "- [MyApp-AndroidMobile-111111111111.apk](https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-111111111111.apk)"
@@ -325,6 +327,16 @@ def test_upsert_section_carries_assets_from_newest_section_and_drops_staged_stem
     view_json = json.dumps({"body": body, "url": DRAFT_URL})
     patch_bash(monkeypatch, check_returns=True)
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
+    monkeypatch.setattr(
+        drafts,
+        "pull_build_assets",
+        FixedReturn([
+            (
+                BuildArtifactConfig(project="OtherApp", platform="Android", name="OtherApp-Android.apk"),
+                make_source_file("OtherApp-Android.apk"),
+            )
+        ]),
+    )
 
     written: list[str] = []
 
@@ -335,34 +347,35 @@ def test_upsert_section_carries_assets_from_newest_section_and_drops_staged_stem
 
     monkeypatch.setattr(drafts, "bash", capturing_bash)
 
-    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
-    draft.upsert_section(
-        "sha-run",
-        ["Run"],
-        [("OtherApp-Android-444444444444.apk", Path("staged/OtherApp-Android-444444444444.apk"))],
+    write_draft_section(
+        make_context(make_build_config()), "dev-builds", ["Run"], stage_changed_only=False, publishing=True
     )
 
     assert written
-    section = written[0].split('<a id="sha-run"></a>', 1)[1].split('<a id="sha-newest"></a>', 1)[0]
+    anchor = f"sha-{SHORT_SHA}"
+    section = written[0].split(f'<a id="{anchor}"></a>', 1)[1].split('<a id="sha-newest"></a>', 1)[0]
     assert old_link in section
-    assert "OtherApp-Android-444444444444.apk" in section
+    assert f"OtherApp-Android-{SHORT_SHA}.apk" in section
     assert "OtherApp-Android-222222222222.apk" not in section
     assert "OtherApp-Android-333333333333.apk" not in section
 
 
-def test_has_new_digests_compares_manifest_against_body(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_write_draft_section_guard_compares_manifest_digests_against_body(monkeypatch: pytest.MonkeyPatch) -> None:
     known = "sha256:" + "a" * 64
     fresh = "sha256:" + "b" * 64
-    view_json = json.dumps({"body": f"| img | tree-1 | `{known}` |", "url": DRAFT_URL})
-    patch_bash(monkeypatch, check_returns=True)
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
+    bash_log = patch_bash(monkeypatch, check_returns=True)
 
-    draft = drafts.DraftRelease("dev-builds", "owner/repo", CERTIFIED_SHA)
+    known_body = json.dumps({"body": f"| img | tree-1 | `{known}` |", "url": DRAFT_URL})
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(known_body))
+    context = make_context(
+        PublishConfig(), manifest={"img": DigestEntry(ref="ghcr.io/owner/repo/img", digest=known, tags=["tree-1"])}
+    )
+    write_draft_section(context, "dev-builds", ["Heading"], stage_changed_only=False)
+    assert not any("gh release edit" in command for command in bash_log.commands)
 
-    assert (
-        draft.has_new_digests({"img": DigestEntry(ref="ghcr.io/owner/repo/img", digest=known, tags=["tree-1"])})
-        is False
+    monkeypatch.setattr(drafts, "bash_output", FixedReturn(json.dumps({"body": "", "url": DRAFT_URL})))
+    context = make_context(
+        PublishConfig(), manifest={"img": DigestEntry(ref="ghcr.io/owner/repo/img", digest=fresh, tags=["tree-1"])}
     )
-    assert (
-        draft.has_new_digests({"img": DigestEntry(ref="ghcr.io/owner/repo/img", digest=fresh, tags=["tree-1"])}) is True
-    )
+    write_draft_section(context, "dev-builds", ["Heading"], stage_changed_only=False)
+    assert any("gh release edit" in command for command in bash_log.commands)

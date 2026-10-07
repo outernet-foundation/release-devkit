@@ -3,14 +3,13 @@ from __future__ import annotations
 import json
 import re
 import shutil
-from collections.abc import Sequence
 from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
 
 from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 
-from release_devkit.builds import DigestEntry, pull_build_assets
+from release_devkit.builds import pull_build_assets
 from release_devkit.context import VerbContext
 from release_devkit.plan import apps_with_changes
 from release_devkit.rendering import DIGEST_PATTERN, AssetLink, PackageRow, parse_asset_links, render_draft_section
@@ -18,65 +17,6 @@ from release_devkit.rendering import DIGEST_PATTERN, AssetLink, PackageRow, pars
 DEV_DRAFT_TAG = "dev-builds"
 _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
 _ASSET_NAME_PATTERN = re.compile(r"^(.+)-[0-9a-f]{12}\.[^.]+$")
-
-
-class DraftRelease:
-    def __init__(self, tag: str, repository: str, target_sha: str) -> None:
-        if not bash_check(f"gh release view {tag} --repo {repository}"):
-            bash(f"gh release create {tag} --draft --target {target_sha} --title {tag} --notes '' --repo {repository}")
-            print(f"  Draft release {tag} created")
-        payload = json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body,url"))
-        self.tag = tag
-        self.repository = repository
-        self.body = payload["body"]
-        self.url = payload["url"]
-        parts = _ANCHOR_PATTERN.split(self.body)
-        sections: list[tuple[str, str]] = []
-        for index in range(1, len(parts), 2):
-            anchor_id = parts[index]
-            content = parts[index + 1].strip() if index + 1 < len(parts) else ""
-            sections.append((anchor_id, content))
-        self.sections = sections
-
-    def has_new_digests(self, manifest: dict[str, DigestEntry]) -> bool:
-        existing = set(DIGEST_PATTERN.findall(self.body))
-        return any(entry.digest not in existing for entry in manifest.values())
-
-    def upsert_section(
-        self,
-        anchor: str,
-        heading_fragments: list[str],
-        staged: Sequence[tuple[str, Path]] = (),
-        manifest: dict[str, DigestEntry] | None = None,
-        packages: list[PackageRow] | None = None,
-    ) -> None:
-        fresh = [
-            AssetLink(name, f"https://github.com/{self.repository}/releases/download/{self.tag}/{name}")
-            for name, _ in staged
-        ]
-        staged_stems = {stem for stem in (asset_stem(name) for name, _ in staged) if stem is not None}
-        carried = (
-            [link for link in parse_asset_links(self.sections[0][1]) if asset_stem(link.name) not in staged_stems]
-            if self.sections
-            else []
-        )
-        new_entry = (
-            anchor,
-            render_draft_section(heading_fragments, fresh + carried or None, manifest, packages or None).strip(),
-        )
-        for index, (existing_anchor, _) in enumerate(self.sections):
-            if existing_anchor == anchor:
-                self.sections[index] = new_entry
-                break
-        else:
-            self.sections.insert(0, new_entry)
-        blocks = [f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in self.sections]
-        with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
-            file.write("\n\n".join(blocks) + "\n")
-            notes_path = file.name
-        bash(f"gh release edit {self.tag} --repo {self.repository} --notes-file {notes_path}")
-        Path(notes_path).unlink()
-        print(f"  Section {anchor} written to draft {self.tag}")
 
 
 def write_draft_section(
@@ -87,12 +27,17 @@ def write_draft_section(
     publishing: bool = False,
     packages: list[PackageRow] | None = None,
 ) -> None:
+    repository = context.settings.github_repository
     changed_apps = apps_with_changes(context.publish_config)
-    draft = DraftRelease(tag, context.settings.github_repository, context.head)
+    if not bash_check(f"gh release view {tag} --repo {repository}"):
+        bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
+        print(f"  Draft release {tag} created")
+    body = json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body"))["body"]
+    known_digests = set(DIGEST_PATTERN.findall(body))
     if (
         not publishing
         and not changed_apps
-        and not (context.manifest is not None and draft.has_new_digests(context.manifest))
+        and not any(entry.digest not in known_digests for entry in (context.manifest or {}).values())
     ):
         print("Nothing to publish")
         return
@@ -120,10 +65,40 @@ def write_draft_section(
             staged.append((name, target))
             print(f"  Asset: {name}")
     if staged:
-        with ci_step(f"Upload assets to {draft.tag}"):
+        with ci_step(f"Upload assets to {tag}"):
             files = " ".join(f'"{path}"' for _, path in staged)
-            bash(f"gh release upload {draft.tag} {files} --clobber --repo {draft.repository}")
-    draft.upsert_section(f"sha-{context.short}", heading_fragments, staged, context.manifest, packages)
+            bash(f"gh release upload {tag} {files} --clobber --repo {repository}")
+    anchor = f"sha-{context.short}"
+    fresh = [AssetLink(name, f"https://github.com/{repository}/releases/download/{tag}/{name}") for name, _ in staged]
+    staged_stems = {stem for stem in (asset_stem(name) for name, _ in staged) if stem is not None}
+    parts = _ANCHOR_PATTERN.split(body)
+    sections: list[tuple[str, str]] = []
+    for index in range(1, len(parts), 2):
+        anchor_id = parts[index]
+        content = parts[index + 1].strip() if index + 1 < len(parts) else ""
+        sections.append((anchor_id, content))
+    carried = (
+        [link for link in parse_asset_links(sections[0][1]) if asset_stem(link.name) not in staged_stems]
+        if sections
+        else []
+    )
+    new_entry = (
+        anchor,
+        render_draft_section(heading_fragments, fresh + carried or None, context.manifest, packages or None).strip(),
+    )
+    for index, (existing_anchor, _) in enumerate(sections):
+        if existing_anchor == anchor:
+            sections[index] = new_entry
+            break
+    else:
+        sections.insert(0, new_entry)
+    blocks = [f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]
+    with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
+        file.write("\n\n".join(blocks) + "\n")
+        notes_path = file.name
+    bash(f"gh release edit {tag} --repo {repository} --notes-file {notes_path}")
+    Path(notes_path).unlink()
+    print(f"  Section {anchor} written to draft {tag}")
 
 
 def asset_stem(name: str) -> str | None:
