@@ -12,7 +12,7 @@ from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.builds import pull_build
 
 from release_devkit.context import merge_push_context, pr_head_context
-from release_devkit.plan import UNCHANGED_FALLBACK_VERSION
+from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, ReleasePlan
 from release_devkit.publishing import build_registries, publish_packages
 from release_devkit.tags import create_and_push_tag, latest_version
 
@@ -26,18 +26,18 @@ class ReleaseChannel(StrEnum):
 
 
 def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
-    # Resolve the PR draft surface without publishing packages
-    if channel == ReleaseChannel.PR:
-        context = pr_head_context(config)
-        published = None
-        tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
-        versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
-        heading = f"### [{context.short}]({context.commit_url})"
-    else:
-        # Publish every changed package for the delivery channels
-        context = merge_push_context(config)
-        release_plan, published = publish_packages(context, dev=channel == ReleaseChannel.DEV)
-        if channel == ReleaseChannel.STABLE:
+    # Resolve the run's identity and publish packages on the delivery channels
+    match channel:
+        case ReleaseChannel.PR:
+            context = pr_head_context(config)
+            release_plan, published = ReleasePlan.empty(), None
+        case ReleaseChannel.STABLE | ReleaseChannel.DEV:
+            context = merge_push_context(config)
+            release_plan, published = publish_packages(context, dev=channel == ReleaseChannel.DEV)
+
+    # Prepare the channel's release surface
+    match channel:
+        case ReleaseChannel.STABLE:
             # Stop when the stable run has nothing to ship
             if not release_plan.publishing and not release_plan.app_versions:
                 return
@@ -55,7 +55,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
             versions = {**release_plan.app_last_versions, **release_plan.app_versions}
             heading = None
-        else:
+        case ReleaseChannel.DEV:
             # Head the snapshot section with the merge's PR title
             pr_number, pr_title = re.findall(
                 r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
@@ -67,6 +67,10 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
                 f" — [PR #{pr_number}: {pr_title}]"
                 f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
             )
+        case ReleaseChannel.PR:
+            tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
+            versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
+            heading = f"### [{context.short}]({context.commit_url})"
 
     publish = channel == ReleaseChannel.STABLE
     repository = context.settings.github_repository

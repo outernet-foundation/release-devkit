@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from release_devkit.config import PublishConfig
@@ -35,6 +37,17 @@ class ReleasePlan:
     resolved_versions: dict[str, dict[str, ResolvedDependency]]
     app_last_versions: dict[str, str | None]
     app_versions: dict[str, str]
+
+    @classmethod
+    def empty(cls) -> ReleasePlan:
+        return cls(
+            plans={},
+            publishing=set(),
+            publishing_registries=set(),
+            resolved_versions={},
+            app_last_versions={},
+            app_versions={},
+        )
 
 
 def compute_release_plan(publish_config: PublishConfig) -> ReleasePlan:
