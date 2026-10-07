@@ -1,18 +1,13 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from tempfile import mkdtemp
-from typing import TYPE_CHECKING
 
 from ci_devkit.builds import pull_build
 from ci_devkit.ci_step import ci_step
 from pydantic import BaseModel
 
 from release_devkit.config import AppConfig, BuildArtifactConfig
-
-if TYPE_CHECKING:
-    from release_devkit.context import VerbContext
 
 DIGEST_PROJECT = "images-digests"
 DIGEST_PLATFORM = "all"
@@ -23,31 +18,6 @@ class DigestEntry(BaseModel):
     ref: str
     digest: str
     tags: list[str]
-
-
-def stage_build_assets(
-    context: VerbContext,
-    apps: dict[str, AppConfig],
-    short: str | None,
-) -> list[tuple[str, str, Path]]:
-    if not apps:
-        return []
-    staging = Path(mkdtemp(prefix="build-assets-"))
-    staged: list[tuple[str, str, Path]] = []
-    for app_name, artifact, source in pull_build_assets(
-        apps,
-        context.publish_config.builds_registry,
-        context.certified,
-        context.settings.github_actor,
-        context.settings.github_token,
-    ):
-        named = Path(artifact.name) if artifact.name else source
-        name = f"{named.stem}-{short}{named.suffix}" if short is not None else named.name
-        target = staging / name
-        shutil.copy2(source, target)
-        staged.append((app_name, name, target))
-        print(f"  Asset: {name}")
-    return staged
 
 
 def pull_build_assets(

@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, mkdtemp
 
 from bashrun.bash import bash, bash_check, bash_output
 
-from release_devkit.builds import stage_build_assets
+from release_devkit.builds import pull_build_assets
 from release_devkit.context import VerbContext
-from release_devkit.plan import PackageRow, package_rows, package_version_overrides
-from release_devkit.rendering import collect_app_rows, render_release_body
+from release_devkit.plan import package_rows
+from release_devkit.rendering import render_images_table
 
 DEV_DRAFT_TAG = "dev-builds"
 
@@ -32,18 +33,72 @@ def write_release(
     else:
         body = json.loads(bash_output(f"gh release view {tag} --repo {repository} --json body"))["body"]
 
-    staged = stage_build_assets(context, context.publish_config.apps, short)
+    staged: list[tuple[str, str, Path]] = []
+    if context.publish_config.apps:
+        staging = Path(mkdtemp(prefix="build-assets-"))
+        for app_name, artifact, source in pull_build_assets(
+            context.publish_config.apps,
+            context.publish_config.builds_registry,
+            context.certified,
+            context.settings.github_actor,
+            context.settings.github_token,
+        ):
+            named = Path(artifact.name) if artifact.name else source
+            name = f"{named.stem}-{short}{named.suffix}" if short is not None else named.name
+            target = staging / name
+            shutil.copy2(source, target)
+            staged.append((app_name, name, target))
+            print(f"  Asset: {name}")
+
     if staged:
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
 
-    app_rows = collect_app_rows(staged, versions, repository, tag)
+    prefix = "#" * (2 if publish else 4)
+    blocks: list[list[str]] = []
 
-    packages: list[PackageRow] | None = None
+    if heading is not None:
+        blocks.append([heading])
+
     if published is not None:
         configured = context.publish_config.packages
-        packages = package_rows(configured, package_version_overrides(configured, published))
+        names_by_identity = {
+            identity: name for name, package in configured.items() for identity in package.registries.values()
+        }
+        overrides = {names_by_identity[identity]: version for _, identity, version in published}
+        rows = package_rows(configured, overrides)
+        if rows:
+            package_lines = ["| Package | Version | Registry |", "|---|---|---|"]
+            for row in rows:
+                if not row.registries:
+                    package_lines.append(f"| {row.name} | {row.version} | — |")
+                    continue
+                registry_versions = {link.version for link in row.registries}
+                if len(registry_versions) == 1:
+                    version_cell = next(iter(registry_versions))
+                else:
+                    version_cell = ", ".join(f"{link.version} ({link.name})" for link in row.registries)
+                registry_parts: list[str] = []
+                for link in row.registries:
+                    if link.url is not None:
+                        registry_parts.append(f"[{link.name}]({link.url})")
+                    else:
+                        registry_parts.append(link.name)
+                package_lines.append(f"| {row.name} | {version_cell} | {', '.join(registry_parts)} |")
+            blocks.append([f"{prefix} Packages", *package_lines])
 
-    section = render_release_body(heading, packages, app_rows, context.manifest, level=2 if publish else 4)
+    if staged:
+        app_lines = ["| App | Version | Asset |", "|---|---|---|"]
+        for app_name, asset_name, _ in staged:
+            version = versions.get(app_name)
+            version_cell = version if version is not None else "—"
+            asset_url = f"https://github.com/{repository}/releases/download/{tag}/{asset_name}"
+            app_lines.append(f"| {app_name} | {version_cell} | [{asset_name}]({asset_url}) |")
+        blocks.append([f"{prefix} Apps", *app_lines])
+
+    if context.manifest:
+        blocks.append([f"{prefix} Built images", *render_images_table(context.manifest)])
+
+    section = "\n\n".join("\n".join(block) for block in blocks)
 
     if not publish:
         anchor = f"sha-{context.short}"

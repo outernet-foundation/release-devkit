@@ -6,7 +6,6 @@ from tempfile import mkdtemp
 
 import pytest
 
-from release_devkit import builds as builds_module
 from release_devkit import drafts
 from release_devkit import plan as plan_module
 from release_devkit.verbs import update_pr_draft as update_pr_draft_module
@@ -152,7 +151,7 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
-    monkeypatch.setattr(builds_module, "pull_build_assets", FixedReturn([("myapp", artifact, source)]))
+    monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([("myapp", artifact, source)]))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
@@ -171,7 +170,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     monkeypatch.setattr(
         update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config(), manifest=manifest))
     )
-    monkeypatch.setattr(builds_module, "pull_build_assets", FixedReturn([("myapp", artifact, source)]))
+    monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([("myapp", artifact, source)]))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
@@ -198,7 +197,7 @@ def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.Monke
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
     config = PublishConfig(apps={}, builds_registry="ghcr.io/owner/repo/builds")
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(config, manifest=manifest)))
-    monkeypatch.setattr(builds_module, "pull_build_assets", FixedReturn([]))
+    monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([]))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
@@ -295,7 +294,7 @@ def test_update_pr_draft_lists_one_row_per_staged_artifact(monkeypatch: pytest.M
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
     monkeypatch.setattr(
-        builds_module,
+        drafts,
         "pull_build_assets",
         FixedReturn([
             (

@@ -6,7 +6,6 @@ from tempfile import mkdtemp
 
 import pytest
 
-from release_devkit import builds as builds_module
 from release_devkit import drafts
 from release_devkit import publishing as publishing_module
 from release_devkit.verbs import release
@@ -87,9 +86,7 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(release, "create_and_push_tag", noop)
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
     monkeypatch.setattr(
-        builds_module,
-        "pull_build_assets",
-        FixedReturn([("myapp", artifact, make_source_file("MyApp-AndroidMobile.apk"))]),
+        drafts, "pull_build_assets", FixedReturn([("myapp", artifact, make_source_file("MyApp-AndroidMobile.apk"))])
     )
     written: list[str] = []
 

@@ -6,7 +6,6 @@ from tempfile import mkdtemp
 
 import pytest
 
-from release_devkit import builds as builds_module
 from release_devkit import drafts
 from release_devkit import plan as plan_module
 from release_devkit import publishing as publishing_module
@@ -169,7 +168,7 @@ def patch_common(
     )
     monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
     pull_assets = CallRecorder([])
-    monkeypatch.setattr(builds_module, "pull_build_assets", pull_assets)
+    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
     monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Merge PR #7: Add the thing\n"))
     return pull_assets
 
@@ -251,7 +250,7 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     patch_common(monkeypatch, config)
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     pull_assets = CallRecorder([("myapp", artifact, make_source_file("MyApp-AndroidMobile.apk"))])
-    monkeypatch.setattr(builds_module, "pull_build_assets", pull_assets)
+    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
     npm_registry, _ = patch_publish_internals(monkeypatch)
     written: list[str] = []
 
