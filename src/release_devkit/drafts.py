@@ -41,6 +41,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
     # Head the snapshot section with the merge's PR title
     if channel == ReleaseChannel.PR:
+        tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
         versions = {name: get_latest_version(f"{name}-v") for name in context.publish_config.apps}
         blocks.append(f"### [{context.short}]({context.commit_url})")
     else:
@@ -52,8 +53,17 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             return
 
         if channel == ReleaseChannel.STABLE:
+            # Compose this month's next CalVer tag
+            year_month = datetime.now(UTC).strftime("%Y.%m")
+            existing = bash_output(
+                f"gh release list --repo {context.settings.github_repository} --json tagName"
+                f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
+            ).strip()
+            tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
+
             versions = {**release_plan.app_last_versions, **release_plan.app_versions}
         else:
+            tag = DEV_DRAFT_TAG
             versions = release_plan.app_last_versions
 
             pr_number, pr_title = re.findall(
@@ -118,21 +128,6 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         if channel == ReleaseChannel.STABLE:
             for app_name, app_version in release_plan.app_versions.items():
                 create_and_push_tag(f"{app_name}-v{app_version}")
-
-    # Compose the channel's release tag
-    match channel:
-        case ReleaseChannel.STABLE:
-            # Compose this month's next CalVer tag
-            year_month = datetime.now(UTC).strftime("%Y.%m")
-            existing = bash_output(
-                f"gh release list --repo {context.settings.github_repository} --json tagName"
-                f" --jq '[.[].tagName] | map(select(startswith(\"{year_month}\"))) | length'"
-            ).strip()
-            tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
-        case ReleaseChannel.DEV:
-            tag = DEV_DRAFT_TAG
-        case ReleaseChannel.PR:
-            tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', context.settings.github_ref)[0][0]}"
 
     repository = context.settings.github_repository
 
