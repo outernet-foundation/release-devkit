@@ -95,7 +95,11 @@ def make_config(
     )
 
 
-def make_plan(publishing: set[str], unchanged: set[str] | None = None) -> ReleasePlan:
+def make_plan(
+    publishing: set[str],
+    unchanged: set[str] | None = None,
+    app_last_versions: dict[str, str | None] | None = None,
+) -> ReleasePlan:
     names = publishing | (unchanged or set())
     plans = {
         name: PackagePlan(name=name, publish=name in publishing, version="1.0.0", last_version=None) for name in names
@@ -105,7 +109,7 @@ def make_plan(publishing: set[str], unchanged: set[str] | None = None) -> Releas
         publishing=publishing,
         publishing_registries=set(),
         resolved_versions={name: {} for name in publishing},
-        app_last_versions={},
+        app_last_versions=app_last_versions or {},
         app_versions={},
     )
 
@@ -123,7 +127,6 @@ def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
     monkeypatch.setattr(plan_module, "latest_version", tags.latest_version)
     monkeypatch.setattr(plan_module, "latest_version_in_line", tags.latest_version_in_line)
     monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
-    monkeypatch.setattr(drafts, "latest_version", tags.latest_version)
 
 
 def make_context(
@@ -241,7 +244,9 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"})
 
-    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(make_plan(set())))
+    monkeypatch.setattr(
+        publishing_module, "compute_release_plan", FixedReturn(make_plan(set(), app_last_versions={"myapp": "1.0.0"}))
+    )
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")

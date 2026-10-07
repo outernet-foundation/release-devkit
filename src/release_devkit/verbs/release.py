@@ -14,7 +14,6 @@ from release_devkit.drafts import (
     delete_draft_release,
     edit_release_notes,
     ensure_draft_release,
-    latest_app_versions,
     stage_and_upload,
 )
 from release_devkit.plan import package_rows, package_version_overrides
@@ -49,19 +48,24 @@ def main(
     release_tag = f"{year_month}.{(int(existing) if existing else 0) + 1}"
 
     ensure_draft_release(context, release_tag)
+
     staged = stage_and_upload(context, release_tag, None)
 
-    edit_release_notes(
-        context,
+    app_rows = collect_app_rows(
+        staged,
+        {**release_plan.app_last_versions, **release_plan.app_versions},
+        context.settings.github_repository,
         release_tag,
-        render_release_body(
-            None,
-            package_rows(packages, package_version_overrides(packages, published)),
-            collect_app_rows(staged, latest_app_versions(context), context.settings.github_repository, release_tag),
-            context.manifest,
-            level=2,
-        ),
-        publish=True,
     )
+
+    body = render_release_body(
+        None,
+        package_rows(packages, package_version_overrides(packages, published)),
+        app_rows,
+        context.manifest,
+        level=2,
+    )
+
+    edit_release_notes(context, release_tag, body, publish=True)
 
     delete_draft_release(DEV_DRAFT_TAG, context.settings.github_repository)

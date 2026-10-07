@@ -85,7 +85,6 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(release, "merge_push_context", FixedReturn(make_context(config)))
     monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(release, "create_and_push_tag", noop)
-    monkeypatch.setattr(drafts, "latest_version", FixedReturn("1.0.0"))
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))
     monkeypatch.setattr(
         builds_module,

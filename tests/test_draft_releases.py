@@ -63,7 +63,7 @@ class FakeTags:
 def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
     monkeypatch.setattr(plan_module, "latest_version", tags.latest_version)
     monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
-    monkeypatch.setattr(drafts, "latest_version", tags.latest_version)
+    monkeypatch.setattr(update_pr_draft_module, "latest_version", tags.latest_version)
 
 
 def make_build_config() -> PublishConfig:

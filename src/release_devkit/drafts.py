@@ -9,14 +9,24 @@ from bashrun.bash import bash, bash_check, bash_output
 
 from release_devkit.builds import stage_build_assets
 from release_devkit.context import VerbContext
-from release_devkit.tags import latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
 ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
 
 
-def latest_app_versions(context: VerbContext) -> dict[str, str | None]:
-    return {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
+def upsert_section(body: str, anchor: str, section: str) -> str:
+    parts = ANCHOR_PATTERN.split(body)
+    sections: list[tuple[str, str]] = [
+        (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "") for index in range(1, len(parts), 2)
+    ]
+    new_entry = (anchor, section)
+    for index, (existing_anchor, _) in enumerate(sections):
+        if existing_anchor == anchor:
+            sections[index] = new_entry
+            break
+    else:
+        sections.insert(0, new_entry)
+    return "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections])
 
 
 def stage_and_upload(context: VerbContext, tag: str, short: str | None) -> list[tuple[str, str, Path]]:

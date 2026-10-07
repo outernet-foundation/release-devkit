@@ -9,13 +9,13 @@ import typer
 from release_devkit.config import DEFAULT_CONFIG_PATH
 from release_devkit.context import pr_head_context
 from release_devkit.drafts import (
-    ANCHOR_PATTERN,
     edit_release_notes,
     ensure_draft_release,
-    latest_app_versions,
     stage_and_upload,
+    upsert_section,
 )
 from release_devkit.rendering import collect_app_rows, render_release_body
+from release_devkit.tags import latest_version
 
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -31,35 +31,18 @@ def update_pr_draft(
 
     tag = f"{PR_DRAFT_TAG_PREFIX}{PR_REF_PATTERN.findall(context.settings.github_ref)[0][0]}"
 
-    app_last_versions = latest_app_versions(context)
+    app_last_versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
 
     body = ensure_draft_release(context, tag)
 
     staged = stage_and_upload(context, tag, context.short)
 
-    anchor = f"sha-{context.short}"
-    parts = ANCHOR_PATTERN.split(body)
-    sections: list[tuple[str, str]] = [
-        (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "") for index in range(1, len(parts), 2)
-    ]
-
     app_rows = collect_app_rows(staged, app_last_versions, context.settings.github_repository, tag)
 
-    body = render_release_body(
-        f"### [{context.short}]({context.commit_url})", None, app_rows, context.manifest, level=4
+    body = upsert_section(
+        body,
+        f"sha-{context.short}",
+        render_release_body(f"### [{context.short}]({context.commit_url})", None, app_rows, context.manifest, level=4),
     )
 
-    new_entry = (anchor, body)
-    for index, (existing_anchor, _) in enumerate(sections):
-        if existing_anchor == anchor:
-            sections[index] = new_entry
-            break
-    else:
-        sections.insert(0, new_entry)
-
-    edit_release_notes(
-        context,
-        tag,
-        "\n\n".join([f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections]),
-        publish=False,
-    )
+    edit_release_notes(context, tag, body, publish=False)
