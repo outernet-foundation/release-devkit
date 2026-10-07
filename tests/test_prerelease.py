@@ -130,7 +130,7 @@ def patch_common(
     config: PublishConfig,
     manifest: dict[str, DigestEntry] | None = None,
 ) -> CallRecorder:
-    monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
+    monkeypatch.setattr(publishing_module, "merge_push_context", FixedReturn(make_context(config, manifest)))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())
     monkeypatch.setattr(
@@ -138,7 +138,7 @@ def patch_common(
         "bash_output",
         FixedReturn('{"body": "", "url": "https://github.com/owner/repo/releases/untagged-abc"}'),
     )
-    monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
+    monkeypatch.setattr(publishing_module, "merge_push_context", FixedReturn(make_context(config, manifest)))
     pull_assets = CallRecorder([])
     monkeypatch.setattr(builds_module, "pull_build_assets", pull_assets)
     monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Merge PR #7: Add the thing\n"))
@@ -196,7 +196,7 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
     assert written != []
     assert f'<a id="sha-{SHORT_SHA}"></a>' in written[0]
     strategy = publish_packages.calls[0][3]
-    assert isinstance(strategy, prerelease.DevStrategy)
+    assert isinstance(strategy, publishing_module.DevStrategy)
     assert strategy.package_version("npm", release_plan.plans["pkg"]) == f"1.0.0-dev.{SHORT_SHA}"
 
 

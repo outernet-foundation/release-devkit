@@ -1,10 +1,12 @@
+from enum import Enum
+from pathlib import Path
 from typing import Protocol
 
 from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from release_devkit.config import PackageConfig
-from release_devkit.context import VerbContext
+from release_devkit.context import VerbContext, merge_push_context
 from release_devkit.plan import PackagePlan, ReleasePlan, ResolvedDependency, compute_release_plan
 from release_devkit.registries import (
     DEV_VERSION_FORMATS,
@@ -12,6 +14,11 @@ from release_devkit.registries import (
     PublishRequest,
     build_registries,
 )
+
+
+class Channel(Enum):
+    STABLE = "stable"
+    DEV = "dev"
 
 
 class VersionStrategy(Protocol):
@@ -49,10 +56,12 @@ class DevStrategy:
         return NPM_DEV_DIST_TAG if registry_name == "npm" else None
 
 
-def publish_changed_packages(
-    context: VerbContext,
-    strategy: VersionStrategy,
-) -> tuple[ReleasePlan, list[tuple[str, str, str]]]:
+def deliver_changed_packages(
+    config: Path,
+    channel: Channel,
+) -> tuple[VerbContext, ReleasePlan, list[tuple[str, str, str]]]:
+    context = merge_push_context(config)
+    strategy = DevStrategy(context.short) if channel is Channel.DEV else StableStrategy()
     packages = context.publish_config.packages
     release_plan = compute_release_plan(context.publish_config)
     published: list[tuple[str, str, str]] = []
@@ -64,7 +73,7 @@ def publish_changed_packages(
             strategy,
             context.settings.github_workspace,
         )
-    return release_plan, published
+    return context, release_plan, published
 
 
 def publish_packages(
