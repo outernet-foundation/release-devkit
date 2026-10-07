@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
 from pathlib import Path
 from tempfile import mkdtemp
 
@@ -21,10 +20,6 @@ from release_devkit.verbs.update_pr_draft import update_pr_draft
 
 DRAFT_URL = "https://github.com/owner/repo/releases/untagged-abc"
 DRAFT_VIEW_JSON = json.dumps({"body": "", "url": DRAFT_URL})
-
-
-def null_ci_step(label: str) -> object:
-    return nullcontext()
 
 
 class BashLog:
@@ -125,7 +120,6 @@ def make_context(
 
 
 def patch_bash(monkeypatch: pytest.MonkeyPatch, check_returns: object = False) -> BashLog:
-    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(check_returns))
     bash_log = BashLog()
     monkeypatch.setattr(drafts, "bash", bash_log)
@@ -182,7 +176,6 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     )
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"}))
-    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
@@ -209,7 +202,6 @@ def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.Monke
     config = PublishConfig(apps={}, builds_registry="ghcr.io/owner/repo/builds")
     monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(config, manifest=manifest)))
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([]))
-    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 

@@ -7,7 +7,6 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
 
 from bashrun.bash import bash, bash_check, bash_output
-from ci_devkit.ci_step import ci_step
 
 from release_devkit.builds import pull_build_assets
 from release_devkit.context import VerbContext
@@ -75,8 +74,7 @@ def write_draft_section(
             staged.append((name, target))
             print(f"  Asset: {name}")
     if staged:
-        with ci_step(f"Upload assets to {tag}"):
-            bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, path in staged)} --clobber --repo {repository}")
+        bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, path in staged)} --clobber --repo {repository}")
     anchor = f"sha-{context.short}"
     parts = _ANCHOR_PATTERN.split(body)
     sections: list[tuple[str, str]] = [
@@ -125,9 +123,8 @@ def asset_stem(name: str) -> str | None:
 
 
 def delete_draft_release(tag: str, repository: str) -> None:
-    with ci_step(f"Delete draft release {tag}"):
-        if not bash_check(f"gh release view {tag} --repo {repository}"):
-            print(f"  Draft release {tag} not found — nothing to delete")
-            return
-        bash(f"gh release delete {tag} --cleanup-tag --yes --repo {repository}")
-        print(f"  Draft release {tag} deleted")
+    if not bash_check(f"gh release view {tag} --repo {repository}"):
+        print(f"  Draft release {tag} not found — nothing to delete")
+        return
+    bash(f"gh release delete {tag} --cleanup-tag --yes --repo {repository}")
+    print(f"  Draft release {tag} deleted")

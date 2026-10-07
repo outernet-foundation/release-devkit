@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -82,10 +81,6 @@ def make_plan(publishing: set[str]) -> ReleasePlan:
     )
 
 
-def null_ci_step(label: str) -> object:
-    return nullcontext()
-
-
 CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
 SHORT_SHA = CERTIFIED_SHA[:12]
 MERGE_SHA = "654321abcdef0987654321abcdef0987654321"
@@ -127,7 +122,6 @@ def patch_common(
     manifest: dict[str, DigestEntry] | None = None,
 ) -> CallRecorder:
     monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
-    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())
     monkeypatch.setattr(
