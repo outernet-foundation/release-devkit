@@ -8,7 +8,7 @@ from bashrun.bash import bash, bash_check, bash_output
 STABLE_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 
-def latest_version(prefix: str) -> str | None:
+def get_latest_version(prefix: str) -> str | None:
     for version in list_tag_versions(prefix):
         if STABLE_VERSION_PATTERN.fullmatch(version):
             return version

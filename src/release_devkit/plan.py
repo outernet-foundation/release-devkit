@@ -6,7 +6,7 @@ from release_devkit.config import PublishConfig
 from release_devkit.manifests import DependencyEdge, resolve_edges
 from release_devkit.tags import (
     has_changes_since,
-    latest_version,
+    get_latest_version,
     latest_version_in_line,
     parse_major_minor,
     parse_version,
@@ -68,7 +68,7 @@ def compute_release_plan(publish_config: PublishConfig) -> ReleasePlan:
     for name in ordered:
         package = packages[name]
         prefix = f"{name}-v"
-        last_version = latest_version(prefix)
+        last_version = get_latest_version(prefix)
         last_in_line = latest_version_in_line(prefix, package.major_minor)
         changed = has_changes_since(f"{prefix}{last_version}" if last_version else None, package.path)
         plans[name] = PackagePlan(
@@ -91,7 +91,7 @@ def compute_release_plan(publish_config: PublishConfig) -> ReleasePlan:
     app_versions: dict[str, str] = {}
     for app_name, app_config in publish_config.apps.items():
         prefix = f"{app_name}-v"
-        last_version = latest_version(prefix)
+        last_version = get_latest_version(prefix)
         last_in_line = latest_version_in_line(prefix, app_config.major_minor)
         app_last_versions[app_name] = last_version
         changed = has_changes_since(f"{prefix}{last_version}" if last_version else None, app_config.path)

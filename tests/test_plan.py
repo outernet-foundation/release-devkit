@@ -14,7 +14,7 @@ from release_devkit.plan import (
     resolve_dependency_versions,
 )
 from release_devkit.manifests import SENTINEL_VERSION
-from release_devkit.tags import latest_version, latest_version_in_line, parse_major_minor, parse_version
+from release_devkit.tags import get_latest_version, latest_version_in_line, parse_major_minor, parse_version
 
 
 def test_latest_version_skips_prerelease_tags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -23,7 +23,7 @@ def test_latest_version_skips_prerelease_tags(monkeypatch: pytest.MonkeyPatch) -
         preview_and_stable_tags,
     )
 
-    assert latest_version("pkg-v") == "1.0.5"
+    assert get_latest_version("pkg-v") == "1.0.5"
 
 
 def test_latest_version_returns_none_when_no_stable_tag(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -32,7 +32,7 @@ def test_latest_version_returns_none_when_no_stable_tag(monkeypatch: pytest.Monk
         prerelease_only_tags,
     )
 
-    assert latest_version("pkg-v") is None
+    assert get_latest_version("pkg-v") is None
 
 
 def test_latest_version_in_line_filters_to_declared_line(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,7 +79,7 @@ class FakeTagSource:
 
 
 def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTagSource) -> None:
-    monkeypatch.setattr(plan_module, "latest_version", tags.latest_version)
+    monkeypatch.setattr(plan_module, "get_latest_version", tags.latest_version)
     monkeypatch.setattr(plan_module, "latest_version_in_line", tags.latest_version_in_line)
     monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
 

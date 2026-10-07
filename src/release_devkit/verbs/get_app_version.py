@@ -9,7 +9,7 @@ from bashrun.bash import bash_output
 
 from release_devkit.config import DEFAULT_CONFIG_PATH, load_config
 from release_devkit.plan import next_version
-from release_devkit.tags import latest_version, latest_version_in_line
+from release_devkit.tags import get_latest_version, latest_version_in_line
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
@@ -26,7 +26,7 @@ def main(
 
     app_config = publish_config.apps[application]
     prefix = f"{application}-v"
-    last_version = latest_version(prefix)
+    last_version = get_latest_version(prefix)
     last_in_line = latest_version_in_line(prefix, app_config.major_minor)
     base_version = next_version(app_config.major_minor, last_in_line, last_version, application)
     head = bash_output("git rev-parse HEAD").strip()

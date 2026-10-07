@@ -15,7 +15,7 @@ from ci_devkit.setup import configure_git, install_dotnet, install_node
 from release_devkit.context import build_context
 from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, ReleasePlan, compute_release_plan
 from release_devkit.publishing import build_registries
-from release_devkit.tags import create_and_push_tag, latest_version
+from release_devkit.tags import create_and_push_tag, get_latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
 
@@ -69,29 +69,45 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         table_rows: list[list[str]] = []
         for name, package in context.publish_config.packages.items():
             plan = release_plan.plans[name]
-            if plan.publish:
-                version = registries[package.registry].publish(
-                    package.path,
-                    plan.version,
-                    release_plan.resolved_versions[name],
-                    channel == ReleaseChannel.DEV,
-                    context.short,
-                )
-                registry_cell = f"[{package.registry}]({registries[package.registry].url(package.identity, version)})"
-                if channel == ReleaseChannel.STABLE:
-                    create_and_push_tag(f"{name}-v{plan.version}")
-            else:
-                latest = latest_version(f"{name}-v")
-                if latest:
-                    version = latest
-                    registry_cell = (
-                        f"[{package.registry}]({registries[package.registry].url(package.identity, version)})"
-                    )
-                else:
-                    version = UNCHANGED_FALLBACK_VERSION
-                    registry_cell = package.registry
+            registry = registries[package.registry]
+            latest_version = get_latest_version(f"{name}-v")
 
-            table_rows.append([name, version, registry_cell])
+            # List an unchanged package at its latest stable tag
+            if not plan.publish and latest_version is not None:
+                table_rows.append([
+                    name,
+                    latest_version,
+                    f"[{package.registry}]({registry.url(package.identity, latest_version)})",
+                ])
+                continue
+
+            # List a never-published package with the fallback version
+            if not plan.publish:
+                table_rows.append([
+                    name,
+                    UNCHANGED_FALLBACK_VERSION,
+                    package.registry,
+                ])
+                continue
+
+            # Publish the changed package and list the version it returned
+            version = registry.publish(
+                package.path,
+                plan.version,
+                release_plan.resolved_versions[name],
+                channel == ReleaseChannel.DEV,
+                context.short,
+            )
+
+            if channel == ReleaseChannel.STABLE:
+                create_and_push_tag(f"{name}-v{plan.version}")
+
+            table_rows.append([
+                name,
+                version,
+                f"[{package.registry}]({registry.url(package.identity, version)})",
+            ])
+
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
@@ -176,7 +192,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             case ReleaseChannel.DEV:
                 versions = release_plan.app_last_versions
             case ReleaseChannel.PR:
-                versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
+                versions = {name: get_latest_version(f"{name}-v") for name in context.publish_config.apps}
 
         # List staged apps with their asset links
         table_rows = [
