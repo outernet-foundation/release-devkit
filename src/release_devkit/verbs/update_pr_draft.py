@@ -44,11 +44,6 @@ def update_pr_draft(
         print("Nothing to publish")
         return
 
-    heading_fragments = [
-        f"[{context.short}]({context.commit_url})",
-        f"[PR #{pr_number}](https://github.com/{repository}/pull/{pr_number})",
-    ]
-
     staged = publish_draft_assets(
         publish_config,
         context.certified,
@@ -62,9 +57,12 @@ def update_pr_draft(
     draft.upsert_section(
         f"sha-{context.short}",
         render_draft_section(
-            heading_fragments=heading_fragments,
-            assets=assets or None,
-            images=manifest,
+            [
+                f"[{context.short}]({context.commit_url})",
+                f"[PR #{pr_number}](https://github.com/{repository}/pull/{pr_number})",
+            ],
+            assets or None,
+            manifest,
         ),
     )
 

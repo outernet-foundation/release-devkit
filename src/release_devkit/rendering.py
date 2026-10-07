@@ -82,9 +82,9 @@ def render_images_table(manifest: dict[str, DigestEntry]) -> list[str]:
 
 def render_draft_section(
     heading_fragments: list[str],
-    packages: list[PackageRow] | None = None,
     assets: list[AssetLink] | None = None,
     images: dict[str, DigestEntry] | None = None,
+    packages: list[PackageRow] | None = None,
 ) -> str:
     lines = [render_heading(heading_fragments)]
     if packages:

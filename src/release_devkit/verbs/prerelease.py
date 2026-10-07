@@ -66,10 +66,6 @@ def main(
 
     groups = _MERGE_PR_PATTERN.findall(bash_output(f"git log -1 --format=%B {head}").strip())[0]
     pr_number = int(groups[0])
-    heading_fragments: list[str] = [
-        f"[{short}]({context.commit_url})",
-        f"[PR #{pr_number}: {groups[1]}](https://github.com/{repository}/pull/{pr_number})",
-    ]
 
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
@@ -85,8 +81,19 @@ def main(
     draft.upsert_section(
         anchor,
         render_draft_section(
-            heading_fragments=heading_fragments,
-            packages=package_rows(
+            [
+                f"[{short}]({context.commit_url})",
+                f"[PR #{pr_number}: {groups[1]}](https://github.com/{repository}/pull/{pr_number})",
+            ],
+            (
+                draft.asset_links(staged_assets)
+                + draft.carried_asset_links({
+                    stem for stem in (asset_stem(name) for name, _ in staged_assets) if stem is not None
+                })
+            )
+            or None,
+            manifest,
+            package_rows(
                 packages,
                 {
                     {identity: name for name, package in packages.items() for identity in package.registries.values()}[
@@ -96,14 +103,6 @@ def main(
                 },
             )
             or None,
-            assets=(
-                draft.asset_links(staged_assets)
-                + draft.carried_asset_links({
-                    stem for stem in (asset_stem(name) for name, _ in staged_assets) if stem is not None
-                })
-            )
-            or None,
-            images=manifest,
         ),
     )
 
