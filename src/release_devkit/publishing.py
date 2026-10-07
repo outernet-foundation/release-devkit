@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 from ci_devkit.setup import configure_git, install_dotnet, install_node
@@ -11,6 +12,12 @@ from release_devkit.registries import (
     build_registries,
 )
 from release_devkit.tags import create_and_push_tag
+
+REGISTRY_SETUP: dict[str, Callable[[], None]] = {
+    "nuget": lambda: install_dotnet("8.0"),
+    "npm": lambda: install_node("24", "https://registry.npmjs.org"),
+    "pypi": lambda: None,
+}
 
 
 def deliver_changed_packages(
@@ -29,10 +36,8 @@ def deliver_changed_packages(
         registry_name for name in release_plan.publishing for registry_name in packages[name].registries
     }
     configure_git(context.settings.github_workspace)
-    if "nuget" in registries_to_publish:
-        install_dotnet("8.0")
-    if "npm" in registries_to_publish:
-        install_node("24", "https://registry.npmjs.org")
+    for registry_name in sorted(registries_to_publish):
+        REGISTRY_SETUP[registry_name]()
 
     registries = build_registries(context.settings.nuget_api_key)
     for name, package in packages.items():
