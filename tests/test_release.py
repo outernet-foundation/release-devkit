@@ -8,6 +8,7 @@ import pytest
 
 from release_devkit import builds as builds_module
 from release_devkit import drafts
+from release_devkit import publishing as publishing_module
 from release_devkit.verbs import release
 from release_devkit.builds import BuildArtifactConfig
 from release_devkit.config import AppConfig, PublishConfig, Settings
@@ -81,7 +82,7 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
     )
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     monkeypatch.setattr(release, "merge_push_context", FixedReturn(make_context(config)))
-    monkeypatch.setattr(release, "compute_release_plan", FixedReturn(release_plan))
+    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(release, "create_and_push_tag", noop)
     monkeypatch.setattr(release, "latest_version", FixedReturn("1.0.0"))
     monkeypatch.setattr(release, "bash_output", FixedReturn("0"))

@@ -4,7 +4,8 @@ from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, install_dotnet, install_node
 
 from release_devkit.config import PackageConfig
-from release_devkit.plan import PackagePlan, ReleasePlan, ResolvedDependency
+from release_devkit.context import VerbContext
+from release_devkit.plan import PackagePlan, ReleasePlan, ResolvedDependency, compute_release_plan
 from release_devkit.registries import (
     DEV_VERSION_FORMATS,
     NPM_DEV_DIST_TAG,
@@ -46,6 +47,24 @@ class DevStrategy:
 
     def dist_tag(self, registry_name: str) -> str | None:
         return NPM_DEV_DIST_TAG if registry_name == "npm" else None
+
+
+def publish_changed_packages(
+    context: VerbContext,
+    strategy: VersionStrategy,
+) -> tuple[ReleasePlan, list[tuple[str, str, str]]]:
+    packages = context.publish_config.packages
+    release_plan = compute_release_plan(context.publish_config)
+    published: list[tuple[str, str, str]] = []
+    if release_plan.publishing:
+        published = publish_packages(
+            packages,
+            release_plan,
+            context.settings.nuget_api_key,
+            strategy,
+            context.settings.github_workspace,
+        )
+    return release_plan, published
 
 
 def publish_packages(

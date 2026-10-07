@@ -9,6 +9,7 @@ import pytest
 from release_devkit import builds as builds_module
 from release_devkit import drafts
 from release_devkit import plan as plan_module
+from release_devkit import publishing as publishing_module
 from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig, Settings
 from release_devkit.builds import DigestEntry
 from release_devkit.context import VerbContext
@@ -150,11 +151,11 @@ def run_prerelease(
     release_plan: ReleasePlan,
     tags: FakeTags,
 ) -> tuple[CallRecorder, CallRecorder, list[str]]:
-    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(release_plan))
+    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(release_plan))
     patch_plan_tags(monkeypatch, tags)
     pull_assets = patch_common(monkeypatch, config)
     publish_packages = CallRecorder([])
-    monkeypatch.setattr(prerelease, "publish_packages", publish_packages)
+    monkeypatch.setattr(publishing_module, "publish_packages", publish_packages)
     written: list[str] = []
 
     def capturing_bash(command: str) -> None:
@@ -203,14 +204,14 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed={"myapp"})
 
-    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
+    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(make_plan(set())))
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     pull_assets = CallRecorder([("myapp", artifact, make_source_file("MyApp-AndroidMobile.apk"))])
     monkeypatch.setattr(builds_module, "pull_build_assets", pull_assets)
     publish_packages = CallRecorder([])
-    monkeypatch.setattr(prerelease, "publish_packages", publish_packages)
+    monkeypatch.setattr(publishing_module, "publish_packages", publish_packages)
     written: list[str] = []
 
     def capturing_bash(command: str) -> None:
@@ -261,7 +262,7 @@ def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: py
         "other-capture": DigestEntry(ref="ghcr.io/owner/repo/other-capture", digest=digest_existing, tags=["tree-2"]),
     }
 
-    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
+    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(make_plan(set())))
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config, manifest=manifest)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
@@ -304,10 +305,12 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
     )
     tags = FakeTags(versions={"myapp": "1.0.0", "settled": "2.1.0"}, changed=set())
 
-    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan({"fresh"})))
+    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(make_plan({"fresh"})))
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
-    monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([("npm", "fresh-id", "1.0.1-dev.abcdef123456")]))
+    monkeypatch.setattr(
+        publishing_module, "publish_packages", CallRecorder([("npm", "fresh-id", "1.0.1-dev.abcdef123456")])
+    )
     written: list[str] = []
 
     def capturing_bash(command: str) -> None:
@@ -331,10 +334,10 @@ def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch)
     )
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
-    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan({"pkg"})))
+    monkeypatch.setattr(publishing_module, "compute_release_plan", FixedReturn(make_plan({"pkg"})))
     patch_plan_tags(monkeypatch, tags)
     patch_common(monkeypatch, config)
-    monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([]))
+    monkeypatch.setattr(publishing_module, "publish_packages", CallRecorder([]))
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
     view_calls = CallRecorder('{"body": "", "url": "https://github.com/owner/repo/releases/untagged-abc"}')
     monkeypatch.setattr(drafts, "bash_output", view_calls)
