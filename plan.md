@@ -12,11 +12,13 @@ Transient working artifact for a three-session refactor arc. **Delete this file 
 
 Investigation conclusions feeding sessions 2–3: the three verb files are byte-identical except the channel literal; trusted publishing binds to workflow *filename* (`release.yml`), not verb name, so the collapse is OIDC-safe; consumers pin by full SHA so nothing breaks until a consumer bumps its wrapper pin.
 
-### Session 2 — lint-workflows rebuild (grammar rides here)
+### Session 2 — lint-workflows rebuild (grammar rides here) (DONE)
 
-Aggressive code-quality pass on `src/release_devkit/verbs/lint_workflows.py` (677 lines) + `tests/test_lint_workflows.py` (892 lines), **ending with the deliberate grammar flip to the single-verb paradigm** — the lint accepts `release --channel pr|dev|stable` spellings while the three old verbs still exist as scripts. Operator ruling: behavior-preserving-only was rejected; the grammar change rides session 2, session 3 lands the verbs. Constraint that follows: **no consumer pin may be bumped between session 2's push and session 3's push** — an intermediate pin would lint-reject old spellings while the new spelling doesn't run yet.
+Aggressive code-quality pass on `src/release_devkit/verbs/lint_workflows.py` + `tests/test_lint_workflows.py`, **ending with the deliberate grammar flip to the single-verb paradigm** — the lint accepts `release --channel pr|dev|stable` spellings while the three old verbs still exist as scripts. Operator ruling: behavior-preserving-only was rejected; the grammar change rides session 2, session 3 lands the verbs. Constraint that follows: **no consumer pin may be bumped between session 2's push and session 3's push** — an intermediate pin would lint-reject old spellings while the new spelling doesn't run yet.
 
-### Session 3 — verb collapse + ci_step helpers + module move
+Landed (commit order): actionlint module extracted (`src/release_devkit/actionlint.py`, tarball deleted, paths quoted); TypeGuard family replaced by a pydantic-validated typed view (`StepView`/`JobView`/`WorkflowView`, parse-boundary shape problems, yaml-1.1 `on:`/True quirk folded into `WorkflowView.triggers`); `Problem` dataclass as the validators' currency with rendering at the two public boundaries; `RepoContext` replacing the drilled `nuget` booleans; `validate_job` decomposed into per-concern checks with one parametrized `canonical_mint_steps` collector and `steps_in_window`; the six verb tables consolidated into `VerbSpec` + `RELEASE_CHANNELS` with `DEVKIT_INVOCATION` derived and a pyproject drift-guard test; duplicate wrapper steps rejected; `signatures_for` computed once per file; the grammar flip (`release --channel pr|dev|stable`, channel-conditional placement/checkout/env/delivery) with fixtures rewritten around `job_block`/`workflow` builders and the channel matrix tests. 86 tests green, ruff + basedpyright clean, repo baseline unchanged (46 test-side pyright errors, 4 collection errors — session 3's batch).
+
+### Session 3 — verb collapse + ci_step helpers + module move (NEXT)
 
 Collapse `release`/`prerelease`/`update-pr-draft-release` into one `release --channel` verb, extract the three draft stages into helpers behind `ci_step`, move drafts.py's contents into the verb file, fix the deferred test-fallout batch against the final module home, final AGENTS.md truth pass, delete plan.md.
 
@@ -144,15 +146,28 @@ Same f-string job assembly repeated in ~70 tests; fixtures hardcode the three-ve
 
 **Proposal:** keep the block-string approach and the test names' semantics (they are the grammar's regression spec), add a small `job(...)`/`workflow(...)` builder to cut repetition, rewrite verb fixtures as `RELEASE_PR_RUN`/`RELEASE_DEV_RUN`/`RELEASE_STABLE_RUN` with the `--channel` spelling, and add: the per-channel checkout/env/placement matrix, channel-arg rejections (`--channel bogus`, bare `release`), the duplicate-wrapper rejection (K), and the table-drift guard (A).
 
-### Session 2 execution order
+### Session 2 execution order (DONE)
 
-1. Survey the three consumers' workflows (placeframe, unity-devkit, docker-devkit — all publishing); pin the channel→job placement table and job names.
-2. AGENTS.md prose-first commit: Commands table rows collapse to one `release` entry with `--channel`; workflow-contract bullets re-spell the verbs; also fixes the stale `write_release` reference in the Draft-surfaces section.
-3. Code commits, each behavior-preserving: extract actionlint module (J); typed view layer replacing the guard family (E/F); `problem()` currency (D); `RepoContext` (H); decompose `validate_job` (C); spec table consolidation with drift guard (A/L/K/I/N).
-4. Final commit: the grammar flip (B) — spec table gains channels, fixtures rewritten (O), all tests green, ruff + basedpyright clean.
-5. Update this plan: mark session 2 done, record deviations from these proposals.
+1. Survey the consumers' workflows — done; findings below.
+2. AGENTS.md prose-first commit — done (`60e5555`).
+3. Behavior-preserving code commits — done (actionlint J; typed view E/F; Problem D; RepoContext H; validate_job decomposition C; spec consolidation A/L/K/I/N).
+4. Grammar-flip commit with fixtures rewritten — done (`bb6d9a7`).
+5. This plan update — done.
 
-Verification: `uv run ruff format && uv run ruff check . && uv run pytest tests/test_lint_workflows.py -q && uv run basedpyright` (repo-wide basedpyright stays at the known 46 test-side errors until session 3's batch — do not add new errors).
+**Survey findings (channel→job table, pinned):** the fleet is 12 publishing consumers + the infra trio, not three. All publishing release.yml files name the dev job `prerelease` and the stable job `release` (openapi-client-codegen's `publish-prerelease` job/verb is an ancient-pin outlier that adopts the canonical spellings on bump); the PR-draft job is named `update-pr-draft-release` (Make-it-Sing, the only current carrier). Channel placement as landed: `pr` → integrate.yml's `update-pr-draft-release` job; `dev` → release.yml's `prerelease` job; `stable` → release.yml's `release` job. unity-devkit, docker-devkit, Make-it-Sing, and openapi-client-codegen still carry pre-flag-ban spellings (`--repository/--actor/--workspace/--step-summary/--pr-number/--run-number`, `HEAD_SHA` env) at their pinned SHAs — every one of them already fails the pre-flip lint, confirming they must adopt the lint-blessed spellings at bump time.
+
+**Deviations from the proposals:**
+
+- **Two spec tables, not a `channels` field** (A/B): `VERB_SPECS` (channelless verbs) + `RELEASE_CHANNELS` joined by a `RELEASE_VERB` key. A `channels: ... | None` field on `VerbSpec` would leave the release row's own args/env/checkout/delivery as dead fields (L's sin recreated); the sibling table has no dead data and the same derivation property.
+- **The typed view is pydantic-validated, not hand-rolled isinstance** (E): the proposal's "pydantic buys nothing here" was wrong in strict mode — hand-rolled narrowing from `object` propagates pydantic-strict `Unknown`s everywhere (the old TypeGuards were fabricating `dict[object, object]`, the exact sin E flagged). Three `TypeAdapter`s (`dict[object, object]` root — it preserves the yaml-1.1 boolean `True` key so `get("on")`/`get(True)` keep working; `dict[str, object]` inner; `list[object]`) are the sanctioned typed-schema route.
+- **`BLOCK_SCALAR_HEADS` became a classifying regex** (G): trimming the dead `|1`–`|4`/`+` entries outright would have let an empty `run: |2` block slip through as an inline value; `^[|>](?:[+-]\d?|\d[+-]?)$` keeps every block head rejected with no enumeration to rot. Fleet scan: only `>`, `>-`, `|`, `|-` ever occur.
+- **The drift guard is a pyproject-parsing test** (`test_verb_spec_table_matches_the_console_scripts`) with a `LEGACY_VERB_SCRIPTS = ("prerelease", "update-pr-draft-release")` carve-out for the session-2→3 window. **Session 3 must tighten it to exact equality when the legacy script rows die.**
+- **H resolved at the inner layers only**: `RepoContext` replaces the `nuget` drilling through `validate_job`/`collect_verb_steps`/`validate_verb_env`; `validate_workflow_file`'s `publishing`/`nuget` keyword boundary stays — it is the tests' API and its defaults are exercised by them.
+- **M folded into D and the flip** (no separate commit): the collect→render→actionlint→exit flow was already the structure; the one comment documenting that `--workflow` under non-canonical filenames skips the per-file contract checks landed in `validate_workflow_file`.
+- **AGENTS.md identity paragraph**: the stale `build_context`/`context.py` tail (dead since session 1) was cut in session 2's prose commit rather than left for session 3; session 3 still owns the `drafts.py` → `verbs/release.py` re-spelling.
+- **plan.md is itself ruff-formatted** (code blocks) — its comment spacing was normalized by a format run and committed as its own prose commit.
+
+Verification (all green at `bb6d9a7`): `uv run ruff format && uv run ruff check . && uv run pytest tests/test_lint_workflows.py -q && uv run basedpyright` — repo-wide basedpyright stays at the known 46 test-side errors.
 
 ---
 
@@ -164,6 +179,7 @@ Verification: `uv run ruff format && uv run ruff check . && uv run pytest tests/
 - Move all of `drafts.py` into `verbs/release.py` (constants, `ReleaseChannel`, `DigestEntry`, `create_or_update_release`, helpers, `markdown_table`, `delete_draft_release`); delete `drafts.py`.
 - `merge_gate.py:12` import of `delete_draft_release` repoints to `release_devkit.verbs.release`.
 - pyproject: three script rows → one `release = "release_devkit.verbs.release:app"`.
+- Tighten the lint drift-guard test: drop the `LEGACY_VERB_SCRIPTS` carve-out once the legacy script rows die (see session 2 deviations).
 
 ### Helper extraction (inside the moved `create_or_update_release`)
 
