@@ -39,7 +39,7 @@ class Registry(Protocol):
         path: Path,
         version: str,
         dependency_versions: dict[str, str],
-        dist_tag: str | None = None,
+        dev: bool,
     ) -> None: ...
 
 
@@ -52,7 +52,7 @@ class NuGetRegistry:
         path: Path,
         version: str,
         dependency_versions: dict[str, str],
-        dist_tag: str | None = None,
+        dev: bool,
     ) -> None:
         properties: dict[str, str] = {}
         found: set[str] = set()
@@ -101,11 +101,11 @@ class NpmRegistry:
         path: Path,
         version: str,
         dependency_versions: dict[str, str],
-        dist_tag: str | None = None,
+        dev: bool,
     ) -> None:
         command = "npm publish --access public --provenance --loglevel verbose"
-        if dist_tag:
-            command += f" --tag {dist_tag}"
+        if dev:
+            command += f" --tag {NPM_DEV_DIST_TAG}"
         with ephemeral_manifest_patch(path, version, dependency_versions):
             try:
                 bash_output(command, cwd=path)
@@ -123,7 +123,7 @@ class PyPIRegistry:
         path: Path,
         version: str,
         dependency_versions: dict[str, str],
-        dist_tag: str | None = None,
+        dev: bool,
     ) -> None:
         with ephemeral_pyproject_patch(path, version, dependency_versions):
             bash("uv build --out-dir dist", cwd=path)

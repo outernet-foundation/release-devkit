@@ -63,13 +63,13 @@ class FakePublishRegistry:
         path: object,
         version: object,
         dependency_versions: object,
-        dist_tag: object = None,
+        dev: bool,
     ) -> None:
         self.calls.append({
             "path": path,
             "version": version,
             "dependency_versions": dependency_versions,
-            "dist_tag": dist_tag,
+            "dev": dev,
         })
 
 
@@ -226,7 +226,7 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
 
     assert len(npm_registry.calls) == 1
     assert npm_registry.calls[0]["version"] == f"1.0.0-dev.{SHORT_SHA}"
-    assert npm_registry.calls[0]["dist_tag"] == "dev"
+    assert npm_registry.calls[0]["dev"] is True
     assert create_and_push_tag.calls == []
     assert pull_assets.calls != []
     assert written != []
