@@ -55,6 +55,9 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     settings = Settings.model_validate({})
     publish_config = load_config(config)
 
+    # Make git trust the workspace before any git call — checkout set safe.directory in a temporary HOME
+    configure_git(settings.github_workspace)
+
     # Publish every changed package to its registry and tag the stable versions
     release_plan = compute_release_plan(publish_config)
 
@@ -168,10 +171,12 @@ def publish_packages(
     channel: ReleaseChannel,
     short_sha: str,
 ) -> list[list[str]]:
-    # Provision the runner and the registries for publishing
-    configure_git(settings.github_workspace)
-    install_dotnet("8.0")
-    install_node("24", "https://registry.npmjs.org")
+    # Provision the toolchains for the registries this run publishes to
+    publishing_registries = {publish_config.packages[name].registry for name in release_plan.publishing}
+    if "nuget" in publishing_registries:
+        install_dotnet("8.0")
+    if "npm" in publishing_registries:
+        install_node("24", "https://registry.npmjs.org")
     registries = build_registries(settings.nuget_api_key)
     table_rows: list[list[str]] = []
     for name, package in publish_config.packages.items():

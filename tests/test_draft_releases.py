@@ -111,6 +111,7 @@ def patch_context(
     monkeypatch.setenv("GITHUB_WORKSPACE", "/workspace")
     monkeypatch.setenv("GITHUB_REF", github_ref)
     monkeypatch.setattr(release_module, "load_config", FixedReturn(publish_config))
+    monkeypatch.setattr(release_module, "configure_git", FixedReturn(None))
     monkeypatch.setattr(release_module, "compute_release_plan", FixedReturn(ReleasePlan.empty()))
 
 
