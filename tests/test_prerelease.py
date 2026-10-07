@@ -97,7 +97,6 @@ def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
     monkeypatch.setattr(plan_module, "latest_version_in_line", tags.latest_version_in_line)
     monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
     monkeypatch.setattr(drafts, "latest_version", tags.latest_version)
-    monkeypatch.setattr(drafts, "has_changes_since", tags.has_changes_since)
 
 
 def make_context(
@@ -170,15 +169,15 @@ def run_prerelease(
     return publish_packages, pull_assets, written
 
 
-def test_nothing_changed_returns_without_publishing_or_drafting(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_noop_merge_publishes_nothing_but_writes_section(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(apps={"myapp": make_app()})
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
     publish_packages, pull_assets, written = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert publish_packages.calls == []
-    assert pull_assets.calls == []
-    assert written == []
+    assert pull_assets.calls != []
+    assert written != []
 
 
 def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -192,7 +191,7 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
     publish_packages, pull_assets, written = run_prerelease(monkeypatch, config, release_plan, tags)
 
     assert publish_packages.calls != []
-    assert pull_assets.calls == []
+    assert pull_assets.calls != []
     assert written != []
     assert f'<a id="sha-{SHORT_SHA}"></a>' in written[0]
     strategy = publish_packages.calls[0][3]
@@ -233,7 +232,7 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk]({fresh_link}) |" in written[0]
 
 
-def test_dev_draft_surfaces_only_changed_apps(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stages_all_apps_regardless_of_source_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(
         apps={
             "changed-app": make_app("changed-app"),
@@ -248,7 +247,7 @@ def test_dev_draft_surfaces_only_changed_apps(monkeypatch: pytest.MonkeyPatch) -
     _, pull_assets, _ = run_prerelease(monkeypatch, config, make_plan(set()), tags)
 
     assert len(pull_assets.calls) == 1
-    assert pull_assets.calls[0][0] == {"changed-app": make_app("changed-app")}
+    assert pull_assets.calls[0][0] == config.apps
 
 
 def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,37 +290,6 @@ def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: py
     assert f"[{SHORT_SHA}](https://github.com/owner/repo/commit/{CERTIFIED_SHA})" in written[0]
 
 
-def test_unchanged_images_only_run_skips_the_section(monkeypatch: pytest.MonkeyPatch) -> None:
-    config = make_config(apps={"myapp": make_app()})
-    tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
-
-    digest_known = "sha256:" + "a" * 64
-    manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest=digest_known, tags=["tree-1"])}
-
-    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
-    patch_plan_tags(monkeypatch, tags)
-    patch_common(monkeypatch, config, manifest=manifest)
-    monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
-    draft_body = f"| zed-capture | tree-0 | `{digest_known}` |"
-    monkeypatch.setattr(
-        drafts,
-        "bash_output",
-        FixedReturn(json.dumps({"body": draft_body, "url": "https://github.com/owner/repo/releases/untagged-abc"})),
-    )
-    written: list[str] = []
-
-    def capturing_bash(command: str) -> None:
-        if "--notes-file" in command:
-            path = command.split("--notes-file", 1)[1].strip().split()[0]
-            written.append(Path(path).read_text(encoding="utf-8"))
-
-    monkeypatch.setattr(drafts, "bash", capturing_bash)
-
-    prerelease.main()
-
-    assert written == []
-
-
 def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -354,42 +322,6 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
     assert len(written) == 1
     assert "| fresh | 1.0.1-dev.abcdef123456 |" in written[0]
     assert "| settled | 2.1.0 |" in written[0]
-
-
-def test_snapshot_section_carries_forward_unchanged_app_assets(monkeypatch: pytest.MonkeyPatch) -> None:
-    config = make_config(apps={"myapp": make_app()})
-    tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
-
-    old_asset = "MyApp-AndroidMobile-999999999999.apk"
-    old_row = (
-        f"| myapp | 1.0.0 | [{old_asset}](https://github.com/owner/repo/releases/download/dev-builds/{old_asset}) |"
-    )
-    draft_body = f'<a id="sha-999999999999"></a>\n### Old\n\n| App | Version | Asset |\n|---|---|---|\n{old_row}'
-
-    monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan({"pkg"})))
-    patch_plan_tags(monkeypatch, tags)
-    patch_common(monkeypatch, config)
-    monkeypatch.setattr(prerelease, "publish_packages", CallRecorder([]))
-    monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
-    monkeypatch.setattr(
-        drafts,
-        "bash_output",
-        FixedReturn(json.dumps({"body": draft_body, "url": "https://github.com/owner/repo/releases/untagged-abc"})),
-    )
-    written: list[str] = []
-
-    def capturing_bash(command: str) -> None:
-        if "--notes-file" in command:
-            path = command.split("--notes-file", 1)[1].strip().split()[0]
-            written.append(Path(path).read_text(encoding="utf-8"))
-
-    monkeypatch.setattr(drafts, "bash", capturing_bash)
-
-    prerelease.main()
-
-    assert written
-    section = written[0].split(f'<a id="sha-{SHORT_SHA}"></a>', 1)[1].split('<a id="sha-999999999999"></a>', 1)[0]
-    assert old_row in section
 
 
 def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch) -> None:

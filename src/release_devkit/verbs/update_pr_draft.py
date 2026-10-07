@@ -30,5 +30,4 @@ def update_pr_draft(
             f"[{context.short}]({context.commit_url})",
             f"[PR #{pr_number}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
         ],
-        stage_changed_only=False,
     )

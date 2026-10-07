@@ -48,8 +48,6 @@ def main(
             f"[{context.short}]({context.commit_url})",
             f"[PR #{pr_number}: {groups[1]}](https://github.com/{context.settings.github_repository}/pull/{pr_number})",
         ],
-        stage_changed_only=True,
-        publishing=bool(release_plan.publishing),
         packages=package_rows(
             packages,
             {

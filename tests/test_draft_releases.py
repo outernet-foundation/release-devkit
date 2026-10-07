@@ -67,7 +67,6 @@ def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
     monkeypatch.setattr(plan_module, "latest_version", tags.latest_version)
     monkeypatch.setattr(plan_module, "has_changes_since", tags.has_changes_since)
     monkeypatch.setattr(drafts, "latest_version", tags.latest_version)
-    monkeypatch.setattr(drafts, "has_changes_since", tags.has_changes_since)
 
 
 def make_build_config() -> PublishConfig:
@@ -230,23 +229,7 @@ def test_update_pr_draft_no_app_builds_uploads_nothing(monkeypatch: pytest.Monke
     update_pr_draft()
 
     assert not any("gh release upload" in command for command in bash_log.commands)
-    assert not any("gh release edit" in command for command in bash_log.commands)
-
-
-def test_update_pr_draft_skips_when_nothing_changed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
-    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
-    bash_log = patch_bash(monkeypatch, check_returns=False)
-    pull_assets = CallRecorder([])
-    monkeypatch.setattr(builds_module, "pull_build_assets", pull_assets)
-
-    update_pr_draft()
-
-    assert pull_assets.calls == []
-    assert not any("gh release create" in command for command in bash_log.commands)
-    assert not any("gh release upload" in command for command in bash_log.commands)
-    assert not any("gh release edit" in command for command in bash_log.commands)
+    assert any("gh release edit pr-7" in command for command in bash_log.commands)
 
 
 def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -265,7 +248,7 @@ def test_write_draft_section_writes_notes_file_without_recreating(monkeypatch: p
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
     context = make_context(PublishConfig())
-    write_draft_section(context, "dev-builds", ["Heading"], stage_changed_only=False, publishing=True)
+    write_draft_section(context, "dev-builds", ["Heading"])
 
     assert any("gh release edit dev-builds" in command and "--notes-file" in command for command in bash_log.commands)
     assert not any("gh release create" in command for command in bash_log.commands)
@@ -276,7 +259,7 @@ def test_write_draft_section_creates_missing_draft(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(DRAFT_VIEW_JSON))
 
     context = make_context(PublishConfig())
-    write_draft_section(context, "dev-builds", ["Heading"], stage_changed_only=False, publishing=True)
+    write_draft_section(context, "dev-builds", ["Heading"])
 
     assert any(
         "gh release create dev-builds" in command and "--draft" in command and f"--target {context.head}" in command
@@ -300,71 +283,12 @@ def test_write_draft_section_replaces_same_anchor_and_preserves_others(monkeypat
 
     monkeypatch.setattr(drafts, "bash", capturing_bash)
 
-    write_draft_section(
-        make_context(PublishConfig()), "dev-builds", ["New v2"], stage_changed_only=False, publishing=True
-    )
+    write_draft_section(make_context(PublishConfig()), "dev-builds", ["New v2"])
 
     assert written
     assert "### Old" in written[0]
     assert "### New v2" in written[0]
     assert "### New v1" not in written[0]
-
-
-def test_write_draft_section_carries_app_rows_from_newest_section_and_drops_staged_stems(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    carried_row = (
-        "| sideapp | 2.0.0 | [SideApp-222222222222.apk]"
-        "(https://github.com/owner/repo/releases/download/dev-builds/SideApp-222222222222.apk) |"
-    )
-    body = (
-        '<a id="sha-newest"></a>\n### Newest\n\n'
-        "| App | Version | Asset |\n|---|---|---|\n"
-        "| myapp | 1.0.0 | [MyApp-AndroidMobile-111111111111.apk]"
-        "(https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-111111111111.apk) |\n"
-        f"{carried_row}\n\n"
-        '<a id="sha-old"></a>\n### Old\n\n'
-        "| App | Version | Asset |\n|---|---|---|\n"
-        "| sideapp | 1.9.0 | [SideApp-333333333333.apk]"
-        "(https://github.com/owner/repo/releases/download/dev-builds/SideApp-333333333333.apk) |"
-    )
-    view_json = json.dumps({"body": body, "url": DRAFT_URL})
-    patch_bash(monkeypatch, check_returns=True)
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(view_json))
-    patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
-    monkeypatch.setattr(
-        builds_module,
-        "pull_build_assets",
-        FixedReturn([
-            (
-                "myapp",
-                BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk"),
-                make_source_file("MyApp-AndroidMobile.apk"),
-            )
-        ]),
-    )
-
-    written: list[str] = []
-
-    def capturing_bash(command: str) -> None:
-        if "--notes-file" in command:
-            path = command.split("--notes-file", 1)[1].strip().split()[0]
-            written.append(Path(path).read_text(encoding="utf-8"))
-
-    monkeypatch.setattr(drafts, "bash", capturing_bash)
-
-    write_draft_section(
-        make_context(make_build_config()), "dev-builds", ["Run"], stage_changed_only=False, publishing=True
-    )
-
-    assert written
-    anchor = f"sha-{SHORT_SHA}"
-    section = written[0].split(f'<a id="{anchor}"></a>', 1)[1].split('<a id="sha-newest"></a>', 1)[0]
-    fresh_link = f"https://github.com/owner/repo/releases/download/dev-builds/MyApp-AndroidMobile-{SHORT_SHA}.apk"
-    assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk]({fresh_link}) |" in section
-    assert "111111111111" not in section
-    assert carried_row in section
-    assert "333333333333" not in section
 
 
 def test_write_draft_section_lists_one_row_per_staged_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -397,31 +321,8 @@ def test_write_draft_section_lists_one_row_per_staged_artifact(monkeypatch: pyte
 
     monkeypatch.setattr(drafts, "bash", capturing_bash)
 
-    write_draft_section(
-        make_context(make_build_config()), "dev-builds", ["Run"], stage_changed_only=False, publishing=True
-    )
+    write_draft_section(make_context(make_build_config()), "dev-builds", ["Run"])
 
     assert written
     assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk](" in written[0]
     assert f"| myapp | 1.0.0 | [MyApp-IOS-{SHORT_SHA}.apk](" in written[0]
-
-
-def test_write_draft_section_guard_compares_manifest_digests_against_body(monkeypatch: pytest.MonkeyPatch) -> None:
-    known = "sha256:" + "a" * 64
-    fresh = "sha256:" + "b" * 64
-    bash_log = patch_bash(monkeypatch, check_returns=True)
-
-    known_body = json.dumps({"body": f"| img | tree-1 | `{known}` |", "url": DRAFT_URL})
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(known_body))
-    context = make_context(
-        PublishConfig(), manifest={"img": DigestEntry(ref="ghcr.io/owner/repo/img", digest=known, tags=["tree-1"])}
-    )
-    write_draft_section(context, "dev-builds", ["Heading"], stage_changed_only=False)
-    assert not any("gh release edit" in command for command in bash_log.commands)
-
-    monkeypatch.setattr(drafts, "bash_output", FixedReturn(json.dumps({"body": "", "url": DRAFT_URL})))
-    context = make_context(
-        PublishConfig(), manifest={"img": DigestEntry(ref="ghcr.io/owner/repo/img", digest=fresh, tags=["tree-1"])}
-    )
-    write_draft_section(context, "dev-builds", ["Heading"], stage_changed_only=False)
-    assert any("gh release edit" in command for command in bash_log.commands)

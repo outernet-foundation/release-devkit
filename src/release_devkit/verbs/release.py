@@ -61,7 +61,7 @@ def main(
     staged = stage_build_assets(context, publish_config.apps, None)
     assets = [target for _, _, target in staged]
     app_versions = {app_name: latest_version(f"{app_name}-v") for app_name in publish_config.apps}
-    app_rows = collect_app_rows(staged, app_versions, [], repository, release_tag)
+    app_rows = collect_app_rows(staged, app_versions, repository, release_tag)
 
     rows = package_rows(packages)
 

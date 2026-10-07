@@ -9,40 +9,21 @@ from bashrun.bash import bash, bash_check, bash_output
 
 from release_devkit.builds import stage_build_assets
 from release_devkit.context import VerbContext
-from release_devkit.rendering import (
-    APP_TABLE_HEADER,
-    DIGEST_PATTERN,
-    AppRow,
-    PackageRow,
-    collect_app_rows,
-    render_release_body,
-)
-from release_devkit.tags import has_changes_since, latest_version
+from release_devkit.rendering import PackageRow, collect_app_rows, render_release_body
+from release_devkit.tags import latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
 _ANCHOR_PATTERN = re.compile(r'<a id="([^"]+)"></a>')
-_APP_ROW_PATTERN = re.compile(r"\| ([^|]+) \| ([^|]*) \| \[([^\]]+)\]\(([^)]+)\) \|")
 
 
 def write_draft_section(
     context: VerbContext,
     tag: str,
     heading_fragments: list[str],
-    stage_changed_only: bool,
-    publishing: bool = False,
     packages: list[PackageRow] | None = None,
 ) -> None:
-    # Detect apps whose source changed since their last version tag
+    # Read the app versions for the table's version column
     app_last_versions = {name: latest_version(f"{name}-v") for name in context.publish_config.apps}
-    changed_apps = {
-        name: app
-        for name, app in context.publish_config.apps.items()
-        if app.builds is not None
-        and has_changes_since(
-            f"{name}-v{app_last_versions[name]}" if app_last_versions[name] else None,
-            app.path,
-        )
-    }
 
     # Read the current body, treating a missing draft as empty
     repository = context.settings.github_repository
@@ -53,25 +34,12 @@ def write_draft_section(
         else ""
     )
 
-    # Skip the write when nothing changed
-    if (
-        not publishing
-        and not changed_apps
-        and not any(
-            entry.digest not in set(DIGEST_PATTERN.findall(body)) for entry in (context.manifest or {}).values()
-        )
-    ):
-        return
-
     # Ensure the draft release exists
     if not draft_exists:
         bash(f"gh release create {tag} --draft --target {context.head} --title {tag} --notes '' --repo {repository}")
 
-    # Stage app assets pulled from the builds shelf
-    apps = changed_apps if stage_changed_only else context.publish_config.apps
-    staged = stage_build_assets(context, apps, context.short)
-
-    # Upload staged assets onto the draft
+    # Stage every app's shelf build at this SHA and upload it onto the draft
+    staged = stage_build_assets(context, context.publish_config.apps, context.short)
     if staged:
         bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, _, path in staged)} --clobber --repo {repository}")
 
@@ -82,23 +50,8 @@ def write_draft_section(
         (parts[index], parts[index + 1].strip() if index + 1 < len(parts) else "") for index in range(1, len(parts), 2)
     ]
 
-    # Parse the carried app rows out of the newest section
-    carried: list[AppRow] = []
-    if sections:
-        lines = sections[0][1].splitlines()
-        if APP_TABLE_HEADER in lines:
-            for line in lines[lines.index(APP_TABLE_HEADER) + 1 :]:
-                stripped = line.strip()
-                if not stripped.startswith("|"):
-                    break
-                if set(stripped) <= set("|-: "):
-                    continue
-                match = _APP_ROW_PATTERN.fullmatch(stripped)
-                if match is not None:
-                    carried.append(AppRow(match[1], match[2] or None, match[3], match[4]))
-
     # Build the section's app table rows
-    app_rows = collect_app_rows(staged, app_last_versions, carried, repository, tag)
+    app_rows = collect_app_rows(staged, app_last_versions, repository, tag)
 
     # Render the new section body
     body = render_release_body(f"### {' — '.join(heading_fragments)}", packages, app_rows, context.manifest, level=4)

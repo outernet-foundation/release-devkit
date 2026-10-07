@@ -8,7 +8,6 @@ from release_devkit.builds import DigestEntry
 
 DIGEST_PATTERN = re.compile(r"sha256:[a-f0-9]{64}")
 APP_TABLE_HEADER = "| App | Version | Asset |"
-_ASSET_NAME_PATTERN = re.compile(r"^(.+)-[0-9a-f]{12}\.[^.]+$")
 
 
 @dataclass
@@ -36,14 +35,12 @@ class AppRow:
 def collect_app_rows(
     staged: list[tuple[str, str, Path]],
     versions: dict[str, str | None],
-    carried: list[AppRow],
     repository: str,
     tag: str,
 ) -> list[AppRow]:
-    restaged_stems = {stem for _, asset_name, _ in staged if (stem := asset_stem(asset_name)) is not None}
     return [
         app_row(app_name, versions.get(app_name), asset_name, repository, tag) for app_name, asset_name, _ in staged
-    ] + [row for row in carried if asset_stem(row.asset_name or "") not in restaged_stems]
+    ]
 
 
 def app_row(
@@ -130,8 +127,3 @@ def render_images_table(manifest: dict[str, DigestEntry]) -> list[str]:
         tag_cell = f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—")
         lines.append(f"| {target} | {tag_cell} | `{entry.digest}` |")
     return lines
-
-
-def asset_stem(name: str) -> str | None:
-    match = _ASSET_NAME_PATTERN.fullmatch(name)
-    return match.group(1) if match is not None else None
