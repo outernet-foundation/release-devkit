@@ -30,37 +30,23 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     # Assemble the release notes from the heading and the artifact tables
     prefix = "#" * (2 if channel == ReleaseChannel.STABLE else 4)
     blocks: list[str] = []
+    head = bash_output("git rev-parse HEAD").strip()
 
     # Resolve the run's identity and publish packages on the delivery channels
     if channel == ReleaseChannel.PR:
-        # Take HEAD as-is — the merge commit is not fetched in this channel and must not be resolved
-        head = bash_output("git rev-parse HEAD").strip()
         context = build_context(head, head, config)
-        blocks.append(f"### [{context.short}]({context.commit_url})")
     else:
-        # The certified tree is the merge's second parent, the merged PR head
-        head = bash_output("git rev-parse HEAD").strip()
         parents = bash_output(f"git log -1 --format=%P {head}").strip().split()
         context = build_context(head, parents[1] if len(parents) >= 2 else head, config)
 
     # Head the snapshot section with the merge's PR title
-    if channel == ReleaseChannel.DEV:
-        pr_number, pr_title = re.findall(
-            r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
-        )[0]
-        blocks.append(
-            f"### [{context.short}]({context.commit_url})"
-            f" — [PR #{pr_number}: {pr_title}]"
-            f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
-        )
-
     if channel == ReleaseChannel.PR:
         versions = {name: get_latest_version(f"{name}-v") for name in context.publish_config.apps}
+        blocks.append(f"### [{context.short}]({context.commit_url})")
     else:
         # Publish every changed package to its registry and tag the stable versions
         release_plan = compute_release_plan(context.publish_config)
 
-        # Stop a dev run with nothing to ship
         # Stop a stable run with nothing to ship
         if channel == ReleaseChannel.STABLE and not release_plan.publishing and not release_plan.app_versions:
             return
@@ -69,6 +55,15 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             versions = {**release_plan.app_last_versions, **release_plan.app_versions}
         else:
             versions = release_plan.app_last_versions
+
+            pr_number, pr_title = re.findall(
+                r"Merge PR #(\d+): (.+)", bash_output(f"git log -1 --format=%B {context.head}").strip()
+            )[0]
+            blocks.append(
+                f"### [{context.short}]({context.commit_url})"
+                f" — [PR #{pr_number}: {pr_title}]"
+                f"(https://github.com/{context.settings.github_repository}/pull/{pr_number})"
+            )
 
         configure_git(context.settings.github_workspace)
         install_dotnet("8.0")
