@@ -69,7 +69,7 @@ def write_release(
                         f"({', '.join(path.name for path in files)}); declare which one with 'file'"
                     )
                 named = Path(artifact.name) if artifact.name else source
-                name = f"{named.stem}-{context.short}{named.suffix}" if not publish else named.name
+                name = named.name if publish else f"{named.stem}-{context.short}{named.suffix}"
                 target = staging / name
                 shutil.copy2(source, target)
                 staged.append((app_name, name, target))
@@ -100,27 +100,25 @@ def write_release(
                 or latest_version(f"{name}-v")
                 or UNCHANGED_FALLBACK_VERSION
             )
-            registry_cells: list[str] = []
-            for registry_name, identity in package.registries.items():
-                if version != UNCHANGED_FALLBACK_VERSION:
-                    registry_cells.append(
-                        f"[{registry_name}]({build_registries('')[registry_name].url(identity, version)})"
-                    )
-                else:
-                    registry_cells.append(registry_name)
-            table_rows.append([name, version, ", ".join(registry_cells) if registry_cells else "—"])
+            registry_cells = [
+                f"[{registry_name}]({build_registries('')[registry_name].url(identity, version)})"
+                if version != UNCHANGED_FALLBACK_VERSION
+                else registry_name
+                for registry_name, identity in package.registries.items()
+            ]
+            table_rows.append([name, version, ", ".join(registry_cells) or "—"])
         if table_rows:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], table_rows)}")
 
     if staged:
-        table_rows = []
-        for app_name, asset_name, _ in staged:
-            version = versions.get(app_name)
-            table_rows.append([
+        table_rows = [
+            [
                 app_name,
-                version if version is not None else "—",
+                versions.get(app_name) or "—",
                 f"[{asset_name}](https://github.com/{repository}/releases/download/{tag}/{asset_name})",
-            ])
+            ]
+            for app_name, asset_name, _ in staged
+        ]
         blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], table_rows)}")
 
     if context.manifest:
@@ -130,13 +128,12 @@ def write_release(
                 (tag_name for tag_name in entry.tags if tag_name.startswith("tree-")),
                 entry.tags[0] if entry.tags else "",
             )
-            url = None
-            if entry.ref.startswith("ghcr.io/"):
-                ref_parts = entry.ref[len("ghcr.io/") :].split("/", 1)
-                if len(ref_parts) >= 2:
-                    url = (
-                        f"https://github.com/orgs/{ref_parts[0]}/packages/container/{ref_parts[1].replace('/', '%2F')}"
-                    )
+            url = (
+                f"https://github.com/orgs/{ref_parts[0]}/packages/container/{ref_parts[1].replace('/', '%2F')}"
+                if entry.ref.startswith("ghcr.io/")
+                and len(ref_parts := entry.ref[len("ghcr.io/") :].split("/", 1)) >= 2
+                else None
+            )
             table_rows.append([
                 image_name,
                 f"[{tree_tag}]({url})" if url is not None and tree_tag else (tree_tag or "—"),
@@ -150,10 +147,8 @@ def write_release(
         anchor = f"sha-{context.short}"
         parts = re.split(r'<a id="([^"]+)"></a>', body)
         sections = {parts[index]: parts[index + 1].strip() for index in range(1, len(parts), 2)}
-        if anchor in sections:
-            sections[anchor] = section
-        else:
-            sections = {anchor: section, **sections}
+        sections.pop(anchor, None)
+        sections = {anchor: section, **sections}
         section = "\n\n".join(f'<a id="{anchor_id}"></a>\n{content}' for anchor_id, content in sections.items())
 
     with NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as file:
