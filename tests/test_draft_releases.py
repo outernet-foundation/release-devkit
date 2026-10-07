@@ -8,8 +8,9 @@ import pytest
 
 from release_devkit import drafts
 from release_devkit.verbs import update_pr_draft as update_pr_draft_module
-from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig
+from release_devkit.config import AppConfig, BuildArtifactConfig, PublishConfig, Settings
 from release_devkit.builds import DigestEntry, pull_build_assets
+from release_devkit.context import VerbContext
 from release_devkit.drafts import (
     append_draft_section,
     delete_draft_release,
@@ -64,9 +65,27 @@ def make_source_file(name: str = "app.apk") -> Path:
 
 
 DRAFT_REPOSITORY = "owner/repo"
-DRAFT_ACTOR = "bot"
 CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
 SHORT_SHA = CERTIFIED_SHA[:12]
+
+
+def make_context(
+    publish_config: PublishConfig,
+    manifest: dict[str, DigestEntry] | None = None,
+    github_ref: str = "refs/pull/7/merge",
+) -> VerbContext:
+    return VerbContext(
+        settings=Settings(
+            github_token="token",
+            github_repository=DRAFT_REPOSITORY,
+            github_actor="bot",
+            github_ref=github_ref,
+        ),
+        publish_config=publish_config,
+        head=CERTIFIED_SHA,
+        certified=CERTIFIED_SHA,
+        manifest=manifest,
+    )
 
 
 def patch_bash(monkeypatch: pytest.MonkeyPatch, check_returns: object = False) -> BashLog:
@@ -102,22 +121,14 @@ def test_delete_draft_release_noop_when_absent(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GITHUB_TOKEN", "token")
     source = make_source_file("MyApp.apk")
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
-    monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_build_config()))
+    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config())))
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
-    monkeypatch.setattr(update_pr_draft_module, "pull_digest_manifest", FixedReturn(None))
-    monkeypatch.setattr(update_pr_draft_module, "bash_output", FixedReturn(f"{CERTIFIED_SHA}\n"))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
-    update_pr_draft(
-        pr_number=7,
-        repository=DRAFT_REPOSITORY,
-        actor=DRAFT_ACTOR,
-        step_summary="",
-    )
+    update_pr_draft()
 
     assert any("pr-7" in command for command in bash_log.commands)
     assert any("gh release upload pr-7" in command and "--clobber" in command for command in bash_log.commands)
@@ -126,14 +137,13 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
 
 
 def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GITHUB_TOKEN", "token")
     source = make_source_file("MyApp.apk")
     artifact = BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
-    monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_build_config()))
+    monkeypatch.setattr(
+        update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_build_config(), manifest=manifest))
+    )
     monkeypatch.setattr(drafts, "pull_build_assets", FixedReturn([(artifact, source)]))
-    monkeypatch.setattr(update_pr_draft_module, "pull_digest_manifest", FixedReturn(manifest))
-    monkeypatch.setattr(update_pr_draft_module, "bash_output", FixedReturn(f"{CERTIFIED_SHA}\n"))
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash_output", FixedReturn(""))
@@ -147,12 +157,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
 
     monkeypatch.setattr(drafts, "bash", capturing_bash)
 
-    update_pr_draft(
-        pr_number=7,
-        repository=DRAFT_REPOSITORY,
-        actor=DRAFT_ACTOR,
-        step_summary="",
-    )
+    update_pr_draft()
 
     assert written
     assert "zed-capture" in written[0]
@@ -162,17 +167,21 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
 
 
 def test_update_pr_draft_noop_on_empty_builds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GITHUB_TOKEN", "token")
-    monkeypatch.setattr(update_pr_draft_module, "load_config", FixedReturn(make_empty_config()))
-    monkeypatch.setattr(update_pr_draft_module, "bash_output", FixedReturn(f"{CERTIFIED_SHA}\n"))
+    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(make_context(make_empty_config())))
     bash_log = patch_bash(monkeypatch, check_returns=False)
 
-    update_pr_draft(
-        pr_number=7,
-        repository=DRAFT_REPOSITORY,
-        actor=DRAFT_ACTOR,
-        step_summary="",
-    )
+    update_pr_draft()
+
+    assert not bash_log.commands
+
+
+def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = make_context(make_build_config(), github_ref="refs/heads/dev")
+    monkeypatch.setattr(update_pr_draft_module, "pr_head_context", FixedReturn(context))
+    bash_log = patch_bash(monkeypatch, check_returns=False)
+
+    with pytest.raises(SystemExit, match="GITHUB_REF"):
+        update_pr_draft()
 
     assert not bash_log.commands
 

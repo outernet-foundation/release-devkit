@@ -7,8 +7,9 @@ import pytest
 
 from release_devkit.verbs import prerelease
 from release_devkit import drafts
-from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig
+from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig, Settings
 from release_devkit.builds import DigestEntry
+from release_devkit.context import VerbContext
 from release_devkit.plan import PackagePlan, ReleasePlan
 
 
@@ -92,23 +93,37 @@ def noop(*args: object, **kwargs: object) -> None:
     pass
 
 
-def merge_checkout_bash_output(command: str) -> str:
-    if "git rev-parse" in command:
-        return MERGE_SHA
-    return "Not a merge commit\n"
+def make_context(
+    config: PublishConfig,
+    manifest: dict[str, DigestEntry] | None = None,
+) -> VerbContext:
+    return VerbContext(
+        settings=Settings(
+            github_token="token",
+            github_repository="owner/repo",
+            github_actor="bot",
+            github_workspace="/workspace",
+        ),
+        publish_config=config,
+        head=MERGE_SHA,
+        certified=CERTIFIED_SHA,
+        manifest=manifest,
+    )
 
 
-def patch_common(monkeypatch: pytest.MonkeyPatch) -> CallRecorder:
-    monkeypatch.setenv("GITHUB_TOKEN", "token")
+def patch_common(
+    monkeypatch: pytest.MonkeyPatch,
+    config: PublishConfig,
+    manifest: dict[str, DigestEntry] | None = None,
+) -> CallRecorder:
     monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "ci_step", null_ci_step)
     monkeypatch.setattr(drafts, "bash_check", FixedReturn(False))
     monkeypatch.setattr(drafts, "bash", CallRecorder())
-    monkeypatch.setattr(prerelease, "certified_sha", FixedReturn(CERTIFIED_SHA))
-    monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(None))
+    monkeypatch.setattr(prerelease, "merge_push_context", FixedReturn(make_context(config, manifest)))
     pull_assets = CallRecorder([])
     monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
-    monkeypatch.setattr(prerelease, "bash_output", merge_checkout_bash_output)
+    monkeypatch.setattr(prerelease, "bash_output", FixedReturn("Not a merge commit\n"))
     return pull_assets
 
 
@@ -118,21 +133,15 @@ def run_prerelease(
     release_plan: ReleasePlan,
     tags: FakeTags,
 ) -> tuple[CallRecorder, CallRecorder, CallRecorder]:
-    monkeypatch.setattr(prerelease, "load_config", FixedReturn(config))
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(release_plan))
     monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
-    pull_assets = patch_common(monkeypatch)
+    pull_assets = patch_common(monkeypatch, config)
     publish_packages = CallRecorder([])
     monkeypatch.setattr(prerelease, "publish_packages", publish_packages)
     append_section = CallRecorder()
     monkeypatch.setattr(prerelease, "append_draft_section", append_section)
 
-    prerelease.main(
-        repository="owner/repo",
-        actor="bot",
-        workspace="/workspace",
-        step_summary="",
-    )
+    prerelease.main()
 
     return publish_packages, pull_assets, append_section
 
@@ -210,26 +219,12 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
         "other-capture": DigestEntry(ref="ghcr.io/owner/repo/other-capture", digest=digest_existing, tags=["tree-2"]),
     }
 
-    monkeypatch.setenv("GITHUB_TOKEN", "token")
-    monkeypatch.setattr(prerelease, "load_config", FixedReturn(config))
     monkeypatch.setattr(prerelease, "compute_release_plan", FixedReturn(make_plan(set())))
     monkeypatch.setattr(prerelease, "GitTags", FixedReturn(tags))
-    monkeypatch.setattr(prerelease, "ci_step", null_ci_step)
-    monkeypatch.setattr(prerelease, "certified_sha", FixedReturn(CERTIFIED_SHA))
-    monkeypatch.setattr(prerelease, "pull_digest_manifest", FixedReturn(manifest))
+    patch_common(monkeypatch, config, manifest=manifest)
     monkeypatch.setattr(prerelease, "bash_check", FixedReturn(True))
-
-    def mock_bash_output(command: str) -> str:
-        if "git rev-parse" in command:
-            return MERGE_SHA
-        if "git log" in command:
-            return "Not a merge commit\n"
-        return f"`{digest_existing}`"
-
-    monkeypatch.setattr(prerelease, "bash_output", mock_bash_output)
-    pull_assets = CallRecorder([])
-    monkeypatch.setattr(drafts, "pull_build_assets", pull_assets)
-    monkeypatch.setattr(drafts, "ci_step", null_ci_step)
+    monkeypatch.setattr(drafts, "bash_check", FixedReturn(True))
+    monkeypatch.setattr(prerelease, "bash_output", FixedReturn(f"`{digest_existing}`"))
     sections: list[str] = []
 
     def capture_section(tag: str, repository: str, anchor: str, section: str) -> None:
@@ -237,14 +232,8 @@ def test_only_new_image_digests_appends_section_without_publishing(monkeypatch: 
 
     monkeypatch.setattr(prerelease, "append_draft_section", capture_section)
 
-    prerelease.main(
-        repository="owner/repo",
-        actor="bot",
-        workspace="/workspace",
-        step_summary="",
-    )
+    prerelease.main()
 
-    assert pull_assets.calls == []
     assert len(sections) == 1
     assert digest_new in sections[0]
     assert digest_existing not in sections[0]

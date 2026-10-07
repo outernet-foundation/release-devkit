@@ -8,6 +8,7 @@ from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from release_devkit.config import Settings
 from release_devkit.drafts import delete_draft_release
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -52,8 +53,11 @@ PULL_REQUEST_REFS = TypeAdapter(list[PullRequestRef])
 @app.command()
 def main(
     head_sha: Annotated[str, typer.Option(help="Head SHA to resolve to a PR and merge")],
-    repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
 ) -> None:
+    settings = Settings.model_validate({})
+    repository = settings.github_repository
+    if not repository:
+        raise SystemExit("GITHUB_REPOSITORY is not set — this verb reads the GitHub runner environment")
     branches = bash_output(f"git branch -r --contains {head_sha}").split()
     numbers: list[int] = []
     for branch in branches:

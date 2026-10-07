@@ -10,47 +10,46 @@ import typer
 from bashrun.bash import bash, bash_output
 from ci_devkit.ci_step import ci_step
 
-from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config
+from release_devkit.builds import pull_build_assets
+from release_devkit.config import DEFAULT_CONFIG_PATH
+from release_devkit.context import merge_push_context
 from release_devkit.drafts import DEV_DRAFT_TAG, delete_draft_release
 from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, compute_and_print_plan
 from release_devkit.publishing import StableStrategy, publish_packages
 from release_devkit.registries import registry_url
 from release_devkit.rendering import PackageRow, RegistryLink, render_release_body
 from release_devkit.tags import GitTags
-from release_devkit.builds import (
-    certified_sha,
-    pull_build_assets,
-    pull_digest_manifest,
-)
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 
 @app.command()
 def main(
-    repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
-    actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
-    workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
-    step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
-    settings = Settings.model_validate({})
-    publish_config = load_config(config)
-    head = bash_output("git rev-parse HEAD").strip()
-    certified = certified_sha(head)
-    manifest = pull_digest_manifest(publish_config.builds_registry, certified, actor, settings.github_token)
+    context = merge_push_context(config)
+    repository = context.settings.github_repository
+    settings = context.settings
+    publish_config = context.publish_config
+    certified = context.certified
 
     tags = GitTags()
 
     with ci_step("Compute publish plan"):
-        release_plan = compute_and_print_plan(publish_config, tags, step_summary)
+        release_plan = compute_and_print_plan(publish_config, tags, settings.github_step_summary)
 
     if not release_plan.anything_releases():
         print("Nothing to publish")
         return
 
     if publish_config.packages:
-        publish_packages(publish_config.packages, release_plan, settings.nuget_api_key, StableStrategy(), workspace)
+        publish_packages(
+            publish_config.packages,
+            release_plan,
+            settings.nuget_api_key,
+            StableStrategy(),
+            settings.github_workspace,
+        )
 
     with ci_step("Create version tags"):
         for name in publish_config.packages:
@@ -73,7 +72,7 @@ def main(
     count = int(existing) if existing else 0
     release_tag = f"{year_month}.{count + 1}"
 
-    pulled = pull_build_assets(publish_config, certified, actor, settings.github_token)
+    pulled = pull_build_assets(publish_config, certified, settings.github_actor, settings.github_token)
     staging = Path(mkdtemp(prefix="release-assets-"))
     assets: list[Path] = []
     for artifact, source in pulled:
@@ -101,7 +100,7 @@ def main(
             if version:
                 rows.append(PackageRow(app_name, version))
 
-        notes = render_release_body(rows, manifest)
+        notes = render_release_body(rows, context.manifest)
         print(notes)
 
         asset_args = " ".join(f'"{asset}"' for asset in assets)

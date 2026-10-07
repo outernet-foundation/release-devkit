@@ -69,10 +69,10 @@ def exit_message(exit_request: SystemExit) -> str:
 def run_gate(
     monkeypatch: pytest.MonkeyPatch,
     responses: dict[str, str],
-    repository: str = "owner/repo",
     bash_check_fn: Callable[[str], bool] | None = None,
     delete_draft_fn: Callable[[str, str], None] | None = None,
 ) -> tuple[SystemExit | None, BashLog]:
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
     monkeypatch.setattr(merge_gate, "bash_output", CommandResponses(responses))
     bash_log = BashLog()
     monkeypatch.setattr(merge_gate, "bash", bash_log)
@@ -80,7 +80,7 @@ def run_gate(
     monkeypatch.setattr(merge_gate, "ci_step", null_ci_step)
     monkeypatch.setattr(merge_gate, "delete_draft_release", delete_draft_fn or noop_delete_draft)
     try:
-        merge_gate.main(head_sha=HEAD_SHA, repository=repository)
+        merge_gate.main(head_sha=HEAD_SHA)
     except SystemExit as exit_request:
         return exit_request, bash_log
     return None, bash_log

@@ -75,23 +75,16 @@ GET_APP_VERSION_RUN = (
 
 LINT_WORKFLOWS_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows\n'
 
-PRERELEASE_RUN = (
-    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
-    " prerelease --repository ${{ github.repository }}"
-    " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
-    " --step-summary $GITHUB_STEP_SUMMARY\n"
-)
+PRERELEASE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev prerelease\n'
 
-RELEASE_RUN = (
-    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
-    " release --repository ${{ github.repository }}"
-    " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
-    " --step-summary $GITHUB_STEP_SUMMARY\n"
-)
+RELEASE_RUN = '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev release\n'
 
 VALIDATE_RELEASE_PLAN_RUN = (
-    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
-    " validate-release-plan --step-summary $GITHUB_STEP_SUMMARY\n"
+    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev validate-release-plan\n'
+)
+
+UPDATE_PR_DRAFT_RUN = (
+    '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev update-pr-draft-release\n'
 )
 
 RELEASE_ENV = "        env:\n          GITHUB_TOKEN: ${{ github.token }}\n"
@@ -114,8 +107,7 @@ MINT_STEP = (
 
 MERGE_GATE_RUN = (
     '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
-    " merge-gate --head-sha ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}"
-    " --repository ${{ github.repository }}\n"
+    " merge-gate --head-sha ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}\n"
 )
 
 MERGE_GATE_ENV = "        env:\n          GITHUB_TOKEN: ${{ steps.mint.outputs.token }}\n"
@@ -340,6 +332,24 @@ def test_rejected_verb_flags_are_flagged(tmp_path: Path) -> None:
     jobs = f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
     problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
     assert any("carries rejected arguments" in problem for problem in problems)
+
+
+def test_flag_pass_through_contract_is_rejected(tmp_path: Path) -> None:
+    step = (
+        '      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev'
+        " prerelease --repository ${{ github.repository }}"
+        " --actor ${{ github.actor }} --workspace ${{ github.workspace }}"
+        " --step-summary $GITHUB_STEP_SUMMARY\n"
+    )
+    jobs = f"  prerelease:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{step}"
+    problems = validate_workflow_file(write_workflow(tmp_path, workflow(jobs)))
+    assert any("carries rejected arguments" in problem for problem in problems)
+
+
+def test_update_pr_draft_bare_invocation_is_clean(tmp_path: Path) -> None:
+    jobs = f"  update-pr-draft-release:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+    jobs += f"{UPDATE_PR_DRAFT_RUN}{RELEASE_ENV}"
+    assert validate_workflow_file(write_workflow(tmp_path, workflow(jobs))) == []
 
 
 def test_validate_release_plan_rejects_flags(tmp_path: Path) -> None:

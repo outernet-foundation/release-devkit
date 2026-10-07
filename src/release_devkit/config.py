@@ -12,6 +12,11 @@ DEFAULT_CONFIG_PATH = Path("release-devkit.yaml")
 class Settings(BaseSettings):
     github_token: str = ""
     nuget_api_key: str = ""
+    github_repository: str = ""
+    github_actor: str = ""
+    github_workspace: str = ""
+    github_step_summary: str | None = None
+    github_ref: str = ""
 
 
 class PackageConfig(BaseModel):

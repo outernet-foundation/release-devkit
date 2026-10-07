@@ -1,15 +1,13 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Annotated
 
 import typer
-from bashrun.bash import bash_output
 
-from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
-from release_devkit.builds import (
-    pull_digest_manifest,
-)
+from release_devkit.config import DEFAULT_CONFIG_PATH, write_step_summary
+from release_devkit.context import pr_head_context
 from release_devkit.drafts import (
     append_draft_section,
     publish_draft_assets,
@@ -19,31 +17,27 @@ from release_devkit.rendering import AssetLink, DraftSection, render_asset_links
 update_pr_app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
 
 PR_DRAFT_TAG_PREFIX = "pr-"
+PR_REF_PATTERN = re.compile(r"^refs/pull/(\d+)/merge$")
 
 
 @update_pr_app.command()
 def update_pr_draft(
-    pr_number: Annotated[int, typer.Option(help="PR number whose draft to update")],
-    repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
-    actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
-    step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
-    settings = Settings.model_validate({})
-    publish_config = load_config(config)
-    certified = bash_output("git rev-parse HEAD").strip()
-    short = certified[:12]
-    commit_url = f"https://github.com/{repository}/commit/{certified}"
-    manifest = pull_digest_manifest(publish_config.builds_registry, certified, actor, settings.github_token)
+    context = pr_head_context(config)
+    settings = context.settings
+    repository = settings.github_repository
+    pr_number = pr_number_from_ref(settings.github_ref)
+    certified = context.certified
 
-    if not any(app.builds for app in publish_config.apps.values()):
+    if not any(app.builds for app in context.publish_config.apps.values()):
         return
 
     tag = f"{PR_DRAFT_TAG_PREFIX}{pr_number}"
     staged = publish_draft_assets(
-        publish_config,
+        context.publish_config,
         certified,
-        actor,
+        settings.github_actor,
         settings.github_token,
         tag,
         repository,
@@ -57,18 +51,25 @@ def update_pr_draft(
     section = render_draft_section(
         DraftSection(
             heading_fragments=[
-                f"[{short}]({commit_url})",
+                f"[{context.short}]({context.commit_url})",
                 f"[PR #{pr_number}]({pr_url})",
             ],
             assets=assets or None,
-            images=manifest,
+            images=context.manifest,
         )
     )
 
-    append_draft_section(tag, repository, f"sha-{short}", section)
+    append_draft_section(tag, repository, f"sha-{context.short}", section)
 
     summary_lines = [f"### Draft release `{tag}`", ""]
     summary_lines.extend(render_asset_links(assets))
     summary = "\n".join(summary_lines)
     print(summary)
-    write_step_summary(step_summary, summary)
+    write_step_summary(settings.github_step_summary, summary)
+
+
+def pr_number_from_ref(ref: str) -> int:
+    match = PR_REF_PATTERN.fullmatch(ref)
+    if match is None:
+        raise SystemExit(f"GITHUB_REF {ref!r} is not a pull_request ref — this verb runs on pull_request events")
+    return int(match.group(1))

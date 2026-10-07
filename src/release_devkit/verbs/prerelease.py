@@ -8,12 +8,9 @@ import typer
 from bashrun.bash import bash_check, bash_output
 from ci_devkit.ci_step import ci_step
 
-from release_devkit.config import DEFAULT_CONFIG_PATH, Settings, load_config, write_step_summary
-from release_devkit.builds import (
-    DigestEntry,
-    certified_sha,
-    pull_digest_manifest,
-)
+from release_devkit.builds import DigestEntry
+from release_devkit.config import DEFAULT_CONFIG_PATH, write_step_summary
+from release_devkit.context import merge_push_context
 from release_devkit.drafts import (
     DEV_DRAFT_TAG,
     append_draft_section,
@@ -32,19 +29,17 @@ _MERGE_PR_PATTERN = re.compile(r"Merge PR #(\d+): (.+)")
 
 @app.command()
 def main(
-    repository: Annotated[str, typer.Option(help="GitHub repository (owner/repo)")],
-    actor: Annotated[str, typer.Option(help="GitHub actor for registry auth")],
-    workspace: Annotated[str, typer.Option(help="GitHub workspace path")],
-    step_summary: Annotated[str | None, typer.Option(help="Path to $GITHUB_STEP_SUMMARY file")] = None,
     config: Annotated[Path, typer.Option(help="Publish configuration YAML")] = DEFAULT_CONFIG_PATH,
 ) -> None:
-    settings = Settings.model_validate({})
-    publish_config = load_config(config)
-    head = bash_output("git rev-parse HEAD").strip()
-    certified = certified_sha(head)
-    short = certified[:12]
-    commit_url = f"https://github.com/{repository}/commit/{certified}"
-    manifest = pull_digest_manifest(publish_config.builds_registry, certified, actor, settings.github_token)
+    context = merge_push_context(config)
+    settings = context.settings
+    publish_config = context.publish_config
+    head = context.head
+    certified = context.certified
+    short = context.short
+    commit_url = context.commit_url
+    repository = settings.github_repository
+    manifest = context.manifest
 
     new_image_manifest: dict[str, DigestEntry] = {}
     if manifest is not None:
@@ -81,7 +76,13 @@ def main(
 
     published: list[tuple[str, str, str]] = []
     if release_plan.publishing:
-        published = publish_packages(packages, release_plan, settings.nuget_api_key, DevStrategy(short), workspace)
+        published = publish_packages(
+            packages,
+            release_plan,
+            settings.nuget_api_key,
+            DevStrategy(short),
+            settings.github_workspace,
+        )
 
         if published:
             recap = "\n".join([
@@ -90,7 +91,7 @@ def main(
             ])
             print(recap)
             print("Consume these by exact version pin - there is no discovery tooling by design")
-            write_step_summary(step_summary, recap)
+            write_step_summary(settings.github_step_summary, recap)
 
     staged_assets: list[tuple[str, Path]] = []
     if has_app_changes:
@@ -98,7 +99,7 @@ def main(
         staged_assets = publish_draft_assets(
             draft_config,
             certified,
-            actor,
+            settings.github_actor,
             settings.github_token,
             DEV_DRAFT_TAG,
             repository,
@@ -152,4 +153,4 @@ def main(
     draft_url = bash_output(f"gh release view {DEV_DRAFT_TAG} --repo {repository} --json url --jq .url").strip()
     backlink_text = f"### Draft release `{DEV_DRAFT_TAG}` updated\n- [Section `{anchor}`]({draft_url}#{anchor})"
     print(backlink_text)
-    write_step_summary(step_summary, backlink_text)
+    write_step_summary(settings.github_step_summary, backlink_text)
