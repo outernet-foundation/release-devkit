@@ -97,7 +97,7 @@ def noop(*args: object, **kwargs: object) -> None:
 
 
 def make_builds() -> list[BuildArtifactConfig]:
-    return [BuildArtifactConfig(project="MyApp", platform="AndroidMobile")]
+    return [BuildArtifactConfig(project="MyApp", platform="AndroidMobile", file="MyApp-AndroidMobile.apk")]
 
 
 def make_app(name: str = "myapp", builds: list[BuildArtifactConfig] | None = None) -> AppConfig:
@@ -268,8 +268,12 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
 def test_stages_all_apps_regardless_of_source_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     config = make_config(
         apps={
-            "changed-app": make_app("changed-app", [BuildArtifactConfig(project="AppA", platform="AndroidMobile")]),
-            "unchanged-app": make_app("unchanged-app", [BuildArtifactConfig(project="AppB", platform="AndroidMobile")]),
+            "changed-app": make_app(
+                "changed-app", [BuildArtifactConfig(project="AppA", platform="AndroidMobile", file="AppA.apk")]
+            ),
+            "unchanged-app": make_app(
+                "unchanged-app", [BuildArtifactConfig(project="AppB", platform="AndroidMobile", file="AppB.apk")]
+            ),
         }
     )
     tags = FakeTags(versions={"changed-app": "1.0.0", "unchanged-app": "2.0.0"}, changed={"changed-app"})

@@ -183,7 +183,7 @@ RELEASE_CONFIG = PublishConfig(
         "app": AppConfig(
             path=Path("app"),
             major_minor="0.2",
-            builds=[BuildArtifactConfig(project="App", platform="AndroidMobile")],
+            builds=[BuildArtifactConfig(project="App", platform="AndroidMobile", file="App-AndroidMobile.apk")],
         )
     },
     builds_registry="ghcr.io/owner/repo/builds",

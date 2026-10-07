@@ -255,7 +255,7 @@ def stage_apps(
         source = next(path for path in layer.iterdir() if path.is_file())
 
         # Copy the asset under its release name and record it
-        named = Path(artifact.name) if artifact.name else source
+        named = Path(artifact.file)
         name = named.name if channel == ReleaseChannel.STABLE else f"{named.stem}-{short_sha}{named.suffix}"
         target = staging / name
         shutil.copy2(source, target)

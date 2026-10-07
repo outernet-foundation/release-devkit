@@ -88,7 +88,7 @@ def test_release_resets_dev_draft_after_create(monkeypatch: pytest.MonkeyPatch) 
             "myapp": AppConfig(
                 path=Path("apps/myapp"),
                 major_minor="1.0",
-                builds=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")],
+                builds=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile", file="MyApp-AndroidMobile.apk")],
             )
         },
         builds_registry="ghcr.io/owner/repo/builds",
@@ -138,7 +138,7 @@ def test_release_tags_app_versions_before_publishing_notes(monkeypatch: pytest.M
             "myapp": AppConfig(
                 path=Path("apps/myapp"),
                 major_minor="1.0",
-                builds=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")],
+                builds=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile", file="MyApp-AndroidMobile.apk")],
             )
         },
         builds_registry="ghcr.io/owner/repo/builds",

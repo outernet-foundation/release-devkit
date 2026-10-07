@@ -43,7 +43,7 @@ def base_payload() -> dict[str, object]:
                 "path": "apps/CaptureTool",
                 "major_minor": "1.0",
                 "builds": [
-                    {"project": "CaptureTool", "platform": "AndroidMobile"},
+                    {"project": "CaptureTool", "platform": "AndroidMobile", "file": "CaptureTool-AndroidMobile.apk"},
                 ],
             },
         },
@@ -143,8 +143,8 @@ def test_load_config_parses_app_builds_shelf(tmp_path: Path):
     payload = base_payload()
     assert isinstance(payload["apps"], dict)
     payload["apps"]["capture-tool"]["builds"] = [
-        {"project": "CaptureTool", "platform": "AndroidMobile"},
-        {"project": "capture-tool", "platform": "images-lock", "name": "images-lock-zed.lock"},
+        {"project": "CaptureTool", "platform": "AndroidMobile", "file": "CaptureTool-AndroidMobile.apk"},
+        {"project": "capture-tool", "platform": "images-lock", "file": "images-lock-zed.lock"},
     ]
 
     config = load_config(write_config(tmp_path, payload))
@@ -155,8 +155,8 @@ def test_load_config_parses_app_builds_shelf(tmp_path: Path):
         ("CaptureTool", "AndroidMobile"),
         ("capture-tool", "images-lock"),
     ]
-    assert builds[0].name is None
-    assert builds[1].name == "images-lock-zed.lock"
+    assert builds[0].file == "CaptureTool-AndroidMobile.apk"
+    assert builds[1].file == "images-lock-zed.lock"
 
 
 def test_load_config_rejects_app_without_builds(tmp_path: Path):
@@ -168,12 +168,19 @@ def test_load_config_rejects_app_without_builds(tmp_path: Path):
         load_config(write_config(tmp_path, payload))
 
 
-def test_load_config_rejects_file_selection_key(tmp_path: Path):
+def test_load_config_rejects_artifact_without_file(tmp_path: Path):
     payload = base_payload()
     assert isinstance(payload["apps"], dict)
-    payload["apps"]["capture-tool"]["builds"] = [
-        {"project": "CaptureTool", "platform": "AndroidMobile", "file": "Capture_Tool.apk"}
-    ]
+    payload["apps"]["capture-tool"]["builds"] = [{"project": "CaptureTool", "platform": "AndroidMobile"}]
+
+    with pytest.raises(ValidationError, match="file"):
+        load_config(write_config(tmp_path, payload))
+
+
+def test_load_config_rejects_name_key(tmp_path: Path):
+    payload = base_payload()
+    assert isinstance(payload["apps"], dict)
+    payload["apps"]["capture-tool"]["builds"][0]["name"] = "CaptureTool-AndroidMobile.apk"
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         load_config(write_config(tmp_path, payload))

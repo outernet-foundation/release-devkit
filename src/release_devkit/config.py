@@ -47,7 +47,7 @@ class BuildArtifactConfig(BaseModel):
 
     project: str
     platform: str
-    name: str | None = None
+    file: str
 
 
 class AppConfig(BaseModel):

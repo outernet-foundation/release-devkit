@@ -94,7 +94,7 @@ def make_build_config() -> PublishConfig:
             "myapp": AppConfig(
                 path=Path("apps/myapp"),
                 major_minor="1.0",
-                builds=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk")],
+                builds=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile", file="MyApp-AndroidMobile.apk")],
             )
         },
         builds_registry="ghcr.io/owner/repo/builds",
@@ -305,8 +305,8 @@ def test_update_pr_draft_lists_one_row_per_staged_artifact(monkeypatch: pytest.M
                 path=Path("apps/myapp"),
                 major_minor="1.0",
                 builds=[
-                    BuildArtifactConfig(project="MyApp", platform="AndroidMobile", name="MyApp-AndroidMobile.apk"),
-                    BuildArtifactConfig(project="MyApp", platform="IOS", name="MyApp-IOS.apk"),
+                    BuildArtifactConfig(project="MyApp", platform="AndroidMobile", file="MyApp-AndroidMobile.apk"),
+                    BuildArtifactConfig(project="MyApp", platform="IOS", file="MyApp-IOS.apk"),
                 ],
             )
         },
