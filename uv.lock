@@ -43,12 +43,16 @@ wheels = [
 
 [[package]]
 name = "ci-devkit"
-version = "0.0.0.dev0"
-source = { git = "https://github.com/outernet-foundation/ci-devkit.git?rev=bf9011df20c481f7ae6ffaed9581cd134f0512f2#bf9011df20c481f7ae6ffaed9581cd134f0512f2" }
+version = "0.2.1.dev37711169350"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bashrun" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2f/26/04ccb0564f39c35021062c8513b024487090e0536a6280be06a4ca89555b/ci_devkit-0.2.1.dev37711169350.tar.gz", hash = "sha256:35428cbfb41b276657db12ca56fbf505289b7fd97e5f50c48692ce8b7f75c0cd", size = 53388, upload-time = "2026-10-08T01:12:42.616Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0f/2e/84cc2405c29329055294a960964972cc7dc45835d0fee79e014513436675/ci_devkit-0.2.1.dev37711169350-py3-none-any.whl", hash = "sha256:36a1cfee980e366eab52a92ecbaccd06f3de971ebecd2a214af9f838a6168bf2", size = 28223, upload-time = "2026-10-08T01:12:41.589Z" },
 ]
 
 [[package]]
@@ -332,7 +336,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bashrun", specifier = ">=0.1.0" },
-    { name = "ci-devkit", git = "https://github.com/outernet-foundation/ci-devkit.git?rev=bf9011df20c481f7ae6ffaed9581cd134f0512f2" },
+    { name = "ci-devkit", specifier = ">=0.2.1.dev37711169350" },
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pydantic-settings", specifier = ">=2.9.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
