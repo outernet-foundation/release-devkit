@@ -46,11 +46,6 @@ class PackageRow(NamedTuple):
     url: str | None
 
 
-class StagedAsset(NamedTuple):
-    app: str
-    asset: str
-
-
 class ImageRow(NamedTuple):
     image: str
     tag: str
@@ -151,9 +146,9 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             [
                 app_name,
                 versions.get(app_name) or "—",
-                f"[{asset}](https://github.com/{repository}/releases/download/{tag}/{asset})",
+                f"[{path.name}](https://github.com/{repository}/releases/download/{tag}/{path.name})",
             ]
-            for app_name, asset in assets
+            for app_name, path in assets
         ]
         blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], assets_rows)}")
 
@@ -257,7 +252,7 @@ def stage_apps(
     short_sha: str,
     tag: str,
     repository: str,
-) -> list[StagedAsset]:
+) -> list[tuple[str, Path]]:
     staging = Path(mkdtemp(prefix="release-builds-"))
     staged: list[tuple[str, Path]] = []
     for app_name, artifact in [
@@ -294,7 +289,7 @@ def stage_apps(
     # Upload the staged assets
     bash(f"gh release upload {tag} {' '.join(f'"{path}"' for _, path in staged)} --clobber --repo {repository}")
 
-    return [StagedAsset(app_name, path.name) for app_name, path in staged]
+    return staged
 
 
 def render_built_images(settings: Settings, shelf: str, sha: str) -> list[ImageRow]:
