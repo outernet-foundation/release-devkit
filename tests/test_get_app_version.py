@@ -63,7 +63,7 @@ def invoke(
 FULL_HEAD = "abcdef1234567890abcdef1234567890abcdef12"
 
 
-def test_stamps_next_version_plus_short_head(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_stamps_next_version_plus_repo_wide_count(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     config_path = write_config(tmp_path)
 
     result, git_head = invoke(
@@ -75,8 +75,8 @@ def test_stamps_next_version_plus_short_head(monkeypatch: pytest.MonkeyPatch, tm
     )
 
     assert result.exit_code == 0
-    assert result.output.splitlines() == [f"version=0.2.8+{FULL_HEAD[:12]}", "version-code=42"]
-    assert git_head.commands == ["git rev-parse HEAD", "git rev-list --count HEAD -- apps/CaptureTool"]
+    assert result.output.splitlines() == ["version=0.2.8+42", "version-code=42"]
+    assert git_head.commands == ["git rev-list --count HEAD"]
 
 
 def test_outputs_write_to_github_output_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -94,7 +94,7 @@ def test_outputs_write_to_github_output_file(monkeypatch: pytest.MonkeyPatch, tm
 
     assert result.exit_code == 0
     assert result.output == ""
-    assert output_file.read_text(encoding="utf-8") == f"version=0.2.8+{FULL_HEAD[:12]}\nversion-code=7\n"
+    assert output_file.read_text(encoding="utf-8") == "version=0.2.8+7\nversion-code=7\n"
 
 
 def test_no_tags_defaults_to_first_in_line(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -103,7 +103,7 @@ def test_no_tags_defaults_to_first_in_line(monkeypatch: pytest.MonkeyPatch, tmp_
     result, _ = invoke(monkeypatch, "", FULL_HEAD, 1, ["--app", "capture-tool", "--config", str(config_path)])
 
     assert result.exit_code == 0
-    assert result.output.splitlines() == [f"version=0.2.0+{FULL_HEAD[:12]}", "version-code=1"]
+    assert result.output.splitlines() == ["version=0.2.0+1", "version-code=1"]
 
 
 def test_prerelease_tags_do_not_count(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -118,7 +118,7 @@ def test_prerelease_tags_do_not_count(monkeypatch: pytest.MonkeyPatch, tmp_path:
     )
 
     assert result.exit_code == 0
-    assert result.output.splitlines() == [f"version=0.2.8+{FULL_HEAD[:12]}", "version-code=1"]
+    assert result.output.splitlines() == ["version=0.2.8+1", "version-code=1"]
 
 
 def test_unknown_app_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

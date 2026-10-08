@@ -29,9 +29,8 @@ def main(
     last_version = get_latest_version(prefix)
     last_in_line = latest_version_in_line(prefix, app_config.major_minor)
     base_version = next_version(app_config.major_minor, last_in_line, last_version, application)
-    head = bash_output("git rev-parse HEAD").strip()
-    count = int(bash_output(f"git rev-list --count HEAD -- {app_config.path}").strip())
-    lines = [f"version={base_version}+{head[:12]}", f"version-code={count}"]
+    count = int(bash_output("git rev-list --count HEAD").strip())
+    lines = [f"version={base_version}+{count}", f"version-code={count}"]
     output_file = os.environ.get("GITHUB_OUTPUT")
     if output_file:
         with Path(output_file).open("a", encoding="utf-8") as file:

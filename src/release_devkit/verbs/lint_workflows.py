@@ -29,6 +29,7 @@ SETUP_UV_USES = "astral-sh/setup-uv@v7"
 CONFIG_PATH = Path("release-devkit.yaml")
 INTEGRATE_HEAD_SHA = "${{ github.event.pull_request.head.sha }}"
 MERGE_BOT_REF = "${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}"
+PR_DRAFT_JOB_IF = "github.event.pull_request"
 MERGE_GATE_JOB_IF = (
     "github.event.label.name == 'ready-to-merge'"
     " || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')"
@@ -422,6 +423,35 @@ def validate_integrate_contract(
                 f"publishing repos must run the {VALIDATE_RELEASE_PLAN_JOB} job (release-devkit.yaml is present)",
             )
         )
+
+    if context.publishing:
+        pr_draft_job = jobs.get(UPDATE_PR_DRAFT_JOB)
+        if pr_draft_job is None:
+            problems.append(
+                file_problem(
+                    path,
+                    f"publishing repos must run the {UPDATE_PR_DRAFT_JOB} job in integrate.yml (the per-PR draft surface)",
+                )
+            )
+        else:
+            if pr_draft_job.if_condition != PR_DRAFT_JOB_IF:
+                problems.append(
+                    job_problem(
+                        path,
+                        UPDATE_PR_DRAFT_JOB,
+                        f"must gate on if: {PR_DRAFT_JOB_IF} (the verb parses the PR number from GITHUB_REF,"
+                        " which carries no refs/pull spelling on a dispatch run)",
+                    )
+                )
+            if VALIDATE_RELEASE_PLAN_JOB not in pr_draft_job.needs:
+                problems.append(
+                    job_problem(
+                        path,
+                        UPDATE_PR_DRAFT_JOB,
+                        f"must need {VALIDATE_RELEASE_PLAN_JOB} (contract breaks kill the battery early),"
+                        f" got {pr_draft_job.needs}",
+                    )
+                )
     if LINT_WORKFLOWS_JOB not in jobs:
         problems.append(file_problem(path, f"integrate.yml must run the {LINT_WORKFLOWS_JOB} job (the lint root)"))
     for verb_job in (LINT_WORKFLOWS_JOB, VALIDATE_RELEASE_PLAN_JOB):

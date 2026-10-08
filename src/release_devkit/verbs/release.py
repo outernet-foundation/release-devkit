@@ -82,6 +82,9 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     head = bash_output("git rev-parse HEAD").strip()
     sha = head if channel == ReleaseChannel.PR else bash_output(f"git log -1 --format=%P {head}").strip().split()[1]
     short_sha = sha[:12]
+    # Keyed at the certified head, not HEAD: the merge commit bumps the count past
+    # what the app binaries stamped at this head.
+    commit_count = int(bash_output(f"git rev-list --count {sha}").strip()) if channel != ReleaseChannel.STABLE else 0
 
     # Lay out the release notes scaffolding
     heading = f"### [{short_sha}](https://github.com/{settings.github_repository}/commit/{sha})"
@@ -128,7 +131,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     # Publish the changed packages and tag the stable versions
     if channel in (ReleaseChannel.DEV, ReleaseChannel.STABLE):
         with ci_step("Publish packages"):
-            packages = publish_packages(settings, publish_config, release_plan, channel, short_sha)
+            packages = publish_packages(settings, publish_config, release_plan, channel, commit_count)
         if packages:
             packages_rows = [
                 [name, version, f"[{registry}]({url})" if url else registry]
@@ -140,7 +143,9 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     shelf = f"ghcr.io/{repository}/builds"
     if publish_config.apps:
         with ci_step("Stage apps"):
-            assets = stage_apps(settings, publish_config, shelf, release_plan, channel, sha, short_sha, tag, repository)
+            assets = stage_apps(
+                settings, publish_config, shelf, release_plan, channel, sha, commit_count, tag, repository
+            )
         assets_rows = [
             [
                 app_name,
@@ -201,7 +206,7 @@ def publish_packages(
     publish_config: PublishConfig,
     release_plan: ReleasePlan,
     channel: ReleaseChannel,
-    short_sha: str,
+    commit_count: int,
 ) -> list[PackageRow]:
     # Provision the toolchains for the registries this run publishes to
     publishing_registries = {publish_config.packages[name].registry for name in release_plan.publishing}
@@ -210,6 +215,7 @@ def publish_packages(
     if "npm" in publishing_registries:
         install_node("24", "https://registry.npmjs.org")
     registries = build_registries(settings.nuget_api_key)
+    dev = channel == ReleaseChannel.DEV
     rows: list[PackageRow] = []
     for name, package in publish_config.packages.items():
         plan = release_plan.plans[name]
@@ -233,8 +239,8 @@ def publish_packages(
             package.path,
             plan.version,
             release_plan.resolved_versions[name],
-            channel == ReleaseChannel.DEV,
-            short_sha,
+            dev,
+            commit_count,
         )
 
         if channel == ReleaseChannel.STABLE:
@@ -252,7 +258,7 @@ def stage_apps(
     release_plan: ReleasePlan,
     channel: ReleaseChannel,
     sha: str,
-    short_sha: str,
+    commit_count: int,
     tag: str,
     repository: str,
 ) -> list[tuple[str, Path]]:
@@ -279,7 +285,7 @@ def stage_apps(
         # Copy the asset under its release name and record it
         file_path = Path(artifact.file)
         target = staging / (
-            file_path.name if channel == ReleaseChannel.STABLE else f"{file_path.stem}-{short_sha}{file_path.suffix}"
+            file_path.name if channel == ReleaseChannel.STABLE else f"{file_path.stem}-{commit_count}{file_path.suffix}"
         )
         shutil.copy2(source, target)
         staged.append((app_name, target))

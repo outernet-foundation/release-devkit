@@ -21,6 +21,7 @@ DRAFT_VIEW_JSON = json.dumps({"body": "", "url": DRAFT_URL})
 DRAFT_REPOSITORY = "owner/repo"
 CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
 SHORT_SHA = CERTIFIED_SHA[:12]
+COMMIT_COUNT = 1563
 
 
 class BashLog:
@@ -126,6 +127,8 @@ def patch_pr_bash_output(monkeypatch: pytest.MonkeyPatch, body: str = "") -> Non
     def dispatching_bash_output(command: str) -> str:
         if command == "git rev-parse HEAD":
             return CERTIFIED_SHA
+        if command == f"git rev-list --count {CERTIFIED_SHA}":
+            return str(COMMIT_COUNT)
         return json.dumps({"body": body})
 
     monkeypatch.setattr(release_module, "bash_output", dispatching_bash_output)
@@ -181,7 +184,7 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
 
     assert any("pr-107" in command for command in bash_log.commands)
     assert any("gh release upload pr-107" in command and "--clobber" in command for command in bash_log.commands)
-    assert any(f"MyApp-AndroidMobile-{SHORT_SHA}.apk" in command for command in bash_log.commands)
+    assert any(f"MyApp-AndroidMobile-{COMMIT_COUNT}.apk" in command for command in bash_log.commands)
     assert any("gh release edit pr-107" in command and "--notes-file" in command for command in bash_log.commands)
 
 
@@ -353,5 +356,5 @@ def test_update_pr_draft_lists_one_row_per_staged_artifact(monkeypatch: pytest.M
     release_module.main(channel=ReleaseChannel.PR)
 
     assert written
-    assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk](" in written[0]
-    assert f"| myapp | 1.0.0 | [MyApp-IOS-{SHORT_SHA}.apk](" in written[0]
+    assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{COMMIT_COUNT}.apk](" in written[0]
+    assert f"| myapp | 1.0.0 | [MyApp-IOS-{COMMIT_COUNT}.apk](" in written[0]

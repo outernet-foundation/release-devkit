@@ -6,13 +6,22 @@ from pathlib import Path
 import pytest
 
 from release_devkit.config import AppConfig, BuildArtifactConfig, PackageConfig, PublishConfig
-from release_devkit.plan import PackagePlan, ReleasePlan
+from release_devkit.plan import PackagePlan, ReleasePlan, ResolvedDependency
+from release_devkit.publishing import (
+    NpmRegistry,
+    NuGetRegistry,
+    PyPIRegistry,
+    pep440_dev_version,
+    resolve_publish_versions,
+    semver_dev_version,
+)
 from release_devkit.verbs import release as release_module
 from release_devkit.verbs.release import DEV_DRAFT_TAG, DigestEntry, ReleaseChannel
 
 MERGE_SHA = "654321abcdef0987654321abcdef0987654321"
 CERTIFIED_SHA = "abcdef1234567890abcdef1234567890abcdef12"
 SHORT_SHA = CERTIFIED_SHA[:12]
+COMMIT_COUNT = 1563
 DRAFT_VIEW_JSON = json.dumps({"body": "", "url": "https://github.com/owner/repo/releases/untagged-abc"})
 
 
@@ -80,16 +89,16 @@ class FakePublishRegistry:
         base_version: object,
         resolved_dependencies: object,
         dev: object,
-        short_sha: object,
+        commit_count: object,
     ) -> object:
         self.calls.append({
             "path": path,
             "base_version": base_version,
             "resolved_dependencies": resolved_dependencies,
             "dev": dev,
-            "short_sha": short_sha,
+            "commit_count": commit_count,
         })
-        return f"{base_version}-dev.{short_sha}" if dev else base_version
+        return f"{base_version}-dev.{commit_count}" if dev else base_version
 
 
 def noop(*args: object, **kwargs: object) -> None:
@@ -150,6 +159,8 @@ def patch_context(monkeypatch: pytest.MonkeyPatch, config: PublishConfig, draft_
     def dispatching_bash_output(command: str) -> str:
         if command == "git rev-parse HEAD":
             return MERGE_SHA
+        if command == f"git rev-list --count {CERTIFIED_SHA}":
+            return str(COMMIT_COUNT)
         if "%P" in command:
             return f"{MERGE_SHA} {CERTIFIED_SHA}\n"
         if command.startswith("git log"):
@@ -228,7 +239,8 @@ def test_only_packages_changed_publishes_and_appends_section(monkeypatch: pytest
     assert len(npm_registry.calls) == 1
     assert npm_registry.calls[0]["base_version"] == "1.0.0"
     assert npm_registry.calls[0]["dev"] is True
-    assert f"| pkg | 1.0.0-dev.{SHORT_SHA} |" in written[0]
+    assert npm_registry.calls[0]["commit_count"] == COMMIT_COUNT
+    assert f"| pkg | 1.0.0-dev.{COMMIT_COUNT} |" in written[0]
     assert create_and_push_tag.calls == []
     assert pull_artifact.calls != []
     assert written != []
@@ -262,8 +274,10 @@ def test_only_apps_changed_surfaces_draft_but_skips_publish(monkeypatch: pytest.
     assert len(written) == 1
     assert "#### Apps" in written[0]
     assert "| App | Version | Asset |" in written[0]
-    fresh_link = f"https://github.com/owner/repo/releases/download/{DEV_DRAFT_TAG}/MyApp-AndroidMobile-{SHORT_SHA}.apk"
-    assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{SHORT_SHA}.apk]({fresh_link}) |" in written[0]
+    fresh_link = (
+        f"https://github.com/owner/repo/releases/download/{DEV_DRAFT_TAG}/MyApp-AndroidMobile-{COMMIT_COUNT}.apk"
+    )
+    assert f"| myapp | 1.0.0 | [MyApp-AndroidMobile-{COMMIT_COUNT}.apk]({fresh_link}) |" in written[0]
 
 
 def test_stages_all_apps_regardless_of_source_changes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -338,10 +352,30 @@ def test_snapshot_section_lists_all_packages_with_dev_and_stable_versions(
     _, _, _, written = run_dev_release(monkeypatch, config, make_plan({"fresh"}, {"settled", "never"}), tags)
 
     assert len(written) == 1
-    fresh_version = f"1.0.0-dev.{SHORT_SHA}"
+    fresh_version = f"1.0.0-dev.{COMMIT_COUNT}"
     assert f"| fresh | {fresh_version} | [npm](https://registry.example/fresh-id/{fresh_version}) |" in written[0]
     assert "| settled | 2.1.0 | [npm](https://registry.example/settled-id/2.1.0) |" in written[0]
     assert "| never | 0.0.0 | npm |" in written[0]
+
+
+def test_dev_version_spelling_per_registry() -> None:
+    assert pep440_dev_version("0.2.1", COMMIT_COUNT) == "0.2.1.dev1563"
+    assert semver_dev_version("0.2.1", COMMIT_COUNT) == "0.2.1-dev.1563"
+    assert PyPIRegistry().dev_version("0.2.1", COMMIT_COUNT) == "0.2.1.dev1563"
+    assert NpmRegistry().dev_version("0.2.1", COMMIT_COUNT) == "0.2.1-dev.1563"
+    assert NuGetRegistry("key").dev_version("0.2.1", COMMIT_COUNT) == "0.2.1-dev.1563"
+
+
+def test_resolve_publish_versions_spells_co_publishing_siblings_with_the_run_count() -> None:
+    resolved = {
+        "co-id": ResolvedDependency(version="1.2.0", co_publishing=True),
+        "settled-id": ResolvedDependency(version="2.0.0", co_publishing=False),
+    }
+
+    version, dependency_versions = resolve_publish_versions(PyPIRegistry(), "0.2.1", COMMIT_COUNT, True, resolved)
+
+    assert version == "0.2.1.dev1563"
+    assert dependency_versions == {"co-id": "1.2.0.dev1563", "settled-id": "2.0.0"}
 
 
 def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -363,6 +397,8 @@ def test_existing_dev_draft_viewed_once_per_run(monkeypatch: pytest.MonkeyPatch)
     def counting_bash_output(command: str) -> str:
         if command == "git rev-parse HEAD":
             return MERGE_SHA
+        if command == f"git rev-list --count {CERTIFIED_SHA}":
+            return str(COMMIT_COUNT)
         if "%P" in command:
             return f"{MERGE_SHA} {CERTIFIED_SHA}\n"
         if command.startswith("git log"):

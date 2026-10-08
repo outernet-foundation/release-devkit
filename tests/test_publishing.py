@@ -141,7 +141,7 @@ def test_npm_publish_rides_the_dev_dist_tag(tmp_path: Path, monkeypatch: pytest.
         base_version="0.2.1",
         resolved_dependencies={},
         dev=True,
-        short_sha="42",
+        commit_count=42,
     )
 
     assert recorder.commands == ["npm publish --access public --provenance --loglevel verbose --tag dev"]
@@ -153,7 +153,7 @@ def test_npm_publish_without_dist_tag_leaves_latest_alone(tmp_path: Path, monkey
     recorder = CommandRecorder()
     monkeypatch.setattr("release_devkit.publishing.bash_output", recorder)
 
-    NpmRegistry().publish(tmp_path, "0.2.1", {}, False, "")
+    NpmRegistry().publish(tmp_path, "0.2.1", {}, False, 0)
 
     assert recorder.commands == ["npm publish --access public --provenance --loglevel verbose"]
 
@@ -182,7 +182,7 @@ def test_npm_publish_swallows_version_conflict_from_current_npm(
         ConflictingCommand("npm error You cannot publish over the previously published versions: 0.2.1.\n"),
     )
 
-    NpmRegistry().publish(tmp_path, "0.2.1", {}, False, "")
+    NpmRegistry().publish(tmp_path, "0.2.1", {}, False, 0)
 
 
 def test_npm_publish_swallows_version_conflict_from_legacy_npm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -192,7 +192,7 @@ def test_npm_publish_swallows_version_conflict_from_legacy_npm(tmp_path: Path, m
         ConflictingCommand("npm ERR! code EPUBLISHCONFLICT\nnpm ERR! cannot publish over existing version\n"),
     )
 
-    NpmRegistry().publish(tmp_path, "0.2.1", {}, False, "")
+    NpmRegistry().publish(tmp_path, "0.2.1", {}, False, 0)
 
 
 def test_npm_publish_rides_through_on_unrelated_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,7 +203,7 @@ def test_npm_publish_rides_through_on_unrelated_failures(tmp_path: Path, monkeyp
     )
 
     with pytest.raises(CalledProcessError):
-        NpmRegistry().publish(tmp_path, "0.2.1", {}, False, "")
+        NpmRegistry().publish(tmp_path, "0.2.1", {}, False, 0)
 
 
 NUGET_CSPROJ = """<Project Sdk="Microsoft.NET.Sdk">
@@ -235,7 +235,7 @@ def test_nuget_publish_injects_property_flags_beside_the_version(
         base_version="1.0.6",
         resolved_dependencies={"Org.Sibling": ResolvedDependency(version="1.0.6", co_publishing=True)},
         dev=False,
-        short_sha="",
+        commit_count=0,
     )
 
     assert recorder.commands[0].startswith("dotnet pack -c Release -p:Version=1.0.6 -p:SiblingVersion=1.0.6 -o ")
@@ -248,7 +248,7 @@ def test_nuget_publish_without_dependencies_omits_property_flags(
     recorder = CommandRecorder()
     monkeypatch.setattr("release_devkit.publishing.bash", recorder)
 
-    NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, "")
+    NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, 0)
 
     assert recorder.commands[0].startswith("dotnet pack -c Release -p:Version=1.0.6 -o ")
 
@@ -260,7 +260,7 @@ def test_nuget_publish_writes_the_nupkg_outside_the_package_root(
     recorder = CommandRecorder()
     monkeypatch.setattr("release_devkit.publishing.bash", recorder)
 
-    NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, "")
+    NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, 0)
 
     pack_command, push_command = recorder.commands
     outdir = pack_command.rsplit(" -o ", 1)[1]
@@ -277,7 +277,7 @@ def test_nuget_publish_without_matching_reference_is_loud(tmp_path: Path) -> Non
             base_version="1.0.6",
             resolved_dependencies={"Org.Missing": ResolvedDependency(version="1.0.0", co_publishing=True)},
             dev=False,
-            short_sha="",
+            commit_count=0,
         )
 
 
@@ -291,7 +291,7 @@ def test_nuget_publish_with_literal_version_is_loud(tmp_path: Path) -> None:
             base_version="1.0.6",
             resolved_dependencies={"Org.Sibling": ResolvedDependency(version="1.0.6", co_publishing=True)},
             dev=False,
-            short_sha="",
+            commit_count=0,
         )
 
 
@@ -314,7 +314,7 @@ def test_nuget_push_failure_never_leaks_the_api_key(tmp_path: Path, monkeypatch:
     monkeypatch.setattr("release_devkit.publishing.bash", failing_push)
 
     with pytest.raises(SystemExit) as excinfo:
-        NuGetRegistry("SECRET-KEY").publish(tmp_path, "1.0.6", {}, False, "")
+        NuGetRegistry("SECRET-KEY").publish(tmp_path, "1.0.6", {}, False, 0)
 
     message = str(excinfo.value)
     assert "exit 1" in message
@@ -342,4 +342,4 @@ def test_nuget_push_failure_without_stderr_still_names_the_exit_code(
     monkeypatch.setattr("release_devkit.publishing.bash", failing_push)
 
     with pytest.raises(SystemExit, match=r"dotnet nuget push failed \(exit 2\): no stderr output"):
-        NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, "")
+        NuGetRegistry("key").publish(tmp_path, "1.0.6", {}, False, 0)

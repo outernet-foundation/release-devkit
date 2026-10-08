@@ -20,7 +20,7 @@ NPM_DEV_DIST_TAG = "dev"
 
 
 class Registry(Protocol):
-    def dev_version(self, base_version: str, short_sha: str) -> str: ...
+    def dev_version(self, base_version: str, commit_count: int) -> str: ...
 
     def url(self, identity: str, version: str) -> str: ...
 
@@ -30,7 +30,7 @@ class Registry(Protocol):
         base_version: str,
         resolved_dependencies: dict[str, ResolvedDependency],
         dev: bool,
-        short_sha: str,
+        commit_count: int,
     ) -> str: ...
 
 
@@ -38,8 +38,8 @@ class NuGetRegistry:
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
 
-    def dev_version(self, base_version: str, short_sha: str) -> str:
-        return semver_dev_version(base_version, short_sha)
+    def dev_version(self, base_version: str, commit_count: int) -> str:
+        return semver_dev_version(base_version, commit_count)
 
     def url(self, identity: str, version: str) -> str:
         return f"https://www.nuget.org/packages/{identity}/{version}"
@@ -50,10 +50,10 @@ class NuGetRegistry:
         base_version: str,
         resolved_dependencies: dict[str, ResolvedDependency],
         dev: bool,
-        short_sha: str,
+        commit_count: int,
     ) -> str:
         version, dependency_versions = resolve_publish_versions(
-            self, base_version, short_sha, dev, resolved_dependencies
+            self, base_version, commit_count, dev, resolved_dependencies
         )
         properties: dict[str, str] = {}
         found: set[str] = set()
@@ -98,8 +98,8 @@ class NuGetRegistry:
 
 
 class NpmRegistry:
-    def dev_version(self, base_version: str, short_sha: str) -> str:
-        return semver_dev_version(base_version, short_sha)
+    def dev_version(self, base_version: str, commit_count: int) -> str:
+        return semver_dev_version(base_version, commit_count)
 
     def url(self, identity: str, version: str) -> str:
         return f"https://www.npmjs.com/package/{identity}/v/{version}"
@@ -110,10 +110,10 @@ class NpmRegistry:
         base_version: str,
         resolved_dependencies: dict[str, ResolvedDependency],
         dev: bool,
-        short_sha: str,
+        commit_count: int,
     ) -> str:
         version, dependency_versions = resolve_publish_versions(
-            self, base_version, short_sha, dev, resolved_dependencies
+            self, base_version, commit_count, dev, resolved_dependencies
         )
         command = "npm publish --access public --provenance --loglevel verbose"
         if dev:
@@ -131,8 +131,8 @@ class NpmRegistry:
 
 
 class PyPIRegistry:
-    def dev_version(self, base_version: str, short_sha: str) -> str:
-        return pep440_dev_version(base_version, short_sha)
+    def dev_version(self, base_version: str, commit_count: int) -> str:
+        return pep440_dev_version(base_version, commit_count)
 
     def url(self, identity: str, version: str) -> str:
         return f"https://pypi.org/project/{identity}/{version}"
@@ -143,10 +143,10 @@ class PyPIRegistry:
         base_version: str,
         resolved_dependencies: dict[str, ResolvedDependency],
         dev: bool,
-        short_sha: str,
+        commit_count: int,
     ) -> str:
         version, dependency_versions = resolve_publish_versions(
-            self, base_version, short_sha, dev, resolved_dependencies
+            self, base_version, commit_count, dev, resolved_dependencies
         )
         with ephemeral_pyproject_patch(path, version, dependency_versions):
             bash("uv build --out-dir dist", cwd=path)
@@ -157,13 +157,13 @@ class PyPIRegistry:
 def resolve_publish_versions(
     registry: Registry,
     base_version: str,
-    short_sha: str,
+    commit_count: int,
     dev: bool,
     resolved_dependencies: dict[str, ResolvedDependency],
 ) -> tuple[str, dict[str, str]]:
-    version = registry.dev_version(base_version, short_sha) if dev else base_version
+    version = registry.dev_version(base_version, commit_count) if dev else base_version
     dependency_versions = {
-        identity: registry.dev_version(resolved.version, short_sha)
+        identity: registry.dev_version(resolved.version, commit_count)
         if dev and resolved.co_publishing
         else resolved.version
         for identity, resolved in resolved_dependencies.items()
@@ -215,12 +215,12 @@ def ephemeral_pyproject_patch(package_path: Path, version: str, dependency_versi
         manifest_path.write_text(original, encoding="utf-8")
 
 
-def semver_dev_version(base_version: str, short_sha: str) -> str:
-    return f"{base_version}-dev.{short_sha}"
+def semver_dev_version(base_version: str, commit_count: int) -> str:
+    return f"{base_version}-dev.{commit_count}"
 
 
-def pep440_dev_version(base_version: str, short_sha: str) -> str:
-    return f"{base_version}.dev{short_sha}"
+def pep440_dev_version(base_version: str, commit_count: int) -> str:
+    return f"{base_version}.dev{commit_count}"
 
 
 def build_registries(nuget_api_key: str) -> dict[str, Registry]:

@@ -125,6 +125,11 @@ MERGE_GATE_RUN = (
 
 MERGE_GATE_ENV = "        env:\n          GITHUB_TOKEN: ${{ steps.mint.outputs.token }}\n"
 
+PR_DRAFT_JOB = (
+    f"  update-pr-draft-release:\n    if: github.event.pull_request\n    needs: [validate-release-plan]\n"
+    f"    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{RELEASE_PR_RUN}{RELEASE_ENV}"
+)
+
 NUGET_LOGIN_STEP = (
     "      - uses: NuGet/login@v1\n        id: nuget-login\n        with:\n          user: ${{ secrets.NUGET_USER }}\n"
 )
@@ -599,9 +604,50 @@ def test_publishing_integrate_with_split_jobs_is_clean(tmp_path: Path) -> None:
         f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
         f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
         f"{VALIDATE_RELEASE_PLAN_RUN}"
+        f"{PR_DRAFT_JOB}"
     )
     path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
     assert validate_workflow_file(path, publishing=True) == []
+
+
+def test_publishing_integrate_requires_the_update_pr_draft_job(tmp_path: Path) -> None:
+    jobs = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
+        f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{VALIDATE_RELEASE_PLAN_RUN}"
+    )
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=True)
+    assert any("must run the update-pr-draft-release job" in problem for problem in problems)
+
+
+def test_update_pr_draft_job_requires_the_pull_request_gate(tmp_path: Path) -> None:
+    ungated = PR_DRAFT_JOB.replace("    if: github.event.pull_request\n", "")
+    jobs = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
+        f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{VALIDATE_RELEASE_PLAN_RUN}"
+        f"{ungated}"
+    )
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=True)
+    assert any("must gate on if: github.event.pull_request" in problem for problem in problems)
+
+
+def test_update_pr_draft_job_must_need_validate_release_plan(tmp_path: Path) -> None:
+    unneeded = PR_DRAFT_JOB.replace("    needs: [validate-release-plan]\n", "")
+    jobs = (
+        f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
+        f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
+        f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
+        f"{VALIDATE_RELEASE_PLAN_RUN}"
+        f"{unneeded}"
+    )
+    path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
+    problems = validate_workflow_file(path, publishing=True)
+    assert any("must need validate-release-plan" in problem for problem in problems)
 
 
 def test_publishing_integrate_with_pr_draft_job_is_clean(tmp_path: Path) -> None:
@@ -610,8 +656,7 @@ def test_publishing_integrate_with_pr_draft_job_is_clean(tmp_path: Path) -> None
         f"  preflight:\n    needs: [lint-workflows]\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}"
         f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
         f"{VALIDATE_RELEASE_PLAN_RUN}"
-        f"  update-pr-draft-release:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}"
-        f"{RELEASE_PR_RUN}{RELEASE_ENV}"
+        f"{PR_DRAFT_JOB}"
     )
     path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
     assert validate_workflow_file(path, publishing=True) == []
@@ -716,6 +761,7 @@ def test_lint_workflows_is_the_cache_writer_when_preflight_dissolves(tmp_path: P
         f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SAVER_SETUP_UV_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
         f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SETUP_UV_RESTORE_STEP}"
         f"{WRAPPER_STEP}{VALIDATE_RELEASE_PLAN_RUN}"
+        f"{PR_DRAFT_JOB}"
     )
     path = write_workflow(tmp_path, integrate_document(jobs), name="integrate.yml")
     assert validate_workflow_file(path, publishing=True) == []
@@ -724,6 +770,7 @@ def test_lint_workflows_is_the_cache_writer_when_preflight_dissolves(tmp_path: P
         f"  lint-workflows:\n    steps:{CHECKOUT_BLOCK}{SETUP_UV_RESTORE_STEP}{WRAPPER_STEP}{LINT_WORKFLOWS_RUN}"
         f"  validate-release-plan:\n    steps:{CHECKOUT_WITH_TAGS_BLOCK}{SAVER_SETUP_UV_STEP}"
         f"{WRAPPER_STEP}{VALIDATE_RELEASE_PLAN_RUN}"
+        f"{PR_DRAFT_JOB}"
     )
     path = write_workflow(tmp_path, integrate_document(misplaced), name="integrate.yml")
     problems = validate_workflow_file(path, publishing=True)
