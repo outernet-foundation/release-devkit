@@ -274,12 +274,12 @@ def stage_apps(
         source = next(path for path in layer.iterdir() if path.is_file())
 
         # Copy the asset under its release name and record it
-        named = Path(artifact.file)
-        name = named.name if channel == ReleaseChannel.STABLE else f"{named.stem}-{short_sha}{named.suffix}"
-        target = staging / name
+        file_path = Path(artifact.file)
+        target = staging / (
+            file_path.name if channel == ReleaseChannel.STABLE else f"{file_path.stem}-{short_sha}{file_path.suffix}"
+        )
         shutil.copy2(source, target)
         staged.append((app_name, target))
-        print(f"  Asset: {name}")
 
     # Tag the bumped app versions alongside their staged assets
     if channel == ReleaseChannel.STABLE:
