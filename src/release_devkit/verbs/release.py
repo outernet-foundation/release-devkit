@@ -97,7 +97,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     # Compose the channel's tag, versions, and header
     match channel:
         case ReleaseChannel.PR:
-            tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', settings.github_ref)[0][0]}"
+            tag = f"pr-{re.findall(r'^refs/pull/(\d+)/merge$', settings.github_ref)[0]}"
             versions = {name: get_latest_version(f"{name}-v") for name in publish_config.apps}
             blocks.append(heading)
         case ReleaseChannel.DEV:

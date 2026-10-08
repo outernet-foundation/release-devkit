@@ -104,7 +104,7 @@ def make_build_config(built_images: bool = False) -> PublishConfig:
 def patch_context(
     monkeypatch: pytest.MonkeyPatch,
     publish_config: PublishConfig,
-    github_ref: str = "refs/pull/7/merge",
+    github_ref: str = "refs/pull/107/merge",
 ) -> None:
     monkeypatch.setenv("GITHUB_REPOSITORY", DRAFT_REPOSITORY)
     monkeypatch.setenv("GITHUB_ACTOR", "bot")
@@ -179,10 +179,10 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
 
     release_module.main(channel=ReleaseChannel.PR)
 
-    assert any("pr-7" in command for command in bash_log.commands)
-    assert any("gh release upload pr-7" in command and "--clobber" in command for command in bash_log.commands)
+    assert any("pr-107" in command for command in bash_log.commands)
+    assert any("gh release upload pr-107" in command and "--clobber" in command for command in bash_log.commands)
     assert any(f"MyApp-AndroidMobile-{SHORT_SHA}.apk" in command for command in bash_log.commands)
-    assert any("gh release edit pr-7" in command and "--notes-file" in command for command in bash_log.commands)
+    assert any("gh release edit pr-107" in command and "--notes-file" in command for command in bash_log.commands)
 
 
 def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -244,7 +244,7 @@ def test_update_pr_draft_no_apps_uploads_nothing(monkeypatch: pytest.MonkeyPatch
     release_module.main(channel=ReleaseChannel.PR)
 
     assert not any("gh release upload" in command for command in bash_log.commands)
-    assert any("gh release edit pr-7" in command for command in bash_log.commands)
+    assert any("gh release edit pr-107" in command for command in bash_log.commands)
 
 
 def test_update_pr_draft_refuses_non_pull_request_wake(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -265,7 +265,7 @@ def test_update_pr_draft_writes_notes_file_without_recreating(monkeypatch: pytes
 
     release_module.main(channel=ReleaseChannel.PR)
 
-    assert any("gh release edit pr-7" in command and "--notes-file" in command for command in bash_log.commands)
+    assert any("gh release edit pr-107" in command and "--notes-file" in command for command in bash_log.commands)
     assert not any("gh release create" in command for command in bash_log.commands)
 
 
@@ -277,10 +277,10 @@ def test_update_pr_draft_creates_missing_draft(monkeypatch: pytest.MonkeyPatch) 
     release_module.main(channel=ReleaseChannel.PR)
 
     assert any(
-        "gh release create pr-7" in command and "--draft" in command and f"--target {CERTIFIED_SHA}" in command
+        "gh release create pr-107" in command and "--draft" in command and f"--target {CERTIFIED_SHA}" in command
         for command in bash_log.commands
     )
-    assert any("gh release edit pr-7" in command and "--notes-file" in command for command in bash_log.commands)
+    assert any("gh release edit pr-107" in command and "--notes-file" in command for command in bash_log.commands)
 
 
 def test_update_pr_draft_replaces_same_anchor_and_preserves_others(monkeypatch: pytest.MonkeyPatch) -> None:
