@@ -7,14 +7,14 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from tempfile import NamedTemporaryFile, mkdtemp
-from typing import Annotated, NamedTuple
+from typing import Annotated, NamedTuple, Self
 
 import typer
 from bashrun.bash import bash, bash_check, bash_output
 from ci_devkit.builds import pull_artifact
 from ci_devkit.ci_step import ci_step
 from ci_devkit.setup import configure_git, install_dotnet, install_node
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from release_devkit.config import DEFAULT_CONFIG_PATH, PublishConfig, Settings, load_config
 from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, ReleasePlan, compute_release_plan
@@ -38,18 +38,17 @@ class DigestEntry(BaseModel):
     digest: str
     tags: list[str]
 
+    @model_validator(mode="after")
+    def require_tree_tag(self) -> Self:
+        if not any(tag.startswith("tree-") for tag in self.tags):
+            raise ValueError(f"entry '{self.ref}' carries no tree- tag")
+        return self
+
 
 class PackageRow(NamedTuple):
     name: str
     version: str
     registry: str
-    url: str | None
-
-
-class ImageRow(NamedTuple):
-    image: str
-    tag: str
-    digest: str
     url: str | None
 
 
@@ -155,11 +154,15 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     # List the images built at this SHA from the shelf
     if publish_config.built_images:
         with ci_step("List built images"):
-            images = render_built_images(settings, shelf, sha)
+            images = pull_digest_manifest(settings, shelf, sha)
         if images:
             images_rows = [
-                [image, f"[{image_tag}]({url})" if url and image_tag else (image_tag or "—"), f"`{digest}`"]
-                for image, image_tag, digest, url in images
+                [
+                    image_name,
+                    f"[{tree_tag(entry)}]({ghcr_package_page(entry.ref)})",
+                    f"`{entry.digest}`",
+                ]
+                for image_name, entry in images.items()
             ]
             blocks.append(f"{prefix} Built images\n{markdown_table(['Image', 'Tag', 'Digest'], images_rows)}")
 
@@ -292,8 +295,7 @@ def stage_apps(
     return staged
 
 
-def render_built_images(settings: Settings, shelf: str, sha: str) -> list[ImageRow]:
-    # Pull the digest manifest from the shelf
+def pull_digest_manifest(settings: Settings, shelf: str, sha: str) -> dict[str, DigestEntry]:
     digest_staging = Path(mkdtemp(prefix="digest-manifest-"))
     pull_artifact(
         shelf,
@@ -305,22 +307,18 @@ def render_built_images(settings: Settings, shelf: str, sha: str) -> list[ImageR
         registry_token=settings.github_token,
     )
     data = json.loads((digest_staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
-    manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
+    return {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
 
-    # List built images from the digest manifest
-    rows: list[ImageRow] = []
-    for image_name, entry in manifest.items():
-        tree_tag = next(
-            (tag_name for tag_name in entry.tags if tag_name.startswith("tree-")),
-            entry.tags[0] if entry.tags else "",
-        )
-        url = (
-            f"https://github.com/orgs/{ref_parts[0]}/packages/container/{ref_parts[1].replace('/', '%2F')}"
-            if entry.ref.startswith("ghcr.io/") and len(ref_parts := entry.ref[len("ghcr.io/") :].split("/", 1)) >= 2
-            else None
-        )
-        rows.append(ImageRow(image_name, tree_tag, entry.digest, url))
-    return rows
+
+def tree_tag(entry: DigestEntry) -> str:
+    return next(tag for tag in entry.tags if tag.startswith("tree-"))
+
+
+def ghcr_package_page(ref: str) -> str:
+    if not ref.startswith("ghcr.io/"):
+        raise ValueError(f"image ref '{ref}' does not live under ghcr.io")
+    org, package = ref[len("ghcr.io/") :].split("/", 1)
+    return f"https://github.com/orgs/{org}/packages/container/{package.replace('/', '%2F')}"
 
 
 def markdown_table(headers: list[str], rows: list[list[str]]) -> str:

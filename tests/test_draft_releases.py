@@ -236,6 +236,32 @@ def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.Monke
     assert "sha256:abc" in written[0]
 
 
+def test_update_pr_draft_fails_loudly_on_treeless_manifest_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_manifest = {
+        "zed-capture": {"ref": "ghcr.io/owner/repo/zed-capture", "digest": "sha256:abc", "tags": ["latest"]}
+    }
+    patch_context(monkeypatch, PublishConfig(built_images=True))
+    patch_pull_artifact(monkeypatch, {("images-digests", "all"): {DIGEST_FILE_NAME: json.dumps(raw_manifest)}})
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+
+    with pytest.raises(ValueError, match="tree-"):
+        release_module.main(channel=ReleaseChannel.PR)
+
+
+def test_update_pr_draft_fails_loudly_on_foreign_registry_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_manifest = {
+        "zed-capture": {"ref": "registry.example.com/owner/zed-capture", "digest": "sha256:abc", "tags": ["tree-1"]}
+    }
+    patch_context(monkeypatch, PublishConfig(built_images=True))
+    patch_pull_artifact(monkeypatch, {("images-digests", "all"): {DIGEST_FILE_NAME: json.dumps(raw_manifest)}})
+    patch_pr_bash_output(monkeypatch)
+    patch_bash(monkeypatch, check_returns=False)
+
+    with pytest.raises(ValueError, match=r"ghcr\.io"):
+        release_module.main(channel=ReleaseChannel.PR)
+
+
 def test_update_pr_draft_no_apps_uploads_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_context(monkeypatch, PublishConfig())
     patch_pr_bash_output(monkeypatch)
