@@ -63,15 +63,13 @@ class PublishConfig(BaseModel):
 
     packages: dict[str, PackageConfig] = Field(default_factory=dict)
     apps: dict[str, AppConfig] = Field(default_factory=dict)
-    builds_registry: str | None = None
+    built_images: bool = False
 
     @model_validator(mode="after")
     def validate_registry_names(self) -> "PublishConfig":
         for name, package in self.packages.items():
             if package.registry not in KNOWN_REGISTRIES:
                 raise ValueError(f"package '{name}' declares unknown registry '{package.registry}'")
-        if self.builds_registry is None and self.apps:
-            raise ValueError("builds_registry is required when any app is declared")
         return self
 
 

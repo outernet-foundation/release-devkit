@@ -107,11 +107,12 @@ def make_app(name: str = "myapp", builds: list[BuildArtifactConfig] | None = Non
 def make_config(
     packages: dict[str, PackageConfig] | None = None,
     apps: dict[str, AppConfig] | None = None,
+    built_images: bool = False,
 ) -> PublishConfig:
     return PublishConfig(
         packages=packages or {},
         apps=apps or {},
-        builds_registry="ghcr.io/owner/repo/builds" if apps else None,
+        built_images=built_images,
     )
 
 
@@ -286,7 +287,7 @@ def test_stages_all_apps_regardless_of_source_changes(monkeypatch: pytest.Monkey
 
 
 def test_any_new_digest_appends_snapshot_section_with_all_images(monkeypatch: pytest.MonkeyPatch) -> None:
-    config = make_config(apps={"myapp": make_app()})
+    config = make_config(apps={"myapp": make_app()}, built_images=True)
     tags = FakeTags(versions={"myapp": "1.0.0"}, changed=set())
 
     digest_existing = "sha256:" + "a" * 64

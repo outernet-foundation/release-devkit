@@ -42,7 +42,6 @@ def write_config(tmp_path: Path) -> Path:
                         "builds": [{"project": "CaptureTool", "platform": "AndroidMobile", "file": "CaptureTool.apk"}],
                     }
                 },
-                "builds_registry": "ghcr.io/owner/repo/builds",
             },
             default_flow_style=False,
             sort_keys=False,

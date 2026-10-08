@@ -143,12 +143,10 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
             blocks.append(f"{prefix} Packages\n{markdown_table(['Package', 'Version', 'Registry'], packages_rows)}")
 
     # Stage every app's build artifacts as release assets
-    builds_registry = publish_config.builds_registry
-    if builds_registry is not None and publish_config.apps:
+    shelf = f"ghcr.io/{repository}/builds"
+    if publish_config.apps:
         with ci_step("Stage apps"):
-            assets = stage_apps(
-                settings, publish_config, builds_registry, release_plan, channel, sha, short_sha, tag, repository
-            )
+            assets = stage_apps(settings, publish_config, shelf, release_plan, channel, sha, short_sha, tag, repository)
         assets_rows = [
             [
                 app_name,
@@ -159,10 +157,10 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         ]
         blocks.append(f"{prefix} Apps\n{markdown_table(['App', 'Version', 'Asset'], assets_rows)}")
 
-    # List the images built at this SHA from the builds shelf
-    if builds_registry is not None:
+    # List the images built at this SHA from the shelf
+    if publish_config.built_images:
         with ci_step("List built images"):
-            images = render_built_images(settings, builds_registry, sha)
+            images = render_built_images(settings, shelf, sha)
         if images:
             images_rows = [
                 [image, f"[{image_tag}]({url})" if url and image_tag else (image_tag or "—"), f"`{digest}`"]
@@ -252,7 +250,7 @@ def publish_packages(
 def stage_apps(
     settings: Settings,
     publish_config: PublishConfig,
-    builds_registry: str,
+    shelf: str,
     release_plan: ReleasePlan,
     channel: ReleaseChannel,
     sha: str,
@@ -268,7 +266,7 @@ def stage_apps(
         layer = staging / f"{artifact.project}-{artifact.platform}"
         # Pull the artifact layer from the builds shelf
         pull_artifact(
-            builds_registry,
+            shelf,
             artifact.project,
             artifact.platform,
             f"sha-{sha}",
@@ -299,20 +297,18 @@ def stage_apps(
     return [StagedAsset(app_name, path.name) for app_name, path in staged]
 
 
-def render_built_images(settings: Settings, builds_registry: str, sha: str) -> list[ImageRow]:
-    # Pull the digest manifest from the builds shelf
+def render_built_images(settings: Settings, shelf: str, sha: str) -> list[ImageRow]:
+    # Pull the digest manifest from the shelf
     digest_staging = Path(mkdtemp(prefix="digest-manifest-"))
-    if not pull_artifact(
-        builds_registry,
+    pull_artifact(
+        shelf,
         DIGEST_PROJECT,
         DIGEST_PLATFORM,
         f"sha-{sha}",
         digest_staging,
-        required=False,
         registry_username=settings.github_actor,
         registry_token=settings.github_token,
-    ):
-        return []
+    )
     data = json.loads((digest_staging / DIGEST_FILE_NAME).read_text(encoding="utf-8"))
     manifest = {target: DigestEntry.model_validate(entry) for target, entry in data.items()}
 

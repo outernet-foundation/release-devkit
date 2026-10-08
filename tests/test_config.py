@@ -47,7 +47,6 @@ def base_payload() -> dict[str, object]:
                 ],
             },
         },
-        "builds_registry": "ghcr.io/outernet-foundation/placeframe-capture-tool/builds",
     }
 
 
@@ -72,7 +71,7 @@ def test_load_config_defaults_empty_collections(tmp_path: Path):
 
     assert config.packages == {}
     assert config.apps == {}
-    assert config.builds_registry is None
+    assert config.built_images is False
 
 
 def test_load_config_rejects_unknown_top_level_keys(tmp_path: Path):
@@ -133,7 +132,7 @@ def test_repo_release_devkit_yaml_loads() -> None:
 
 def test_load_config_rejects_duplicate_keys(tmp_path: Path):
     config_path = tmp_path / "release-devkit.yaml"
-    config_path.write_text("builds_registry: a\nbuilds_registry: b\n", encoding="utf-8")
+    config_path.write_text("built_images: a\nbuilt_images: b\n", encoding="utf-8")
 
     with pytest.raises(Exception, match=r"Duplicate key"):
         load_config(config_path)
@@ -150,7 +149,6 @@ def test_load_config_parses_app_builds_shelf(tmp_path: Path):
     config = load_config(write_config(tmp_path, payload))
 
     builds = config.apps["capture-tool"].builds
-    assert config.builds_registry == "ghcr.io/outernet-foundation/placeframe-capture-tool/builds"
     assert [(artifact.project, artifact.platform) for artifact in builds] == [
         ("CaptureTool", "AndroidMobile"),
         ("capture-tool", "images-lock"),
@@ -186,9 +184,10 @@ def test_load_config_rejects_name_key(tmp_path: Path):
         load_config(write_config(tmp_path, payload))
 
 
-def test_load_config_rejects_apps_without_builds_registry(tmp_path: Path):
+def test_load_config_parses_built_images(tmp_path: Path):
     payload = base_payload()
-    del payload["builds_registry"]
+    payload["built_images"] = True
 
-    with pytest.raises(ValidationError, match="builds_registry is required"):
-        load_config(write_config(tmp_path, payload))
+    config = load_config(write_config(tmp_path, payload))
+
+    assert config.built_images is True

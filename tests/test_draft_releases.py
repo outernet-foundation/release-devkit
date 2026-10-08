@@ -88,7 +88,7 @@ def patch_plan_tags(monkeypatch: pytest.MonkeyPatch, tags: FakeTags) -> None:
     monkeypatch.setattr(release_module, "get_latest_version", tags.latest_version)
 
 
-def make_build_config() -> PublishConfig:
+def make_build_config(built_images: bool = False) -> PublishConfig:
     return PublishConfig(
         apps={
             "myapp": AppConfig(
@@ -97,7 +97,7 @@ def make_build_config() -> PublishConfig:
                 builds=[BuildArtifactConfig(project="MyApp", platform="AndroidMobile", file="MyApp-AndroidMobile.apk")],
             )
         },
-        builds_registry="ghcr.io/owner/repo/builds",
+        built_images=built_images,
     )
 
 
@@ -187,7 +187,7 @@ def test_update_pr_draft_derives_pr_tag_and_uploads(monkeypatch: pytest.MonkeyPa
 
 def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
-    patch_context(monkeypatch, make_build_config())
+    patch_context(monkeypatch, make_build_config(built_images=True))
     patch_pull_artifact(
         monkeypatch, {("MyApp", "AndroidMobile"): {"MyApp.apk": "build content"}, **digest_layer(manifest)}
     )
@@ -206,7 +206,7 @@ def test_update_pr_draft_writes_image_section_when_manifest(monkeypatch: pytest.
     assert f"sha-{SHORT_SHA}" in written[0]
 
 
-def test_update_pr_draft_omits_images_when_manifest_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_update_pr_draft_omits_images_when_not_declared(monkeypatch: pytest.MonkeyPatch) -> None:
     patch_context(monkeypatch, make_build_config())
     patch_pull_artifact(monkeypatch, {("MyApp", "AndroidMobile"): {"MyApp.apk": "build content"}})
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
@@ -222,7 +222,7 @@ def test_update_pr_draft_omits_images_when_manifest_missing(monkeypatch: pytest.
 
 def test_update_pr_draft_lists_images_without_any_apps(monkeypatch: pytest.MonkeyPatch) -> None:
     manifest = {"zed-capture": DigestEntry(ref="ghcr.io/owner/repo/zed-capture", digest="sha256:abc", tags=["tree-1"])}
-    config = PublishConfig(apps={}, builds_registry="ghcr.io/owner/repo/builds")
+    config = PublishConfig(apps={}, built_images=True)
     patch_context(monkeypatch, config)
     patch_pull_artifact(monkeypatch, digest_layer(manifest))
     patch_pr_bash_output(monkeypatch)
@@ -310,7 +310,6 @@ def test_update_pr_draft_lists_one_row_per_staged_artifact(monkeypatch: pytest.M
                 ],
             )
         },
-        builds_registry="ghcr.io/owner/repo/builds",
     )
     patch_context(monkeypatch, config)
     patch_plan_tags(monkeypatch, FakeTags(versions={"myapp": "1.0.0"}, changed=set()))
