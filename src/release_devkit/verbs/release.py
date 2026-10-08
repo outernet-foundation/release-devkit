@@ -271,7 +271,7 @@ def stage_apps(
         )
 
         # The layer holds exactly one file: the build's single player binary
-        source = next(path for path in layer.iterdir() if path.is_file())
+        (source,) = layer.iterdir()
 
         # Copy the asset under its release name and record it
         file_path = Path(artifact.file)
