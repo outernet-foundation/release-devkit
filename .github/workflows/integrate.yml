@@ -16,22 +16,37 @@ permissions:
   actions: read
 
 jobs:
-  preflight:
+  lint-workflows:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: ./.github/actions/checkout
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-uv
+        with:
+          enable-cache: true
+          save-cache: "false"
+      - uses: ./.github/actions/setup-release-devkit
+      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev lint-workflows
+
+  preflight:
+    needs: [lint-workflows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/checkout
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           # Perform a full clone, required for tags
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v7
+      - uses: ./.github/actions/setup-uv
         with:
           enable-cache: true
           save-cache: "true"
       - run: uv run preflight-python
-      - name: Self-test install (this PR's head, consumer geometry, into RUNNER_TEMP)
+      - name: Self-test install
         run: >
           git clone https://github.com/outernet-foundation/release-devkit.git "$RUNNER_TEMP/release-devkit"
           && git -C "$RUNNER_TEMP/release-devkit" checkout ${{ github.event.pull_request.head.sha || github.sha }}

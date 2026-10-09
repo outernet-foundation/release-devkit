@@ -1,0 +1,28 @@
+name: checkout
+description: actions/checkout pinned by commit SHA, credentials not persisted by default
+inputs:
+  ref:
+    description: Ref to check out (empty = the event's default)
+    required: false
+    default: ""
+  fetch-depth:
+    description: Number of commits to fetch (0 = all)
+    required: false
+    default: "1"
+  fetch-tags:
+    description: Fetch all tags
+    required: false
+    default: "false"
+  persist-credentials:
+    description: Persist credentials in the local git config
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      with:
+        ref: ${{ inputs.ref }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+        fetch-tags: ${{ inputs.fetch-tags }}
+        persist-credentials: ${{ inputs.persist-credentials }}
