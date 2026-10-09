@@ -82,8 +82,7 @@ def main(
         ]
         if blocking:
             if all(entry.status in WAITING_STATUSES for entry in blocking):
-                print(f"  checks still pending on PR #{pr_number} — the other wake will land it")
-                return
+                raise SystemExit(f"checks still pending on PR #{pr_number} — remove and re-add the label once green")
             raise SystemExit(
                 f"checks not green on PR #{pr_number} head {pull_request.head_oid[:12]} — see the PR's checks"
             )
@@ -136,7 +135,7 @@ def report_dry_run(head_sha: str, pr_number: str, pull_request: PullRequest) -> 
     with ci_step("Dry-run report (machinery certified, preconditions informational)"):
         print(f"  PR #{pr_number} state {pull_request.state}")
         label_present = LABEL_NAME in {label.name for label in pull_request.labels}
-        print(f"  label {LABEL_NAME} {'present' if label_present else 'absent — the label wake is required'}")
+        print(f"  label {LABEL_NAME} {'present' if label_present else 'absent — apply the label to attempt the merge'}")
         battery = [entry for entry in pull_request.check_rollup if entry.name != GATE_CHECK_NAME]
         blocking = [
             entry for entry in battery if entry.status != "COMPLETED" or entry.conclusion not in GREEN_CONCLUSIONS
@@ -144,7 +143,7 @@ def report_dry_run(head_sha: str, pr_number: str, pull_request: PullRequest) -> 
         if not blocking:
             print(f"  {len(battery)} checks green on {pull_request.head_oid[:12]}")
         elif all(entry.status in WAITING_STATUSES for entry in blocking):
-            print(f"  {len(blocking)} checks still pending on PR #{pr_number}")
+            print(f"  {len(blocking)} checks still pending on PR #{pr_number} — re-apply the label once green")
         else:
             print(f"  checks not green on PR #{pr_number} head {pull_request.head_oid[:12]} — see the PR's checks")
         bash(f"{GIT_COMMAND} fetch origin refs/heads/{BASE_BRANCH}")

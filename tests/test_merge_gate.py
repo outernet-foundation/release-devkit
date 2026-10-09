@@ -116,7 +116,7 @@ def test_gate_refuses_terminal_check_failures_loudly(monkeypatch: pytest.MonkeyP
     assert not any("push" in command for command in bash_log.commands)
 
 
-def test_gate_exits_cleanly_while_checks_are_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gate_refuses_loudly_while_checks_are_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     rollup = [
         {"name": "lint-workflows", "status": "COMPLETED", "conclusion": "SUCCESS"},
         {"name": "preflight", "status": "IN_PROGRESS"},
@@ -124,7 +124,8 @@ def test_gate_exits_cleanly_while_checks_are_pending(monkeypatch: pytest.MonkeyP
     ]
     payload = pr_view_payload(["ready-to-merge"], rollup)
     exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
-    assert exit_request is None
+    assert exit_request is not None
+    assert "re-add" in exit_message(exit_request)
     assert not any("push" in command for command in bash_log.commands)
 
 
