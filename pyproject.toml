@@ -13,9 +13,6 @@ dependencies = [
     "typer>=0.17.4",
 ]
 
-[tool.uv]
-prerelease = "if-necessary-or-explicit"
-
 [dependency-groups]
 dev = [
     "basedpyright>=1.39.10",
