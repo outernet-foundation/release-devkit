@@ -252,16 +252,17 @@ wheels = [
 
 [[package]]
 name = "python-devkit"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bashrun" },
+    { name = "ci-devkit" },
     { name = "pydantic" },
-    { name = "pydantic-settings" },
+    { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/60/92/4198d55ba8c023a79e475c32e4fdd815b653458bff2eb19a84a5d701dcd8/python_devkit-0.1.0.tar.gz", hash = "sha256:57f2341e01f810756957aaaa7026c7019079db31630e40151cd2fc21bcc3ba7b", size = 26511, upload-time = "2026-09-21T22:41:54.536Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/13/42316e7d52663d38027728b2e974ead7b57b8b1836c8ddffcb52aa29cd3c/python_devkit-0.2.0.tar.gz", hash = "sha256:49fb9d2dd9d9eddd191330193c722b8462ac901d282f4de4653593c8316ea767", size = 33742, upload-time = "2026-10-05T17:49:48.932Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/52/eb/990ab1df11d383905e94b291e9f2d9fee6d1f3ec367479b8b5438438e8af/python_devkit-0.1.0-py3-none-any.whl", hash = "sha256:d5fbceac116de875e2f6a998177c1fdc1f284bbb40fe6aa893c2874784c56594", size = 24612, upload-time = "2026-09-21T22:41:53.645Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/1d/4f8957f20da89128b7690297c567d6bc0abda0d662376bbe9d9f5ef69579/python_devkit-0.2.0-py3-none-any.whl", hash = "sha256:0ea4dd7a51e572746ff8bce4a48160424318fa68be3feb17cb6820e16020df87", size = 14524, upload-time = "2026-10-05T17:49:48.047Z" },
 ]
 
 [[package]]

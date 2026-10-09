@@ -15,6 +15,7 @@ from release_devkit.plan import (
 )
 from release_devkit.manifests import SENTINEL_VERSION
 from release_devkit.tags import get_latest_version, latest_version_in_line, parse_major_minor, parse_version
+from release_devkit.verbs.validate_release_plan import validate_delivery_surface
 
 
 def test_latest_version_skips_prerelease_tags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -230,3 +231,30 @@ def test_release_plan_bumps_app_on_its_own_path_change(
 
     assert release_plan.publishing == set()
     assert release_plan.app_versions == {"app": "0.2.4"}
+
+
+def test_delivery_surface_check_demands_release_yml_for_declaring_configs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    config = PublishConfig(
+        packages={"pkg": PackageConfig(path=Path("pkg"), major_minor="0.1", registry="pypi", identity="pkg")}
+    )
+    with pytest.raises(SystemExit, match="declares packages/apps"):
+        validate_delivery_surface(config)
+
+
+def test_delivery_surface_check_passes_when_the_surface_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    release_workflow = tmp_path / ".github/workflows/release.yml"
+    release_workflow.parent.mkdir(parents=True)
+    release_workflow.write_text("jobs: {}\n", encoding="utf-8")
+    config = PublishConfig(
+        packages={"pkg": PackageConfig(path=Path("pkg"), major_minor="0.1", registry="pypi", identity="pkg")}
+    )
+    assert validate_delivery_surface(config) is None
+
+
+def test_delivery_surface_check_ignores_empty_configs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert validate_delivery_surface(PublishConfig()) is None

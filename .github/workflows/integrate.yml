@@ -11,6 +11,9 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
+  checks: read
+  actions: read
 
 jobs:
   preflight:
@@ -33,3 +36,9 @@ jobs:
           git clone https://github.com/outernet-foundation/release-devkit.git "$RUNNER_TEMP/release-devkit"
           && git -C "$RUNNER_TEMP/release-devkit" checkout ${{ github.event.pull_request.head.sha || github.sha }}
       - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev validate-release-plan
+      - name: Self-test merge-gate dry-run
+        run: >
+          uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev
+          merge-gate --head-sha ${{ github.event.pull_request.head.sha || github.sha }} --dry-run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

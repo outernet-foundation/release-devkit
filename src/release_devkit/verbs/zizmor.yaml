@@ -1,0 +1,13 @@
+# Reviewed exceptions for the canonical workflow shapes; lint-workflows applies this file via --config
+# (global discovery), so consumers never carry a zizmor config of their own. The offline persona is set
+# by the runner's permanent --offline flag, not here: zizmor has no offline config persona. The audit
+# input is the repo root, so the composite wrappers under .github/actions are covered like workflows.
+rules:
+  # the local wrappers are spelled ./ (workspace-relative); the flip to $/ self-repository syntax is
+  # gated on actionlint support (no released version accepts $/ as of 1.7.12) and on runner fleet
+  # >= 2.336.0. The disable is load-bearing: zizmor's exit status fails on ANY finding (verified: one
+  # low-severity finding exits 12), and the ./ spelling yields one low-severity finding per wrapper use
+  # — remove this stanza in the same change that flips the spelling, or adopt --min-severity medium
+  # fleet-wide; see zizmor-audit.md
+  self-repository:
+    disable: true

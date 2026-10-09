@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import platform
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,9 +8,9 @@ from typing import Annotated
 
 import typer
 import yaml
+from bashrun.bash import CalledProcessError, bash, bash_output
 from pydantic import TypeAdapter, ValidationError
 
-from release_devkit.actionlint import run_actionlint
 from release_devkit.config import load_config
 
 app = typer.Typer(add_completion=False, pretty_exceptions_show_locals=False)
@@ -19,57 +19,76 @@ ROOT_DOCUMENT = TypeAdapter(dict[object, object])
 STR_MAPPING = TypeAdapter(dict[str, object])
 OBJECT_LIST = TypeAdapter(list[object])
 
-CHECKOUT_USES = "actions/checkout@v5"
+WORKFLOWS_DIRECTORY = Path(".github/workflows")
+ZIZMOR_CONFIG = Path(__file__).with_name("zizmor.yaml")
+ACTIONLINT_VERSION = "1.7.12"
+ACTIONLINT_BUILDS = {
+    ("Linux", "x86_64"): "linux_amd64",
+    ("Linux", "aarch64"): "linux_arm64",
+    ("Darwin", "x86_64"): "darwin_amd64",
+    ("Darwin", "aarch64"): "darwin_arm64",
+}
+ZIZMOR_VERSION = "1.30.1"
+# no upstream checksums file exists, so each build carries its own sha256 — changing the expected hash takes a repo commit
+ZIZMOR_BUILDS = {
+    ("Linux", "x86_64"): (
+        "zizmor-x86_64-unknown-linux-gnu.tar.gz",
+        "e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a",
+    ),
+    ("Linux", "aarch64"): (
+        "zizmor-aarch64-unknown-linux-gnu.tar.gz",
+        "7ff1dce33bdd18fd2a4affe63bdd47efcccca97b2cec1c1863ec26e9e2647540",
+    ),
+    ("Darwin", "x86_64"): (
+        "zizmor-x86_64-apple-darwin.tar.gz",
+        "10e6b18b11ea07e515a16f0f0518c7b07527bc9977c1fd5698181ce7f3554202",
+    ),
+    ("Darwin", "arm64"): (
+        "zizmor-aarch64-apple-darwin.tar.gz",
+        "e28d22b087f9ebb8d99da6e740d348c930f559961c7c3f12badda54f882195a2",
+    ),
+}
+CHECKOUT_USES = "./.github/actions/checkout"
 DEVKIT_WRAPPER_USES = "./.github/actions/setup-release-devkit"
 DEVKIT_WRAPPER_PATH = Path(".github/actions/setup-release-devkit/action.yml")
 DEVKIT_REPOSITORY = "outernet-foundation/release-devkit"
 DEVKIT_INSTALL_PATH = "$RUNNER_TEMP/release-devkit"
 DEVKIT_INVOCATION_PREFIX = f'uv run --project "{DEVKIT_INSTALL_PATH}" --locked --no-dev '
-SETUP_UV_USES = "astral-sh/setup-uv@v7"
+DEVKIT_CLONE_PREFIX = f'git clone https://github.com/{DEVKIT_REPOSITORY}.git "{DEVKIT_INSTALL_PATH}"'
+SETUP_UV_USES = "./.github/actions/setup-uv"
 CONFIG_PATH = Path("release-devkit.yaml")
-INTEGRATE_HEAD_SHA = "${{ github.event.pull_request.head.sha }}"
-MERGE_BOT_REF = "${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}"
+PR_HEAD_SHA = "${{ github.event.pull_request.head.sha }}"
 PR_DRAFT_JOB_IF = "github.event.pull_request"
-MERGE_GATE_JOB_IF = (
-    "github.event.label.name == 'ready-to-merge'"
-    " || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')"
-)
-MERGE_GATE_CONCURRENCY = "merge-gate-${{ github.event.pull_request.number || github.event.workflow_run.head_branch }}"
-MINT_STEP_USES = "actions/create-github-app-token@v3"
-MINT_STEP_INPUTS = {
-    "app-id": "${{ vars.MERGE_BOT_APP_ID }}",
-    "private-key": "${{ secrets.MERGE_BOT_APP_PRIVATE_KEY }}",
-}
-NUGET_LOGIN_USES = "NuGet/login@v1"
-NUGET_LOGIN_INPUTS = {"user": "${{ secrets.NUGET_USER }}"}
+MERGE_GATE_JOB_IF = "github.event.label.name == 'ready-to-merge'"
+MERGE_GATE_CONCURRENCY = "merge-gate-${{ github.event.pull_request.number }}"
+MINT_TOKEN_ENV = {"GITHUB_TOKEN": "${{ steps.mint.outputs.token }}"}
+GITHUB_TOKEN_ENV = {"GITHUB_TOKEN": "${{ github.token }}"}
 NUGET_API_KEY_ENV = "NUGET_API_KEY"
 NUGET_API_KEY_SOURCE = "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
 INTEGRATE_WORKFLOW = Path(".github/workflows/integrate.yml")
 RELEASE_WORKFLOW = Path(".github/workflows/release.yml")
-RELEASE_WORKFLOW_NAME = "Release"
 RELEASE_CONCURRENCY = "release-${{ github.ref }}"
+RELEASE_PUSH_BRANCHES = ["main", "dev"]
 MERGE_GATE_WORKFLOW = Path(".github/workflows/merge-gate.yml")
 LINT_WORKFLOWS_JOB = "lint-workflows"
 VALIDATE_RELEASE_PLAN_JOB = "validate-release-plan"
 PREFLIGHT_JOB = "preflight"
 MIRROR_IMAGES_JOB = "mirror-images"
-RELEASE_JOB = "release"
-PRERELEASE_JOB = "prerelease"
 UPDATE_PR_DRAFT_JOB = "update-pr-draft-release"
+PRERELEASE_JOB = "prerelease"
+RELEASE_JOB = "release"
 RELEASE_VERB = "release"
 PR_CHANNEL = "pr"
 DEV_CHANNEL = "dev"
 STABLE_CHANNEL = "stable"
+DRY_RUN_SUFFIX = " --dry-run"
 
-DEAD_USES_PREFIXES = ("./.release-devkit/", "./.github/actions/checkout-release-devkit")
-
-CHECKOUT = "checkout"
-CHECKOUT_WITH_TAGS = "checkout-with-tags"
-CHECKOUT_WITH_TAGS_PUSH = "checkout-with-tags-push"
-MERGE_BOT = "merge-bot"
-
-SETUP_UV_RESTORE_INPUTS = {"enable-cache": True, "save-cache": "false"}
-SETUP_UV_SAVE_INPUTS = {"enable-cache": True, "save-cache": "true"}
+# ref law: canonical filename -> required checkout ref (None = the file's checkouts must carry no ref)
+REF_LAWS: dict[str, str | None] = {
+    INTEGRATE_WORKFLOW.name: PR_HEAD_SHA,
+    RELEASE_WORKFLOW.name: None,
+    MERGE_GATE_WORKFLOW.name: PR_HEAD_SHA,
+}
 
 WRAPPER_COMMIT_ENV_VAR = "RELEASE_DEVKIT_COMMIT"
 WRAPPER_COMMIT_ENV = re.compile(r"^[0-9a-f]{40}$")
@@ -79,13 +98,17 @@ WRAPPER_CLONE = re.compile(
     rf'\ngit -C "\$RUNNER_TEMP/release-devkit" checkout "\${WRAPPER_COMMIT_ENV_VAR}"$'
 )
 
+ENV_STEP_REFERENCE = re.compile(r"\$\{\{ steps\.([A-Za-z0-9_-]+)\.outputs\.")
+
 
 @dataclass(frozen=True)
 class VerbSpec:
     name: str
     args: re.Pattern[str]
     env: dict[str, str]
-    checkout: str
+    dry_run_env: dict[str, str] | None
+    needs_tag_fetch: bool
+    needs_history: bool
     delivery: bool
 
 
@@ -93,10 +116,9 @@ class VerbSpec:
 class ChannelSpec:
     args: re.Pattern[str]
     env: dict[str, str]
-    checkout: str
-    delivery: bool
     workflow: Path
     job: str
+    delivery: bool
 
 
 VERB_SPECS: dict[str, VerbSpec] = {
@@ -104,28 +126,36 @@ VERB_SPECS: dict[str, VerbSpec] = {
         name="get-app-version",
         args=re.compile(r"^ --app \S+$"),
         env={},
-        checkout=CHECKOUT_WITH_TAGS,
+        dry_run_env=None,
+        needs_tag_fetch=True,
+        needs_history=False,
         delivery=False,
     ),
     "lint-workflows": VerbSpec(
         name="lint-workflows",
         args=re.compile(r"^$"),
         env={},
-        checkout=CHECKOUT,
+        dry_run_env=None,
+        needs_tag_fetch=False,
+        needs_history=False,
         delivery=False,
     ),
     "merge-gate": VerbSpec(
         name="merge-gate",
         args=re.compile(r"^ --head-sha .+$"),
-        env={"GITHUB_TOKEN": "${{ steps.mint.outputs.token }}"},
-        checkout=MERGE_BOT,
+        env=MINT_TOKEN_ENV,
+        dry_run_env=GITHUB_TOKEN_ENV,
+        needs_tag_fetch=False,
+        needs_history=True,
         delivery=False,
     ),
     "validate-release-plan": VerbSpec(
         name="validate-release-plan",
         args=re.compile(r"^$"),
         env={},
-        checkout=CHECKOUT_WITH_TAGS,
+        dry_run_env=None,
+        needs_tag_fetch=True,
+        needs_history=False,
         delivery=False,
     ),
 }
@@ -133,28 +163,33 @@ VERB_SPECS: dict[str, VerbSpec] = {
 RELEASE_CHANNELS: dict[str, ChannelSpec] = {
     PR_CHANNEL: ChannelSpec(
         args=re.compile(r"^ --channel pr$"),
-        env={"GITHUB_TOKEN": "${{ github.token }}"},
-        checkout=CHECKOUT_WITH_TAGS,
-        delivery=False,
+        env=GITHUB_TOKEN_ENV,
         workflow=INTEGRATE_WORKFLOW,
         job=UPDATE_PR_DRAFT_JOB,
+        delivery=False,
     ),
     DEV_CHANNEL: ChannelSpec(
         args=re.compile(r"^ --channel dev$"),
-        env={"GITHUB_TOKEN": "${{ github.token }}"},
-        checkout=CHECKOUT_WITH_TAGS,
-        delivery=True,
+        env=GITHUB_TOKEN_ENV,
         workflow=RELEASE_WORKFLOW,
         job=PRERELEASE_JOB,
+        delivery=True,
     ),
     STABLE_CHANNEL: ChannelSpec(
         args=re.compile(r"^ --channel stable$"),
-        env={"GITHUB_TOKEN": "${{ github.token }}"},
-        checkout=CHECKOUT_WITH_TAGS_PUSH,
-        delivery=True,
+        env=GITHUB_TOKEN_ENV,
         workflow=RELEASE_WORKFLOW,
         job=RELEASE_JOB,
+        delivery=True,
     ),
+}
+
+# local-run flags the CI grammar deliberately does not enforce
+UNENFORCED_FLAGS: dict[str, frozenset[str]] = {
+    "get-app-version": frozenset({"--config"}),
+    "lint-workflows": frozenset({"--workflow"}),
+    "release": frozenset({"--config"}),
+    "validate-release-plan": frozenset({"--config"}),
 }
 
 # the invocation grammar derives from the spec tables, so the regex can never drift from the verbs it validates
@@ -166,9 +201,7 @@ DEVKIT_INVOCATION = re.compile(
     + r'(?P<args>(?: [^)"]*)?)'
 )
 
-RUN_STEP_LINE = re.compile(r"^(?P<prefix>\s*(?:- )?)run:(?:\s*(?P<value>.*))?$")
-BLOCK_SCALAR_HEAD = re.compile(r"^[|>](?:[+-]\d?|\d[+-]?)$")
-RUN_STEP_FOLD_THRESHOLD = 120
+SHELL_STATEMENT_SPLIT = re.compile(r"\n|&&|;")
 
 
 @dataclass
@@ -200,13 +233,14 @@ class WorkflowView:
 @dataclass
 class CheckoutStep:
     step_index: int
-    signature: str
+    with_block: dict[str, object]
 
 
 @dataclass
 class VerbStep:
     step_index: int
     name: str
+    args: str
     channel: str | None
     spec: VerbSpec | ChannelSpec
 
@@ -217,13 +251,6 @@ class Problem:
     message: str
     job: str | None = None
     step_index: int | None = None
-    line_number: int | None = None
-
-
-@dataclass(frozen=True)
-class RepoContext:
-    publishing: bool
-    nuget: bool
 
 
 @app.command()
@@ -232,32 +259,27 @@ def main(
         list[Path] | None,
         typer.Option(
             "--workflow",
-            help="Workflow file to signature-validate (repeatable; default integrate + release + merge-gate)",
+            help="Workflow file to signature-validate (repeatable; default: every file found in .github/workflows)",
         ),
     ] = None,
 ) -> None:
-    workflow_paths = workflows or default_workflows()
+    workflow_paths = workflows or found_workflows()
     problems: list[str] = []
     for workflow_path in workflow_paths:
-        problems.extend(validate_workflow_file(workflow_path, publishing=is_publishing(), nuget=declares_nuget()))
+        problems.extend(validate_workflow_file(workflow_path, nuget=declares_nuget()))
     problems.extend(validate_devkit_wrapper())
     for problem in problems:
         print(problem)
     run_actionlint()
+    run_zizmor()
     if problems:
         raise SystemExit(1)
 
 
-def default_workflows() -> list[Path]:
-    workflows = [INTEGRATE_WORKFLOW]
-    if is_publishing():
-        workflows.append(RELEASE_WORKFLOW)
-    workflows.append(MERGE_GATE_WORKFLOW)
-    return workflows
-
-
-def is_publishing() -> bool:
-    return CONFIG_PATH.is_file()
+def found_workflows() -> list[Path]:
+    if not WORKFLOWS_DIRECTORY.is_dir():
+        return []
+    return sorted({*WORKFLOWS_DIRECTORY.glob("*.yml"), *WORKFLOWS_DIRECTORY.glob("*.yaml")})
 
 
 def declares_nuget() -> bool:
@@ -267,9 +289,102 @@ def declares_nuget() -> bool:
     return any(package.registry == "nuget" for package in config.packages.values())
 
 
+def run_actionlint() -> None:
+    workflow_files = found_workflows()
+    if not workflow_files:
+        raise SystemExit("no .github/workflows/*.yml files found")
+    binary = ensure_actionlint()
+    command = " ".join([f'"{binary}"', *[f'"{workflow_file}"' for workflow_file in workflow_files]])
+    try:
+        bash(command)
+    except CalledProcessError as error:
+        raise SystemExit(error.returncode) from error
+
+
+def run_zizmor() -> None:
+    # offline is the standing persona: no audit needs GH_TOKEN, so the lint job needs no new credentials
+    # repo root, not .github/workflows: the composite wrappers under .github/actions must be audited too
+    binary = ensure_zizmor()
+    command = " ".join([
+        f'"{binary}"',
+        "--offline",
+        "--format",
+        "plain",
+        "--no-progress",
+        "--config",
+        f'"{ZIZMOR_CONFIG}"',
+        '"."',
+    ])
+    try:
+        bash(command)
+    except CalledProcessError as error:
+        raise SystemExit(error.returncode) from error
+
+
+def ensure_actionlint() -> Path:
+    cache_directory = Path.home() / ".cache" / "release-devkit" / f"actionlint-v{ACTIONLINT_VERSION}"
+    binary = cache_directory / "actionlint"
+    if binary.is_file():
+        return binary
+    cache_directory.mkdir(parents=True, exist_ok=True)
+    platform_key = (platform.system(), platform.machine())
+    if platform_key not in ACTIONLINT_BUILDS:
+        raise SystemExit(f"no actionlint build for {platform.system()}/{platform.machine()}")
+    build = ACTIONLINT_BUILDS[platform_key]
+    release_base = f"https://github.com/rhysd/actionlint/releases/download/v{ACTIONLINT_VERSION}"
+    tarball_name = f"actionlint_{ACTIONLINT_VERSION}_{build}.tar.gz"
+    tarball = cache_directory / tarball_name
+    bash(f'curl -fsSL {release_base}/{tarball_name} -o "{tarball}"')
+    checksums = bash_output(f"curl -fsSL {release_base}/actionlint_{ACTIONLINT_VERSION}_checksums.txt")
+    expected = expected_checksum(checksums, tarball_name)
+    actual = bash_output(f'sha256sum "{tarball}"').split(maxsplit=1)[0]
+    if actual != expected:
+        raise SystemExit(
+            f"actionlint {ACTIONLINT_VERSION} checksum mismatch for {tarball_name}: expected {expected}, got {actual}"
+        )
+    bash(f'tar -xzf "{tarball}" -C "{cache_directory}"')
+    tarball.unlink()
+    if not binary.is_file():
+        raise SystemExit(f"actionlint binary missing after extracting {tarball_name}")
+    return binary
+
+
+def ensure_zizmor() -> Path:
+    cache_directory = Path.home() / ".cache" / "release-devkit" / f"zizmor-v{ZIZMOR_VERSION}"
+    binary = cache_directory / "zizmor"
+    if binary.is_file():
+        return binary
+    cache_directory.mkdir(parents=True, exist_ok=True)
+    platform_key = (platform.system(), platform.machine())
+    if platform_key not in ZIZMOR_BUILDS:
+        raise SystemExit(f"no zizmor build for {platform.system()}/{platform.machine()}")
+    tarball_name, expected = ZIZMOR_BUILDS[platform_key]
+    release_base = f"https://github.com/zizmorcore/zizmor/releases/download/v{ZIZMOR_VERSION}"
+    tarball = cache_directory / tarball_name
+    bash(f'curl -fsSL {release_base}/{tarball_name} -o "{tarball}"')
+    actual = bash_output(f'sha256sum "{tarball}"').split(maxsplit=1)[0]
+    if actual != expected:
+        raise SystemExit(
+            f"zizmor {ZIZMOR_VERSION} checksum mismatch for {tarball_name}: expected {expected}, got {actual}"
+        )
+    bash(f'tar -xzf "{tarball}" -C "{cache_directory}"')
+    tarball.unlink()
+    if not binary.is_file():
+        raise SystemExit(f"zizmor binary missing after extracting {tarball_name}")
+    return binary
+
+
+def expected_checksum(checksums: str, tarball_name: str) -> str:
+    for line in checksums.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[1] == tarball_name:
+            return fields[0]
+    raise SystemExit(f"actionlint checksums file has no entry for {tarball_name}")
+
+
 def validate_devkit_wrapper(path: Path = DEVKIT_WRAPPER_PATH) -> list[str]:
     if not path.is_file():
-        return rendered([file_problem(path, "wrapper action not found")])
+        return []
     document: object = yaml.safe_load(path.read_text(encoding="utf-8"))
     root = parse_root_mapping(document)
     if root is None:
@@ -308,27 +423,37 @@ def validate_devkit_wrapper(path: Path = DEVKIT_WRAPPER_PATH) -> list[str]:
     return rendered(problems)
 
 
-def validate_workflow_file(path: Path, publishing: bool = True, nuget: bool = False) -> list[str]:
+def validate_workflow_file(path: Path, nuget: bool = False) -> list[str]:
     if not path.is_file():
         return rendered([file_problem(path, "workflow file not found")])
-    context = RepoContext(publishing=publishing, nuget=nuget)
-    raw_lines = path.read_text(encoding="utf-8").splitlines()
-    document: object = yaml.safe_load("\n".join(raw_lines))
+    document: object = yaml.safe_load(path.read_text(encoding="utf-8"))
     workflow, problems = parse_workflow(path, document)
     if workflow is None:
         return rendered(problems)
     verbs_by_job: dict[str, list[VerbStep]] = {}
     for job_name, job in workflow.jobs.items():
-        job_problems, verb_steps = validate_job(job_name, job, path, context)
+        job_problems, verb_steps = validate_job(job_name, job, path, nuget)
         problems.extend(job_problems)
         verbs_by_job[job_name] = verb_steps
-    problems.extend(validate_run_steps_single_line(raw_lines, path))
-    # contract checks dispatch on the canonical filenames; a --workflow under any other name gets signature checks only
-    if path.name == "integrate.yml":
-        problems.extend(validate_integrate_contract(workflow, verbs_by_job, context, path))
-    if path.name == "release.yml":
+    saver_steps = [
+        (job_name, step.index)
+        for job_name, job in workflow.jobs.items()
+        for step in job.steps
+        if is_cache_writing_setup_uv(step)
+    ]
+    if len(saver_steps) > 1:
+        problems.append(
+            file_problem(
+                path,
+                f"at most one cache-writing {SETUP_UV_USES} step per file, found {len(saver_steps)} at {saver_steps}",
+            )
+        )
+    # contract checks dispatch on the canonical filenames; a found file under any other name gets signature checks only
+    if path.name == INTEGRATE_WORKFLOW.name:
+        problems.extend(validate_integrate_contract(workflow, verbs_by_job, path))
+    if path.name == RELEASE_WORKFLOW.name:
         problems.extend(validate_release_contract(workflow, verbs_by_job, path))
-    if path.name == "merge-gate.yml":
+    if path.name == MERGE_GATE_WORKFLOW.name:
         problems.extend(validate_merge_gate_triggers(workflow, path))
         problems.extend(validate_merge_gate_concurrency(workflow, path))
         for job_name, job in workflow.jobs.items():
@@ -412,54 +537,26 @@ def parse_needs(needs_value: object) -> list[str]:
 
 
 def validate_integrate_contract(
-    workflow: WorkflowView, verbs_by_job: dict[str, list[VerbStep]], context: RepoContext, path: Path
+    workflow: WorkflowView, verbs_by_job: dict[str, list[VerbStep]], path: Path
 ) -> list[Problem]:
     problems: list[Problem] = []
     jobs = workflow.jobs
-    if context.publishing and VALIDATE_RELEASE_PLAN_JOB not in jobs:
-        problems.append(
-            file_problem(
-                path,
-                f"publishing repos must run the {VALIDATE_RELEASE_PLAN_JOB} job (release-devkit.yaml is present)",
-            )
-        )
-
-    if context.publishing:
-        pr_draft_job = jobs.get(UPDATE_PR_DRAFT_JOB)
-        if pr_draft_job is None:
+    for root in (LINT_WORKFLOWS_JOB, VALIDATE_RELEASE_PLAN_JOB, MIRROR_IMAGES_JOB):
+        if root in jobs and jobs[root].needs:
             problems.append(
-                file_problem(
+                job_problem(path, root, f"is a parallel root and must carry no needs, got {jobs[root].needs}")
+            )
+    if PREFLIGHT_JOB in jobs:
+        expected: set[str] = {root for root in (LINT_WORKFLOWS_JOB, MIRROR_IMAGES_JOB) if root in jobs}
+        actual = set(jobs[PREFLIGHT_JOB].needs)
+        if actual != expected:
+            problems.append(
+                job_problem(
                     path,
-                    f"publishing repos must run the {UPDATE_PR_DRAFT_JOB} job in integrate.yml (the per-PR draft surface)",
+                    PREFLIGHT_JOB,
+                    f"must need {sorted(expected)} (contract breaks kill the battery early), got {sorted(actual)}",
                 )
             )
-        else:
-            if pr_draft_job.if_condition != PR_DRAFT_JOB_IF:
-                problems.append(
-                    job_problem(
-                        path,
-                        UPDATE_PR_DRAFT_JOB,
-                        f"must gate on if: {PR_DRAFT_JOB_IF} (the verb parses the PR number from GITHUB_REF,"
-                        " which carries no refs/pull spelling on a dispatch run)",
-                    )
-                )
-            if VALIDATE_RELEASE_PLAN_JOB not in pr_draft_job.needs:
-                problems.append(
-                    job_problem(
-                        path,
-                        UPDATE_PR_DRAFT_JOB,
-                        f"must need {VALIDATE_RELEASE_PLAN_JOB} (contract breaks kill the battery early),"
-                        f" got {pr_draft_job.needs}",
-                    )
-                )
-    if LINT_WORKFLOWS_JOB not in jobs:
-        problems.append(file_problem(path, f"integrate.yml must run the {LINT_WORKFLOWS_JOB} job (the lint root)"))
-    for verb_job in (LINT_WORKFLOWS_JOB, VALIDATE_RELEASE_PLAN_JOB):
-        carrying = [
-            job_name for job_name, steps in verbs_by_job.items() if any(step.name == verb_job for step in steps)
-        ]
-        if carrying and carrying != [verb_job]:
-            problems.append(file_problem(path, f"the {verb_job} verb must run in the '{verb_job}' job, got {carrying}"))
     pr_carriers = [
         job_name for job_name, steps in verbs_by_job.items() if any(step.channel == PR_CHANNEL for step in steps)
     ]
@@ -471,37 +568,26 @@ def validate_integrate_contract(
                 f" got {pr_carriers}",
             )
         )
-    for root in (LINT_WORKFLOWS_JOB, VALIDATE_RELEASE_PLAN_JOB, MIRROR_IMAGES_JOB):
-        needs = jobs[root].needs if root in jobs else []
-        if needs:
-            problems.append(job_problem(path, root, f"is a parallel root and must carry no needs, got {needs}"))
-    if PREFLIGHT_JOB in jobs:
-        expected: set[str] = {LINT_WORKFLOWS_JOB}
-        if MIRROR_IMAGES_JOB in jobs:
-            expected.add(MIRROR_IMAGES_JOB)
-        actual = set(jobs[PREFLIGHT_JOB].needs)
-        if actual != expected:
+    pr_draft_job = jobs.get(UPDATE_PR_DRAFT_JOB)
+    if pr_draft_job is not None:
+        if pr_draft_job.if_condition != PR_DRAFT_JOB_IF:
             problems.append(
                 job_problem(
                     path,
-                    PREFLIGHT_JOB,
-                    f"must need {sorted(expected)} (contract breaks kill the battery early), got {sorted(actual)}",
+                    UPDATE_PR_DRAFT_JOB,
+                    f"must gate on if: {PR_DRAFT_JOB_IF} (the verb parses the PR number from GITHUB_REF,"
+                    " which carries no refs/pull spelling on a dispatch run)",
                 )
             )
-    writer_jobs = [job_name for job_name, job in jobs.items() if job_has_cache_writing_setup_uv(job)]
-    expected_writer = PREFLIGHT_JOB if PREFLIGHT_JOB in jobs else LINT_WORKFLOWS_JOB
-    if len(writer_jobs) != 1:
-        problems.append(
-            file_problem(
-                path,
-                f"integrate.yml must carry exactly one cache-writing setup-uv step ({expected_writer}'s saver),"
-                f" found {len(writer_jobs)}",
+        if VALIDATE_RELEASE_PLAN_JOB not in pr_draft_job.needs:
+            problems.append(
+                job_problem(
+                    path,
+                    UPDATE_PR_DRAFT_JOB,
+                    f"must need {VALIDATE_RELEASE_PLAN_JOB} (contract breaks kill the battery early),"
+                    f" got {pr_draft_job.needs}",
+                )
             )
-        )
-    elif writer_jobs != [expected_writer]:
-        problems.append(
-            file_problem(path, f"the cache-writing setup-uv must live in '{expected_writer}', found {writer_jobs}")
-        )
     return problems
 
 
@@ -509,8 +595,12 @@ def validate_release_contract(
     workflow: WorkflowView, verbs_by_job: dict[str, list[VerbStep]], path: Path
 ) -> list[Problem]:
     problems: list[Problem] = []
-    if workflow.name != RELEASE_WORKFLOW_NAME:
-        problems.append(file_problem(path, f"workflow name must be {RELEASE_WORKFLOW_NAME}"))
+    triggers = workflow.triggers
+    push = parse_str_mapping(triggers.get("push")) if triggers is not None else None
+    if push is None or push.get("branches") != RELEASE_PUSH_BRANCHES:
+        problems.append(
+            file_problem(path, f"must trigger on push to branches {RELEASE_PUSH_BRANCHES} (the delivery events)")
+        )
     concurrency = workflow.concurrency
     if concurrency is None or concurrency.get("group") != RELEASE_CONCURRENCY:
         problems.append(
@@ -547,345 +637,124 @@ def validate_release_contract(
 def validate_merge_gate_triggers(workflow: WorkflowView, path: Path) -> list[Problem]:
     triggers = workflow.triggers
     pull_request = parse_str_mapping(triggers.get("pull_request")) if triggers is not None else None
-    workflow_run = parse_str_mapping(triggers.get("workflow_run")) if triggers is not None else None
     problems: list[Problem] = []
     if pull_request is None or pull_request.get("types") != ["labeled"] or pull_request.get("branches") != ["dev"]:
         problems.append(file_problem(path, "must trigger on pull_request to dev, types [labeled] only"))
-    if (
-        workflow_run is None
-        or workflow_run.get("workflows") != ["Integrate"]
-        or workflow_run.get("types") != ["completed"]
-    ):
-        problems.append(file_problem(path, "must trigger on workflow_run from Integrate, types [completed] only"))
+    if triggers is not None and "workflow_run" in triggers:
+        problems.append(file_problem(path, "workflow_run is forbidden — the labeled wake is the sole trigger"))
     return problems
 
 
 def validate_merge_gate_concurrency(workflow: WorkflowView, path: Path) -> list[Problem]:
     concurrency = workflow.concurrency
     if concurrency is None or concurrency.get("group") != MERGE_GATE_CONCURRENCY:
-        return [
-            file_problem(path, f"concurrency group must be {MERGE_GATE_CONCURRENCY} (the || fallback is load-bearing)")
-        ]
+        return [file_problem(path, f"concurrency group must be {MERGE_GATE_CONCURRENCY} (the per-PR lander queue)")]
     if "cancel-in-progress" in concurrency:
         return [file_problem(path, "concurrency must omit cancel-in-progress — serialization is the policy")]
     return []
 
 
-def validate_job(job_name: str, job: JobView, path: Path, context: RepoContext) -> tuple[list[Problem], list[VerbStep]]:
+def validate_job(job_name: str, job: JobView, path: Path, nuget: bool) -> tuple[list[Problem], list[VerbStep]]:
     problems: list[Problem] = []
     if job.has_environment:
         problems.append(job_problem(path, job_name, "environment: key is forbidden (the fleet runs environment-less)"))
     steps = job.steps
-    signatures = signatures_for(path)
-    checkout_steps, checkout_problems = collect_checkout_steps(job_name, steps, signatures, path)
-    problems.extend(checkout_problems)
-    verb_steps, verb_problems = collect_verb_steps(job_name, steps, path, context)
+    verb_steps, verb_problems = collect_verb_steps(job_name, steps, path, nuget)
     problems.extend(verb_problems)
-    problems.extend(collect_dead_uses(job_name, steps, path))
-    if not verb_steps:
-        return problems, verb_steps
-    problems.extend(validate_reserved_checkouts(job_name, checkout_steps, verb_steps, path))
-    first_verb_index = min(verb.step_index for verb in verb_steps)
-    earliest_wrapper_index, wrapper_problems = validate_wrapper_precedes_verb(job_name, steps, first_verb_index, path)
-    problems.extend(wrapper_problems)
-    if earliest_wrapper_index is None:
-        return problems, verb_steps
-    problems.extend(
-        validate_checkouts_precede_wrapper(job_name, checkout_steps, verb_steps, earliest_wrapper_index, path)
-    )
-    problems.extend(validate_setup_uv_precedes_wrapper(job_name, steps, earliest_wrapper_index, path))
-    problems.extend(
-        validate_mint_window(job_name, steps, verb_steps, first_verb_index, earliest_wrapper_index, path, context)
-    )
+    stable_push_allowed = any(step.channel == STABLE_CHANNEL for step in verb_steps)
+    checkout_steps, checkout_problems = collect_checkout_steps(job_name, steps, path, stable_push_allowed)
+    problems.extend(checkout_problems)
+    if verb_steps:
+        problems.extend(validate_verb_installation(job_name, steps, path))
+        problems.extend(validate_verb_checkout_needs(job_name, checkout_steps, verb_steps, path))
+        problems.extend(validate_env_references(job_name, steps, verb_steps, path))
     return problems, verb_steps
 
 
-def validate_reserved_checkouts(
-    job_name: str, checkout_steps: list[CheckoutStep], verb_steps: list[VerbStep], path: Path
-) -> list[Problem]:
-    problems: list[Problem] = []
-    is_stable_release_job = any(verb_step.channel == STABLE_CHANNEL for verb_step in verb_steps)
-    is_merge_gate_job = any(verb_step.name == "merge-gate" for verb_step in verb_steps)
-    if not is_stable_release_job and any(step.signature == CHECKOUT_WITH_TAGS_PUSH for step in checkout_steps):
-        problems.append(
-            job_problem(path, job_name, "checkout-with-tags-push is reserved for stable-channel release jobs")
-        )
-    if not is_merge_gate_job and any(step.signature == MERGE_BOT for step in checkout_steps):
-        problems.append(job_problem(path, job_name, "merge-bot checkout is reserved for merge-gate jobs"))
-    return problems
-
-
-def validate_wrapper_precedes_verb(
-    job_name: str, steps: list[StepView], first_verb_index: int, path: Path
-) -> tuple[int | None, list[Problem]]:
-    wrapper_indexes = [step.index for step in steps if step.uses == DEVKIT_WRAPPER_USES]
-    problems: list[Problem] = []
-    if len(wrapper_indexes) != 1:
-        problems.append(
-            job_problem(
-                path,
-                job_name,
-                f"a verb-carrying job takes exactly one {DEVKIT_WRAPPER_USES} step, got {len(wrapper_indexes)}",
-            )
-        )
-    wrappers_before = [index for index in wrapper_indexes if index < first_verb_index]
-    if not wrappers_before:
-        problems.append(job_problem(path, job_name, f"no {DEVKIT_WRAPPER_USES} step precedes the release-devkit verb"))
-        return None, problems
-    return min(wrappers_before), problems
-
-
-def validate_checkouts_precede_wrapper(
-    job_name: str,
-    checkout_steps: list[CheckoutStep],
-    verb_steps: list[VerbStep],
-    earliest_wrapper_index: int,
-    path: Path,
-) -> list[Problem]:
-    problems: list[Problem] = []
-    required_checkouts = {verb_step.spec.checkout for verb_step in verb_steps}
-    for required in sorted(required_checkouts):
-        if not any(step.signature == required and step.step_index < earliest_wrapper_index for step in checkout_steps):
-            problems.append(
-                job_problem(path, job_name, f"no {required} checkout precedes the setup-release-devkit step")
-            )
-    return problems
-
-
-def validate_setup_uv_precedes_wrapper(
-    job_name: str, steps: list[StepView], earliest_wrapper_index: int, path: Path
-) -> list[Problem]:
-    if any(is_canonical_setup_uv(step) and step.index < earliest_wrapper_index for step in steps):
+def validate_verb_installation(job_name: str, steps: list[StepView], path: Path) -> list[Problem]:
+    if any(step.uses == DEVKIT_WRAPPER_USES for step in steps):
+        return []
+    if any(step.run is not None and step.run.startswith(DEVKIT_CLONE_PREFIX) for step in steps):
         return []
     return [
         job_problem(
             path,
             job_name,
-            f"no canonical {SETUP_UV_USES} step"
-            " (enable-cache: true with an explicit save-cache) precedes the setup-release-devkit step",
+            f"a verb-carrying job must install release-devkit: one {DEVKIT_WRAPPER_USES} step"
+            f" or a '{DEVKIT_CLONE_PREFIX}' clone step (the dynamic-SHA self-test shape)",
         )
     ]
 
 
-def validate_mint_window(
-    job_name: str,
-    steps: list[StepView],
-    verb_steps: list[VerbStep],
-    first_verb_index: int,
-    earliest_wrapper_index: int,
-    path: Path,
-    context: RepoContext,
+def validate_verb_checkout_needs(
+    job_name: str, checkout_steps: list[CheckoutStep], verb_steps: list[VerbStep], path: Path
 ) -> list[Problem]:
     problems: list[Problem] = []
-    is_merge_gate_job = any(verb_step.name == "merge-gate" for verb_step in verb_steps)
-    is_delivery_job = any(verb_step.spec.delivery for verb_step in verb_steps)
-    mint_indexes, mint_problems = canonical_mint_steps(
-        job_name,
-        steps,
-        MINT_STEP_USES,
-        "mint",
-        MINT_STEP_INPUTS,
-        path,
-        "create-github-app-token must be the canonical mint step"
-        " (id: mint, app-id from the MERGE_BOT_APP_ID var, private-key from the MERGE_BOT_APP_PRIVATE_KEY secret)",
-    )
-    problems.extend(mint_problems)
-    if is_merge_gate_job and not steps_in_window(mint_indexes, earliest_wrapper_index, first_verb_index):
-        problems.append(
-            job_problem(
-                path,
-                job_name,
-                f"merge-gate requires a canonical {MINT_STEP_USES} mint step between the wrapper and the verb",
-            )
-        )
-    nuget_login_indexes, nuget_login_problems = canonical_mint_steps(
-        job_name,
-        steps,
-        NUGET_LOGIN_USES,
-        "nuget-login",
-        NUGET_LOGIN_INPUTS,
-        path,
-        "NuGet/login must be the canonical mint step (id: nuget-login, user from the NUGET_USER org secret)",
-    )
-    problems.extend(nuget_login_problems)
-    if (
-        is_delivery_job
-        and context.nuget
-        and not steps_in_window(nuget_login_indexes, earliest_wrapper_index, first_verb_index)
-    ):
-        problems.append(
-            job_problem(
-                path,
-                job_name,
-                f"nuget delivery jobs require a canonical {NUGET_LOGIN_USES} mint step"
-                " between the wrapper and the verb",
-            )
-        )
-    if not is_delivery_job or not context.nuget:
-        if any(step.uses == NUGET_LOGIN_USES for step in steps):
+    needs_tag_fetch = any(spec_needs_tag_fetch(step.spec) for step in verb_steps)
+    needs_history = any(spec_needs_history(step.spec) for step in verb_steps)
+    if needs_tag_fetch:
+        if not any(
+            step.with_block.get("fetch-depth") == 0 and step.with_block.get("fetch-tags") is True
+            for step in checkout_steps
+        ):
             problems.append(
                 job_problem(
                     path,
                     job_name,
-                    f"{NUGET_LOGIN_USES} is reserved for the delivery jobs"
-                    " of repos whose release-devkit.yaml declares a nuget registry",
+                    "tag-consuming verbs need a checkout with fetch-depth: 0 and fetch-tags: true in the job",
                 )
             )
+    elif needs_history and not any(step.with_block.get("fetch-depth") == 0 for step in checkout_steps):
+        problems.append(job_problem(path, job_name, "merge-gate needs a checkout with fetch-depth: 0 in the job"))
     return problems
 
 
-def canonical_mint_steps(
-    job_name: str, steps: list[StepView], uses: str, step_id: str, inputs: dict[str, str], path: Path, message: str
-) -> tuple[list[int], list[Problem]]:
-    indexes: list[int] = []
+def validate_env_references(
+    job_name: str, steps: list[StepView], verb_steps: list[VerbStep], path: Path
+) -> list[Problem]:
+    step_ids = {step.step_id for step in steps if step.step_id is not None}
     problems: list[Problem] = []
-    for step in steps:
-        if step.uses != uses:
-            continue
-        if step.step_id != step_id or step.with_block != inputs:
-            problems.append(step_problem(path, job_name, step.index, message))
-            continue
-        indexes.append(step.index)
-    return indexes, problems
-
-
-def steps_in_window(indexes: list[int], earliest_wrapper_index: int, first_verb_index: int) -> bool:
-    return any(earliest_wrapper_index < index < first_verb_index for index in indexes)
-
-
-def job_has_cache_writing_setup_uv(job: JobView) -> bool:
-    return any(is_cache_writing_setup_uv(step) for step in job.steps)
-
-
-def validate_run_steps_single_line(raw_lines: list[str], path: Path) -> list[Problem]:
-    # the single-line rule is about physical lines, which the parsed YAML value cannot see — hence this raw-text pass
-    problems: list[Problem] = []
-    for index, line in enumerate(raw_lines):
-        match = RUN_STEP_LINE.match(line)
-        if not match:
-            continue
-        value = (match.group("value") or "").strip()
-        run_column = len(line) - len(line.lstrip()) + len(match.group("prefix").lstrip())
-        if not value or BLOCK_SCALAR_HEAD.fullmatch(value):
-            if value == ">-":
-                block: list[str] = []
-                for entry in raw_lines[index + 1 :]:
-                    if entry.strip() and len(entry) - len(entry.lstrip()) <= run_column:
-                        break
-                    block.append(entry)
-                stripped = [entry.strip() for entry in block if entry.strip()]
-                if len(stripped) != len(block):
-                    problems.append(
-                        line_problem(
-                            path,
-                            index + 1,
-                            "run: steps must be a single physical line (folded blocks may not contain blank lines)",
-                        )
-                    )
-                elif not stripped:
-                    problems.append(
-                        line_problem(path, index + 1, "run: steps must be a single physical line (empty folded block)")
-                    )
-                elif len({len(entry) - len(entry.lstrip()) for entry in block}) != 1:
-                    problems.append(
-                        line_problem(
-                            path,
-                            index + 1,
-                            "run: steps must be a single physical line (folded continuations must share one indent)",
-                        )
-                    )
-                else:
-                    joined = " ".join(stripped)
-                    if len(joined) <= RUN_STEP_FOLD_THRESHOLD:
-                        problems.append(
-                            line_problem(
-                                path,
-                                index + 1,
-                                "run: steps must be a single physical line (folds are allowed only for commands"
-                                f" longer than {RUN_STEP_FOLD_THRESHOLD} characters)",
-                            )
-                        )
-                    elif "release-devkit" in joined:
-                        problems.append(
-                            line_problem(
-                                path,
-                                index + 1,
-                                "run: steps must be a single physical line (devkit verb invocations never fold)",
-                            )
-                        )
-            else:
+    for verb_step in verb_steps:
+        step = next(step for step in steps if step.index == verb_step.step_index)
+        env = step.env if step.env is not None else {}
+        for key, value in env.items():
+            match = ENV_STEP_REFERENCE.search(str(value))
+            if match is not None and match.group(1) not in step_ids:
                 problems.append(
-                    line_problem(
-                        path, index + 1, "run: steps must be a single physical line (no folded or literal blocks)"
+                    step_problem(
+                        path,
+                        job_name,
+                        verb_step.step_index,
+                        f"env {key} references step '{match.group(1)}' but the job has no step with that id",
                     )
                 )
-            continue
-        follow_up = next((entry for entry in raw_lines[index + 1 :] if entry.strip()), "")
-        if follow_up and len(follow_up) - len(follow_up.lstrip()) > run_column:
-            problems.append(
-                line_problem(path, index + 1, "run: steps must be a single physical line (folded continuation follows)")
-            )
-    return problems
-
-
-def is_canonical_setup_uv(step: StepView) -> bool:
-    if step.uses != SETUP_UV_USES:
-        return False
-    with_block = step.with_block
-    if with_block is None:
-        return False
-    return any(with_block == inputs for inputs in (SETUP_UV_RESTORE_INPUTS, SETUP_UV_SAVE_INPUTS))
-
-
-def is_cache_writing_setup_uv(step: StepView) -> bool:
-    if step.uses != SETUP_UV_USES:
-        return False
-    with_block = step.with_block
-    if with_block is None:
-        return False
-    return with_block.get("enable-cache") is True and with_block.get("save-cache") != "false"
-
-
-def collect_dead_uses(job_name: str, steps: list[StepView], path: Path) -> list[Problem]:
-    problems: list[Problem] = []
-    for step in steps:
-        uses_value = step.uses
-        if uses_value is not None and uses_value.startswith(DEAD_USES_PREFIXES):
-            problems.append(
-                step_problem(
-                    path,
-                    job_name,
-                    step.index,
-                    f"{uses_value} is the dead composite-action model;"
-                    " verbs are plain run steps against $RUNNER_TEMP/release-devkit",
-                )
-            )
     return problems
 
 
 def collect_verb_steps(
-    job_name: str, steps: list[StepView], path: Path, context: RepoContext
+    job_name: str, steps: list[StepView], path: Path, nuget: bool
 ) -> tuple[list[VerbStep], list[Problem]]:
     verb_steps: list[VerbStep] = []
     problems: list[Problem] = []
     for step in steps:
         run_value = step.run
-        if run_value is None or DEVKIT_INSTALL_PATH not in run_value:
+        if run_value is None or DEVKIT_INVOCATION_PREFIX not in run_value:
             continue
-        prefix_count = run_value.count(DEVKIT_INVOCATION_PREFIX)
-        matches = list(DEVKIT_INVOCATION.finditer(run_value))
-        if not prefix_count or len(matches) != prefix_count:
-            problems.append(
-                step_problem(
-                    path,
-                    job_name,
-                    step.index,
-                    f"mentions {DEVKIT_INSTALL_PATH} without a canonical"
-                    f" {DEVKIT_INVOCATION_PREFIX.strip()}<verb> invocation",
+        segments = [segment.strip() for segment in SHELL_STATEMENT_SPLIT.split(run_value) if segment.strip()]
+        for segment in segments:
+            match = DEVKIT_INVOCATION.fullmatch(segment)
+            if match is None:
+                problems.append(
+                    step_problem(
+                        path,
+                        job_name,
+                        step.index,
+                        "executes a release-devkit verb;"
+                        f" the step must consist solely of canonical {DEVKIT_INVOCATION_PREFIX.strip()}<verb>"
+                        " invocations",
+                    )
                 )
-            )
-            continue
-        for match in matches:
+                break
             verb = match.group("verb")
             args = match.group("args")
             if verb == RELEASE_VERB:
@@ -903,8 +772,8 @@ def collect_verb_steps(
                         step_problem(path, job_name, step.index, f"{verb} carries rejected arguments ({args.strip()})")
                     )
                     continue
-            verb_step = VerbStep(step_index=step.index, name=verb, channel=channel, spec=spec)
-            problems.extend(validate_verb_env(job_name, verb_step, step, path, context))
+            verb_step = VerbStep(step_index=step.index, name=verb, args=args, channel=channel, spec=spec)
+            problems.extend(validate_verb_env(job_name, verb_step, step, path, nuget))
             verb_steps.append(verb_step)
     return verb_steps, problems
 
@@ -916,24 +785,31 @@ def resolve_channel(args: str) -> tuple[str | None, ChannelSpec | None]:
     return None, None
 
 
+def spec_needs_tag_fetch(spec: VerbSpec | ChannelSpec) -> bool:
+    return isinstance(spec, ChannelSpec) or spec.needs_tag_fetch
+
+
+def spec_needs_history(spec: VerbSpec | ChannelSpec) -> bool:
+    return isinstance(spec, VerbSpec) and spec.needs_history
+
+
 def verb_label(verb_step: VerbStep) -> str:
     if verb_step.channel is None:
         return verb_step.name
     return f"{verb_step.name} --channel {verb_step.channel}"
 
 
-def validate_verb_env(
-    job_name: str, verb_step: VerbStep, step: StepView, path: Path, context: RepoContext
-) -> list[Problem]:
+def validate_verb_env(job_name: str, verb_step: VerbStep, step: StepView, path: Path, nuget: bool) -> list[Problem]:
     problems: list[Problem] = []
     label = verb_label(verb_step)
     env = step.env if step.env is not None else {}
-    for key, value in verb_step.spec.env.items():
+    expected = spec_env(verb_step)
+    for key, value in expected.items():
         if env.get(key) != value:
             problems.append(step_problem(path, job_name, verb_step.step_index, f"{label} requires env {key}: {value}"))
     if verb_step.spec.delivery:
         api_key_value = env.get(NUGET_API_KEY_ENV)
-        if context.nuget and api_key_value != NUGET_API_KEY_SOURCE:
+        if nuget and api_key_value != NUGET_API_KEY_SOURCE:
             problems.append(
                 step_problem(
                     path,
@@ -942,7 +818,7 @@ def validate_verb_env(
                     f"{label} requires env {NUGET_API_KEY_ENV}: {NUGET_API_KEY_SOURCE}",
                 )
             )
-        if not context.nuget and api_key_value is not None:
+        if not nuget and api_key_value is not None:
             problems.append(
                 step_problem(
                     path,
@@ -955,45 +831,83 @@ def validate_verb_env(
     return problems
 
 
+def spec_env(verb_step: VerbStep) -> dict[str, str]:
+    spec = verb_step.spec
+    if isinstance(spec, VerbSpec) and spec.dry_run_env is not None:
+        return spec.dry_run_env if verb_step.args.endswith(DRY_RUN_SUFFIX) else spec.env
+    return spec.env
+
+
 def collect_checkout_steps(
-    job_name: str, steps: list[StepView], signatures: dict[str, dict[str, object]], path: Path
+    job_name: str, steps: list[StepView], path: Path, stable_push_allowed: bool
 ) -> tuple[list[CheckoutStep], list[Problem]]:
     checkout_steps: list[CheckoutStep] = []
     problems: list[Problem] = []
     for step in steps:
         uses_value = step.uses
-        if uses_value is None or not uses_value.startswith("actions/checkout"):
+        if uses_value is None:
+            continue
+        if uses_value != CHECKOUT_USES and not uses_value.startswith("actions/checkout"):
             continue
         if uses_value != CHECKOUT_USES:
             problems.append(
-                step_problem(path, job_name, step.index, f"checkout must be {CHECKOUT_USES}, got {uses_value}")
+                step_problem(
+                    path,
+                    job_name,
+                    step.index,
+                    f"checkout must be {CHECKOUT_USES} (the SHA-pinned wrapper), got {uses_value}",
+                )
             )
             continue
         with_block = step.with_block if step.with_block is not None else {}
-        signature = next((name for name, expected in signatures.items() if with_block == expected), None)
-        if signature is None:
-            with_json = json.dumps(with_block, sort_keys=True)
+        checkout_steps.append(CheckoutStep(step_index=step.index, with_block=with_block))
+        if path.name not in REF_LAWS:
+            continue
+        ref_law = REF_LAWS[path.name]
+        if ref_law is None:
+            if "ref" in with_block:
+                problems.append(
+                    step_problem(
+                        path,
+                        job_name,
+                        step.index,
+                        "release.yml checkouts must carry no ref (they check out what was pushed;"
+                        f" a spelled branch races the delivery queue), got {with_block['ref']}",
+                    )
+                )
+        elif with_block.get("ref") != ref_law:
             problems.append(
-                step_problem(path, job_name, step.index, f"checkout matches no signature; with={with_json}")
+                step_problem(
+                    path,
+                    job_name,
+                    step.index,
+                    f"checkout ref must be {ref_law}, got {with_block.get('ref')}",
+                )
             )
-        else:
-            checkout_steps.append(CheckoutStep(step_index=step.index, signature=signature))
+        persist = with_block.get("persist-credentials")
+        is_stable_push_form = (
+            persist is True and with_block.get("fetch-depth") == 0 and with_block.get("fetch-tags") is True
+        )
+        if persist is not False and not (stable_push_allowed and is_stable_push_form):
+            problems.append(
+                step_problem(
+                    path,
+                    job_name,
+                    step.index,
+                    "checkout must set persist-credentials: false"
+                    " (only the stable release job's tag-fetching push checkout may persist)",
+                )
+            )
     return checkout_steps, problems
 
 
-def signatures_for(path: Path) -> dict[str, dict[str, object]]:
-    checkout_ref: dict[str, object] = {} if path.name == RELEASE_WORKFLOW.name else {"ref": INTEGRATE_HEAD_SHA}
-    return {
-        CHECKOUT: {**checkout_ref, "persist-credentials": False},
-        CHECKOUT_WITH_TAGS: {**checkout_ref, "fetch-depth": 0, "fetch-tags": True, "persist-credentials": False},
-        CHECKOUT_WITH_TAGS_PUSH: {
-            **checkout_ref,
-            "fetch-depth": 0,
-            "fetch-tags": True,
-            "persist-credentials": True,
-        },
-        MERGE_BOT: {"ref": MERGE_BOT_REF, "fetch-depth": 0, "persist-credentials": False},
-    }
+def is_cache_writing_setup_uv(step: StepView) -> bool:
+    if step.uses != SETUP_UV_USES:
+        return False
+    with_block = step.with_block
+    if with_block is None:
+        return False
+    return with_block.get("enable-cache") is True and with_block.get("save-cache") != "false"
 
 
 def parse_root_mapping(value: object) -> dict[object, object] | None:
@@ -1029,13 +943,7 @@ def step_problem(path: Path, job: str, step_index: int, message: str) -> Problem
     return Problem(path=path, message=message, job=job, step_index=step_index)
 
 
-def line_problem(path: Path, line_number: int, message: str) -> Problem:
-    return Problem(path=path, message=message, line_number=line_number)
-
-
 def render_problem(problem: Problem) -> str:
-    if problem.line_number is not None:
-        return f"{problem.path}: line {problem.line_number}: {problem.message}"
     location = str(problem.path)
     if problem.job is not None:
         location += f": job '{problem.job}'"

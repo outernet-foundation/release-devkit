@@ -41,6 +41,7 @@ validate-release-plan = "release_devkit.verbs.validate_release_plan:app"
 packages = ["src/release_devkit"]
 include = [
     "src/release_devkit/py.typed",
+    "src/release_devkit/verbs/zizmor.yaml",
 ]
 
 [tool.basedpyright]
