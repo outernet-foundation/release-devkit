@@ -7,16 +7,28 @@ import typer
 
 from release_devkit.verbs import get_app_version, lint_workflows, merge_gate, release, validate_release_plan
 from release_devkit.verbs.lint_workflows import (
+    ACTIONLINT_BUILDS,
     DRY_RUN_SUFFIX,
     RELEASE_CHANNELS,
     UNENFORCED_FLAGS,
     VERB_SPECS,
     VerbStep,
+    ZIZMOR_BUILDS,
     found_workflows,
     spec_env,
     validate_devkit_wrapper,
     validate_workflow_file,
 )
+
+
+def test_audit_binaries_cover_the_same_platforms() -> None:
+    assert set(ZIZMOR_BUILDS) == set(ACTIONLINT_BUILDS)
+
+
+def test_zizmor_builds_carry_sha256_checksums() -> None:
+    for tarball_name, checksum in ZIZMOR_BUILDS.values():
+        assert tarball_name.startswith("zizmor-") and tarball_name.endswith(".tar.gz")
+        assert re.fullmatch(r"[0-9a-f]{64}", checksum)
 
 
 def write_workflow(tmp_path: Path, text: str, name: str = "workflow.yml") -> Path:

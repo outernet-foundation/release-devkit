@@ -26,7 +26,7 @@ ACTIONLINT_BUILDS = {
     ("Linux", "x86_64"): "linux_amd64",
     ("Linux", "aarch64"): "linux_arm64",
     ("Darwin", "x86_64"): "darwin_amd64",
-    ("Darwin", "aarch64"): "darwin_arm64",
+    ("Darwin", "arm64"): "darwin_arm64",
 }
 ZIZMOR_VERSION = "1.30.1"
 # no upstream checksums file exists, so each build carries its own sha256 — changing the expected hash takes a repo commit
