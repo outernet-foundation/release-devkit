@@ -1,0 +1,20 @@
+name: Update PR draft release
+
+on:
+  workflow_call:
+
+jobs:
+  update-pr-draft-release:
+    if: github.event.pull_request
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/toolkit-checkout
+      - uses: $/.github/actions/consumer-checkout
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: $/.github/actions/setup-uv
+      - run: uv run --project "${{ runner.temp }}/github-actions-toolkit" --locked --no-dev release --channel pr
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

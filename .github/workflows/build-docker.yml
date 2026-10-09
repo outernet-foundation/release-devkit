@@ -1,0 +1,55 @@
+name: Build docker
+
+on:
+  workflow_call:
+    inputs:
+      free_disk_space:
+        description: Free runner disk space before building
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  plan-docker-builds:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: $/.github/actions/toolkit-checkout
+      - uses: $/.github/actions/consumer-checkout
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: $/.github/actions/setup-uv
+      - id: matrix
+        run: uv run --locked docker-build-matrix | uv run --project "${{ runner.temp }}/github-actions-toolkit" --locked --no-dev matrix
+
+  build-docker:
+    needs: [plan-docker-builds]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan-docker-builds.outputs.matrix) }}
+    steps:
+      - uses: $/.github/actions/toolkit-checkout
+      - uses: $/.github/actions/consumer-checkout
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: $/.github/actions/setup-uv
+      - run: uv run --project "${{ runner.temp }}/github-actions-toolkit" --locked --no-dev free-disk-space --large-packages --docker-images --swap-storage
+        if: ${{ inputs.free_disk_space }}
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+        with:
+          platforms: arm64
+      - run: docker buildx create --use --driver docker-container
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - run: uv run --locked build --push --targets "$TARGETS" --gpu "$GPU"
+        env:
+          TARGETS: ${{ matrix.targets }}
+          GPU: ${{ matrix.variant == 'common' && 'none' || matrix.variant }}
+          REGISTRY: ghcr.io/${{ github.repository }}
+          REGISTRY_TOKEN: ${{ github.token }}
+          REGISTRY_USERNAME: ${{ github.actor }}

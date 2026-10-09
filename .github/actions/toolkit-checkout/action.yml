@@ -1,0 +1,11 @@
+name: toolkit-checkout
+description: Check the toolkit out at the SHA the caller pinned, into runner temp — never the workspace
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      with:
+        repository: ${{ job.workflow_repository }}
+        ref: ${{ job.workflow_sha }}
+        path: ${{ runner.temp }}/github-actions-toolkit
+        persist-credentials: false

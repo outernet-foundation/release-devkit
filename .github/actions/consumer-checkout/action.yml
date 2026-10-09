@@ -1,0 +1,25 @@
+name: consumer-checkout
+description: Check the consumer's head out — plain clone shape by default, full via the checkout inputs
+inputs:
+  ref:
+    description: Ref to check out
+    required: true
+  fetch-depth:
+    description: Checkout fetch-depth — 1 is the plain default, 0 the full clone
+    required: false
+    default: 1
+    type: number
+  fetch-tags:
+    description: Checkout fetch-tags — true only on the full clone
+    required: false
+    default: false
+    type: boolean
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      with:
+        ref: ${{ inputs.ref }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+        fetch-tags: ${{ inputs.fetch-tags }}
+        persist-credentials: false

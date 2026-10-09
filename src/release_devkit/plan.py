@@ -1,18 +1,19 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from pathlib import Path
+
+from bashrun.bash import bash_check, bash_output
 
 from release_devkit.config import PublishConfig
 from release_devkit.manifests import DependencyEdge, resolve_edges
-from release_devkit.tags import (
-    has_changes_since,
-    get_latest_version,
-    latest_version_in_line,
-    parse_major_minor,
-    parse_version,
-)
 
 UNCHANGED_FALLBACK_VERSION = "0.0.0"
+
+# Prerelease-suffixed tags (e.g. 1.0.6-preview) are not stable versions: the stable flow
+# must never compute a next version from one. Dev-channel versions never enter the tag space.
+STABLE_VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 @dataclass(frozen=True)
@@ -137,3 +138,41 @@ def next_version(major_minor: str, last_in_line: str | None, last_overall: str |
         return f"{line[0]}.{line[1]}.0"
     major, minor, patch = parse_version(last_in_line)
     return f"{major}.{minor}.{patch + 1}"
+
+
+def get_latest_version(prefix: str) -> str | None:
+    for version in list_tag_versions(prefix):
+        if STABLE_VERSION_PATTERN.fullmatch(version):
+            return version
+    return None
+
+
+def latest_version_in_line(prefix: str, major_minor: str) -> str | None:
+    line = parse_major_minor(major_minor)
+    for version in list_tag_versions(prefix):
+        if STABLE_VERSION_PATTERN.fullmatch(version) and parse_version(version)[:2] == line:
+            return version
+    return None
+
+
+def has_changes_since(tag: str | None, path: Path) -> bool:
+    if tag is None:
+        return True
+    return not bash_check(f"git diff --quiet {tag} HEAD -- {path}")
+
+
+def list_tag_versions(prefix: str) -> list[str]:
+    output = bash_output(f'git tag --list "{prefix}*" --sort=-v:refname').strip()
+    if not output:
+        return []
+    return [tag[len(prefix) :] for tag in output.splitlines()]
+
+
+def parse_version(version: str) -> tuple[int, int, int]:
+    major, minor, patch = (int(part) for part in version.split("."))
+    return major, minor, patch
+
+
+def parse_major_minor(major_minor: str) -> tuple[int, int]:
+    major, minor = (int(part) for part in major_minor.split("."))
+    return major, minor

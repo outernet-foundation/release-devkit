@@ -1,6 +1,5 @@
 import json
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import nullcontext
 
 import pytest
 
@@ -58,10 +57,6 @@ def noop_delete_draft(tag: str, repo: str) -> None:
     pass
 
 
-def null_ci_step(label: str) -> object:
-    return nullcontext()
-
-
 def exit_message(exit_request: SystemExit) -> str:
     return str(exit_request.code)
 
@@ -71,6 +66,7 @@ def run_gate(
     responses: dict[str, str],
     bash_check_fn: Callable[[str], bool] | None = None,
     delete_draft_fn: Callable[[str, str], None] | None = None,
+    dry_run: bool = False,
 ) -> tuple[SystemExit | None, BashLog]:
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
     monkeypatch.setenv("GITHUB_ACTOR", "bot")
@@ -79,10 +75,9 @@ def run_gate(
     bash_log = BashLog()
     monkeypatch.setattr(merge_gate, "bash", bash_log)
     monkeypatch.setattr(merge_gate, "bash_check", bash_check_fn or accept_any_bash_check)
-    monkeypatch.setattr(merge_gate, "ci_step", null_ci_step)
     monkeypatch.setattr(merge_gate, "delete_draft_release", delete_draft_fn or noop_delete_draft)
     try:
-        merge_gate.main(head_sha=HEAD_SHA)
+        merge_gate.main(head_sha=HEAD_SHA, dry_run=dry_run)
     except SystemExit as exit_request:
         return exit_request, bash_log
     return None, bash_log
@@ -115,7 +110,7 @@ def test_gate_refuses_terminal_check_failures_loudly(monkeypatch: pytest.MonkeyP
     assert not any("push" in command for command in bash_log.commands)
 
 
-def test_gate_exits_cleanly_while_checks_are_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_gate_refuses_loudly_while_checks_are_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     rollup = [
         {"name": "lint-workflows", "status": "COMPLETED", "conclusion": "SUCCESS"},
         {"name": "preflight", "status": "IN_PROGRESS"},
@@ -123,7 +118,8 @@ def test_gate_exits_cleanly_while_checks_are_pending(monkeypatch: pytest.MonkeyP
     ]
     payload = pr_view_payload(["ready-to-merge"], rollup)
     exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload))
-    assert exit_request is None
+    assert exit_request is not None
+    assert "re-add" in exit_message(exit_request)
     assert not any("push" in command for command in bash_log.commands)
 
 
@@ -267,3 +263,60 @@ def test_gate_deletes_pr_draft_after_merge(monkeypatch: pytest.MonkeyPatch) -> N
 
     assert exit_request is None
     assert deleted == [("pr-7", "owner/repo")]
+
+
+def test_dry_run_reports_a_landed_shape_pr_without_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP)
+    exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload), dry_run=True)
+    assert exit_request is None
+    assert not any("push" in command for command in bash_log.commands)
+    assert not any("merge --no-ff" in command for command in bash_log.commands)
+    assert not any("--delete" in command for command in bash_log.commands)
+    assert any("fetch origin refs/heads/dev" in command for command in bash_log.commands)
+
+
+def test_dry_run_treats_a_missing_label_as_informational(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = gate_responses(pr_view_payload([], GREEN_ROLLUP))
+    exit_request, bash_log = run_gate(monkeypatch, responses, dry_run=True)
+    assert exit_request is None
+    assert not any("push" in command for command in bash_log.commands)
+
+
+def test_dry_run_treats_a_closed_pr_as_informational(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP, state="CLOSED")
+    exit_request, _ = run_gate(monkeypatch, gate_responses(payload), dry_run=True)
+    assert exit_request is None
+
+
+def test_dry_run_treats_red_checks_as_informational(monkeypatch: pytest.MonkeyPatch) -> None:
+    rollup = [{"name": "lint-workflows", "status": "COMPLETED", "conclusion": "FAILURE"}]
+    payload = pr_view_payload(["ready-to-merge"], rollup)
+    exit_request, bash_log = run_gate(monkeypatch, gate_responses(payload), dry_run=True)
+    assert exit_request is None
+    assert not any("push" in command for command in bash_log.commands)
+
+
+def test_dry_run_treats_a_missing_pr_match_as_informational(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = gate_responses(pr_view_payload(["ready-to-merge"], GREEN_ROLLUP))
+    responses["gh pr list --head feature-x --base dev --json number,headRefOid"] = json.dumps([
+        {"number": 7, "headRefOid": "b" * 40}
+    ])
+    exit_request, bash_log = run_gate(monkeypatch, responses, dry_run=True)
+    assert exit_request is None
+    assert not any("fetch origin" in command for command in bash_log.commands)
+
+
+def test_dry_run_treats_a_non_rebased_pr_as_informational(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = pr_view_payload(["ready-to-merge"], GREEN_ROLLUP)
+    exit_request, bash_log = run_gate(
+        monkeypatch, gate_responses(payload), bash_check_fn=reject_merge_base, dry_run=True
+    )
+    assert exit_request is None
+    assert not any("push" in command for command in bash_log.commands)
+
+
+def test_dry_run_treats_a_head_mismatch_as_informational(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = gate_responses(pr_view_payload(["ready-to-merge"], GREEN_ROLLUP))
+    responses["git rev-parse HEAD"] = "b" * 40 + "\n"
+    exit_request, _ = run_gate(monkeypatch, responses, dry_run=True)
+    assert exit_request is None

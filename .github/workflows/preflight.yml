@@ -1,0 +1,23 @@
+name: Preflight
+
+on:
+  workflow_call:
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/toolkit-checkout
+      - uses: $/.github/actions/consumer-checkout
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: $/.github/actions/setup-uv
+        with:
+          save-cache: true
+      - run: uv run --project "${{ runner.temp }}/github-actions-toolkit" --locked --no-dev lint-workflows
+      - run: uv run --project "${{ runner.temp }}/github-actions-toolkit" --locked --no-dev validate-release-plan
+      - run: uv run --locked scripts/preflight.py
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

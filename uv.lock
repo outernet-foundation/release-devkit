@@ -42,6 +42,20 @@ wheels = [
 ]
 
 [[package]]
+name = "build-artifact-registry"
+version = "0.1.0.dev38075330641"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "bashrun" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/73/67/ea03007ce50b3344e1cf03e28027492ab203bdefdc365ad83ee77db2830f/build_artifact_registry-0.1.0.dev38075330641.tar.gz", hash = "sha256:5ce9baf0f23718577e11c16b7cc6dccc95f24d3ab3602da02b5ad81ce589600a", size = 35911, upload-time = "2026-10-10T18:23:50.715Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/35/86/39eeaba3e1aa36a663349c1209eaf7542c0bd5805db45e5d3205571aca2b/build_artifact_registry-0.1.0.dev38075330641-py3-none-any.whl", hash = "sha256:9dbc398318be094c9ed150c158e4e66de7a4d1dabc32e309e1681f4f4e65ffcf", size = 10583, upload-time = "2026-10-10T18:23:49.77Z" },
+]
+
+[[package]]
 name = "ci-devkit"
 version = "0.2.1.dev37711169350"
 source = { registry = "https://pypi.org/simple" }
@@ -252,16 +266,17 @@ wheels = [
 
 [[package]]
 name = "python-devkit"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bashrun" },
+    { name = "ci-devkit" },
     { name = "pydantic" },
-    { name = "pydantic-settings" },
+    { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/60/92/4198d55ba8c023a79e475c32e4fdd815b653458bff2eb19a84a5d701dcd8/python_devkit-0.1.0.tar.gz", hash = "sha256:57f2341e01f810756957aaaa7026c7019079db31630e40151cd2fc21bcc3ba7b", size = 26511, upload-time = "2026-09-21T22:41:54.536Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/13/42316e7d52663d38027728b2e974ead7b57b8b1836c8ddffcb52aa29cd3c/python_devkit-0.2.0.tar.gz", hash = "sha256:49fb9d2dd9d9eddd191330193c722b8462ac901d282f4de4653593c8316ea767", size = 33742, upload-time = "2026-10-05T17:49:48.932Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/52/eb/990ab1df11d383905e94b291e9f2d9fee6d1f3ec367479b8b5438438e8af/python_devkit-0.1.0-py3-none-any.whl", hash = "sha256:d5fbceac116de875e2f6a998177c1fdc1f284bbb40fe6aa893c2874784c56594", size = 24612, upload-time = "2026-09-21T22:41:53.645Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/1d/4f8957f20da89128b7690297c567d6bc0abda0d662376bbe9d9f5ef69579/python_devkit-0.2.0-py3-none-any.whl", hash = "sha256:0ea4dd7a51e572746ff8bce4a48160424318fa68be3feb17cb6820e16020df87", size = 14524, upload-time = "2026-10-05T17:49:48.047Z" },
 ]
 
 [[package]]
@@ -315,7 +330,7 @@ version = "0.0.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "bashrun" },
-    { name = "ci-devkit" },
+    { name = "build-artifact-registry" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
@@ -336,7 +351,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bashrun", specifier = ">=0.1.0" },
-    { name = "ci-devkit", specifier = ">=0.2.1.dev37711169350" },
+    { name = "build-artifact-registry", specifier = ">=0.1.0.dev0" },
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pydantic-settings", specifier = ">=2.9.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },

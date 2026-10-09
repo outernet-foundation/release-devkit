@@ -1,0 +1,36 @@
+name: release
+description: Deliver a release channel via the toolkit release verb — dev prereleases or the stable release
+inputs:
+  stable:
+    description: Run the stable channel (tag push and the CalVer release) rather than dev prereleases
+    required: false
+    default: false
+    type: boolean
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      with:
+        # Perform a full clone, required for tags
+        fetch-depth: 0
+        fetch-tags: true
+        # Persist credentials on stable so the release command can push release tags
+        persist-credentials: ${{ inputs.stable }}
+    - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78
+      with:
+        enable-cache: true
+        save-cache: false
+    - uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841
+      # NUGET_USER crosses via workflow-level env in the consumer's release.yml — the secrets
+      # context is withheld from composite actions
+      if: ${{ env.NUGET_USER != '' }}
+      id: nuget-login
+      with:
+        user: ${{ env.NUGET_USER }}
+    - shell: bash
+      run: uv run --project "$TOOLKIT_PROJECT" --locked --no-dev release --channel "$RELEASE_CHANNEL"
+      env:
+        TOOLKIT_PROJECT: ${{ github.action_path }}/../..
+        GITHUB_TOKEN: ${{ github.token }}
+        NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        RELEASE_CHANNEL: ${{ inputs.stable && 'stable' || 'dev' }}

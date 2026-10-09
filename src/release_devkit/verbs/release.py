@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import platform
 import re
+import shlex
 import shutil
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -11,15 +14,12 @@ from typing import Annotated, NamedTuple, Self
 
 import typer
 from bashrun.bash import bash, bash_check, bash_output
-from ci_devkit.builds import pull_artifact
-from ci_devkit.ci_step import ci_step
-from ci_devkit.setup import configure_git, install_dotnet, install_node
+from build_artifact_registry.builds import pull_artifact
 from pydantic import BaseModel, model_validator
 
 from release_devkit.config import DEFAULT_CONFIG_PATH, PublishConfig, Settings, load_config
-from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, ReleasePlan, compute_release_plan
+from release_devkit.plan import UNCHANGED_FALLBACK_VERSION, ReleasePlan, compute_release_plan, get_latest_version
 from release_devkit.publishing import build_registries
-from release_devkit.tags import create_and_push_tag, get_latest_version
 
 DEV_DRAFT_TAG = "dev-builds"
 DIGEST_PROJECT = "images-digests"
@@ -130,8 +130,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
     # Publish the changed packages and tag the stable versions
     if channel in (ReleaseChannel.DEV, ReleaseChannel.STABLE):
-        with ci_step("Publish packages"):
-            packages = publish_packages(settings, publish_config, release_plan, channel, commit_count)
+        packages = publish_packages(settings, publish_config, release_plan, channel, commit_count)
         if packages:
             packages_rows = [
                 [name, version, f"[{registry}]({url})" if url else registry]
@@ -142,10 +141,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
     # Stage every app's build artifacts as release assets
     shelf = f"ghcr.io/{repository}/builds"
     if publish_config.apps:
-        with ci_step("Stage apps"):
-            assets = stage_apps(
-                settings, publish_config, shelf, release_plan, channel, sha, commit_count, tag, repository
-            )
+        assets = stage_apps(settings, publish_config, shelf, release_plan, channel, sha, commit_count, tag, repository)
         assets_rows = [
             [
                 app_name,
@@ -158,8 +154,7 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
 
     # List the images built at this SHA from the shelf
     if publish_config.built_images:
-        with ci_step("List built images"):
-            images = pull_digest_manifest(settings, shelf, sha)
+        images = pull_digest_manifest(settings, shelf, sha)
         if images:
             images_rows = [
                 [
@@ -201,6 +196,11 @@ def create_or_update_release(config: Path, channel: ReleaseChannel) -> None:
         delete_draft_release(DEV_DRAFT_TAG, repository)
 
 
+def create_and_push_tag(tag: str) -> None:
+    bash(f"git tag {tag}")
+    bash(f"git push origin {tag}")
+
+
 def publish_packages(
     settings: Settings,
     publish_config: PublishConfig,
@@ -211,7 +211,7 @@ def publish_packages(
     # Provision the toolchains for the registries this run publishes to
     publishing_registries = {publish_config.packages[name].registry for name in release_plan.publishing}
     if "nuget" in publishing_registries:
-        install_dotnet("8.0")
+        install_dotnet(settings, "8.0")
     if "npm" in publishing_registries:
         install_node("24", "https://registry.npmjs.org")
     registries = build_registries(settings.nuget_api_key)
@@ -337,3 +337,40 @@ def delete_draft_release(tag: str, repository: str) -> None:
     if not bash_check(f"gh release view {tag} --repo {repository}"):
         return
     bash(f"gh release delete {tag} --cleanup-tag --yes --repo {repository}")
+
+
+# actions/checkout sets safe.directory in a temporary HOME that's cleaned up
+# after the step finishes (actions/checkout#766). Container jobs that run
+# git later need it re-set in the real HOME.
+def configure_git(workspace: str) -> None:
+    bash(f"git config --global --add safe.directory {shlex.quote(workspace)}")
+
+
+def install_dotnet(settings: Settings, channel: str) -> None:
+    print(f"Installing .NET SDK {channel}")
+    script = Path(__file__).parent.parent / "third-party" / "dotnet-install.sh"
+    bash(f"bash {script} --channel {channel}")
+    dotnet_path = str(Path.home() / ".dotnet")
+    os.environ["PATH"] = f"{dotnet_path}{os.pathsep}{os.environ['PATH']}"
+    if settings.github_path:
+        with open(settings.github_path, "a") as file:
+            file.write(f"{dotnet_path}\n")
+
+
+def install_node(version: str, registry_url: str | None = None) -> None:
+    system = platform.system()
+    sudo = system == "Linux" and os.geteuid() != 0
+
+    print(f"Installing Node.js {version}")
+    shasums = bash_output(f"curl -fsSL https://nodejs.org/dist/latest-v{version}.x/SHASUMS256.txt")
+    match = re.search(r"(node-v[\d.]+-linux-x64\.tar\.xz)", shasums)
+    if not match:
+        raise SystemExit(f"Could not find Node.js v{version} linux-x64 binary")
+    filename = match.group(1)
+    prefix = "sudo " if sudo else ""
+    bash(f"curl -fsSLO https://nodejs.org/dist/latest-v{version}.x/{filename}")
+    bash(f"{prefix}rm -rf /usr/local/lib/node_modules/npm")
+    bash(f"{prefix}tar -xJf {filename} -C /usr/local --strip-components=1")
+    Path(filename).unlink()
+    if registry_url:
+        (Path.home() / ".npmrc").write_text(f"registry={registry_url}\n")

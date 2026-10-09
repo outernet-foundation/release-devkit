@@ -1,0 +1,15 @@
+name: setup-uv
+description: Set uv up with cache restore on — saving is opt-in, preflight is the only saver
+inputs:
+  save-cache:
+    description: Save the uv cache this run
+    required: false
+    default: false
+    type: boolean
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78
+      with:
+        enable-cache: true
+        save-cache: ${{ inputs.save-cache }}
