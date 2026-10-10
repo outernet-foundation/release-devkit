@@ -20,9 +20,9 @@ no trailers).
    (arguably droppable: zizmor already bans `workflow_run` and the verb re-derives every
    precondition on any wake; the surviving failure mode is a racing double-merge.
    Recommendation: keep — it is cheap; drop it if taste says).
-   Same item confirms `verify.yml` bundling: `lint-workflows` ∥ `validate-release-plan` as
-   internal parallel jobs with the fail-fast `needs` contract internal (two separate
-   reusables would re-open needs-contract drift).
+   Same item confirms `preflight.yml` bundling: `lint-workflows` ∥ `validate-release-plan` ∥
+   the consumer's preflight script as internal parallel jobs with the fail-fast `needs`
+   contract internal (separate reusables would re-open needs-contract drift).
 2. **Execution scope of the next session.** Recommendation: Phase 1 (build-artifact-registry-
    devkit split + publish) alone — it is small and unblocks everything; Phase 2
    (github-actions-devkit) gets its own session(s). Pilots after Phase 2+3+4 exist on the
@@ -76,8 +76,8 @@ Supporting laws:
 
 ## Binding decisions (operator, 2026-10-09 session)
 
-- All reusable workflows (verify, update-pr-draft-release, merge-gate, unity
-  build/compile-check, docker build/mirror) live in github-actions-devkit. release-devkit is
+- All reusable workflows (preflight, mirror, update-pr-draft-release, merge-gate, unity
+  build/compile-check, docker build) live in github-actions-devkit. release-devkit is
   renamed github-actions-devkit. Pinning stays lint-enforced multi-spelling (literal `@<full-
   sha>` at every call site; routers/dispatcher muxes and generated pins were designed and
   rejected).
@@ -179,10 +179,16 @@ push, land via merge-gate. The trim's own scope is otherwise complete and verifi
   title/identity. The dependency-of-nothing law survives the rename unchanged.
 - **Reusables**, each self-checking-out via `job.workflow_repository`/`job.workflow_sha`,
   third-party action SHAs pinned once here:
-  - `verify.yml` — internal parallel `lint-workflows` + `validate-release-plan` (checkout
-    PR-head ref law + full fetch internal). Pure certification: no inputs, no outputs —
-    the app-version math rides the plan core, so a bad `major_minor` line still fails at
-    minute 1; the version stamp is computed inside `build-unity.yml`, its sole consumer.
+  - `preflight.yml` — internal parallel `lint-workflows` + `validate-release-plan` + the
+    consumer's preflight script (checkout PR-head ref law + full fetch internal). The script
+    contract: a required executable at the repo-root path `scripts/preflight`, interpreter
+    chosen by shebang (language-free), missing file a loud red — never a skip; the harness
+    provides checkout at the PR head, uv, docker on the runner, and cwd = the repo root;
+    exit code is the whole interface. Per-consumer variance (e.g. `packages: read` for
+    mirror pulls) rides the calling job's permissions, as ever consumer-owned. Pure
+    certification: no outputs — the app-version math rides the plan core, so a bad
+    `major_minor` line still fails before any build; the version stamp is computed inside
+    `build-unity.yml`, its sole consumer.
   - `update-pr-draft-release.yml` — `release --channel pr`; `if: github.event.pull_request`
     internal; `packages: read` at call site; needs the consumer's terminal build legs.
   - `merge-gate.yml` — full-clone checkout of the PR head, internal mint of the merge-bot App
@@ -197,8 +203,13 @@ push, land via merge-gate. The trim's own scope is otherwise complete and verifi
     (its sole consumer; export via `workflow_call.outputs` only if a second stamper ever
     appears), optional `project` scoping passthrough. Verb code resolves
     from the consumer's `uv.lock` — the `@sha` pins structure, the lock pins code.
-  - `build-docker.yml` / `mirror.yml` — docker matrix getter + fanout, mirror login + `uv run
-    mirror`; matrix values env-indirected in `run:` lines; `free_disk_space` a reusable input.
+  - `mirror.yml` — the single first root: every other integrate job depends on it
+    (transitively). Provisioning precedes consumption, and the long-term destiny is
+    `ensure-hermeticity` — images today, packages and actions later (see
+    `todo/supply-chain-control.md`) — which is why it comes first now. Mirror login +
+    `uv run mirror`.
+  - `build-docker.yml` — docker matrix getter + fanout; matrix values env-indirected in
+    `run:` lines; `free_disk_space` a reusable input.
 - **Release composite** `.github/actions/release` (inputs `channel`, `nuget`): absorbs the
   checkout/no-ref/tag-fetch law, setup-uv, nuget login (`NUGET_API_KEY` minted internally),
   and the verb invocation; self-installs per the to-verify mechanics above. Consumer
@@ -255,10 +266,10 @@ push, land via merge-gate. The trim's own scope is otherwise complete and verifi
 
 ## Phase 6 — pilots
 
-- **bashrun** after Phase 2: exercises verify + merge-gate + the release composite; carries
+- **bashrun** after Phase 2: exercises preflight + merge-gate + the release composite; carries
   the PyPI-through-composite verification gate (fallback decision point for release.yml).
-- **placeframe-capture-tool** after Phases 3–4: exercises verify, unity build (app-name
-  version stamping), docker mirror+build, update-pr-draft-release.
+- **placeframe-capture-tool** after Phases 3–4: exercises mirror + preflight, unity build
+  (app-name version stamping), docker build, update-pr-draft-release.
 
 ## Phase 7 — fleet sweep (folds ci-refresh-seed; the old doc's mechanics re-aimed from
 "wrapper re-pin + grammar rewrite" to "atomic cutover to reusables/composite + SHA bump")
@@ -303,7 +314,7 @@ where receivers live on the default branch); update stale agent docs alongside c
 **Sweep order.** Devkit self-cutovers first (build-artifact-registry-devkit,
 github-actions-devkit's own files beyond `./` refs — none needed, python/docker/unity/devkit
 repos themselves), then simple publishers (logger-conf, openapi-client-codegen,
-pydantic-settings-pulumi, lbe-toolkit), the infra trio (verify + merge-gate only), app repos
+pydantic-settings-pulumi, lbe-toolkit), the infra trio (preflight + merge-gate only), app repos
 (Make-it-Sing, Nessle, ObserveThing, StatefulUnity), placeframe-capture-tool is the Phase 6
 pilot, placeframe last (most local surface).
 
@@ -350,10 +361,10 @@ ruleset PR.
 
 ## Consumer end-state
 
-Simple publisher (e.g. bashrun) — `integrate.yml` is `verify` (uses) + local `preflight`
-(`needs: [verify]`) + `update-pr-draft-release` (uses, `needs: [preflight]`); `merge-gate.yml`
-is triggers + concurrency + one gated `uses:` call; `release.yml` is triggers + concurrency +
-delivery jobs of one composite `uses:` each.
+Simple publisher (e.g. bashrun) — `integrate.yml` is `preflight` (uses; the script is a
+one-liner `uv run preflight-python`) + `update-pr-draft-release` (uses, `needs:
+[preflight]`); `merge-gate.yml` is triggers + concurrency + one gated `uses:` call;
+`release.yml` is triggers + concurrency + delivery jobs of one composite `uses:` each.
 
 placeframe-capture-tool `integrate.yml` (canonical example — the target spec; formatting is
 the established fleet style, which the migration does not change; job key order: `needs`,
@@ -375,9 +386,6 @@ permissions:
   contents: read
 
 jobs:
-  verify:
-    uses: outernet-foundation/github-actions-devkit/.github/workflows/verify.yml@<sha>
-
   mirror-images:
     permissions:
       contents: read
@@ -385,11 +393,11 @@ jobs:
     uses: outernet-foundation/github-actions-devkit/.github/workflows/mirror.yml@<sha>
 
   preflight:
-    needs: [verify, mirror-images]
-    # local: checkout PR-head + saver setup-uv + preflight-python + openapi --check
+    needs: [mirror-images]
+    uses: outernet-foundation/github-actions-devkit/.github/workflows/preflight.yml@<sha>
 
   build-unity:
-    needs: [preflight, verify]
+    needs: [preflight]
     permissions:
       contents: read
       packages: write
@@ -402,7 +410,7 @@ jobs:
       unity-serial: …
 
   build-docker:
-    needs: [preflight, verify, mirror-images]
+    needs: [preflight]
     permissions:
       contents: read
       packages: write
@@ -416,11 +424,13 @@ jobs:
     uses: outernet-foundation/github-actions-devkit/.github/workflows/update-pr-draft-release.yml@<sha>
 ```
 
-placeframe: same skeleton plus local `preflight` (composed battery), local `build-docker` /
-`publish-compose` legs (repo-owned scripts; `build-docker.yml` replaces the getter + wrapper
-once Phase 4 lands), unity `compile-check-unity.yml` call, `update-pr-draft-release` needing
-`publish-compose` + the unity fanout. What stays local everywhere is an ownership boundary,
-not a mechanics one: repo-composed preflights, repo-owned scripts, `publish-compose`.
+placeframe: same skeleton plus local `build-docker` / `publish-compose` legs (repo-owned
+scripts; `build-docker.yml` replaces the getter + wrapper once Phase 4 lands), unity
+`compile-check-unity.yml` call, `update-pr-draft-release` needing `publish-compose` + the
+unity fanout; its `scripts/preflight` carries the DB battery, and the calling job's
+`packages: read` supplies the mirrored postgres the battery pulls. What stays local is an
+ownership boundary, not a mechanics one: repo-owned scripts (the preflight script itself
+included), `publish-compose`.
 
 ## lint-workflows disposition
 
@@ -440,8 +450,6 @@ surface structurally impossible to drift, so the lint shrinks to:
 
 ## Out of scope (recorded, not planned)
 
-- Preflight reusables (python-devkit `preflight-python.yml` as a github-actions-devkit
-  reusable) — follow-up phase.
 - The `$/` flip (call sites + lint constants + tests + delete the self-repository zizmor
   stanza, one change): gated on an actionlint release accepting `$/` and runner fleet ≥
   2.336.0 (verify the self-hosted fleet version first). Scope much reduced by this
