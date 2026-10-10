@@ -56,20 +56,6 @@ wheels = [
 ]
 
 [[package]]
-name = "ci-devkit"
-version = "0.2.1.dev37711169350"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "bashrun" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2f/26/04ccb0564f39c35021062c8513b024487090e0536a6280be06a4ca89555b/ci_devkit-0.2.1.dev37711169350.tar.gz", hash = "sha256:35428cbfb41b276657db12ca56fbf505289b7fd97e5f50c48692ce8b7f75c0cd", size = 53388, upload-time = "2026-10-08T01:12:42.616Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/2e/84cc2405c29329055294a960964972cc7dc45835d0fee79e014513436675/ci_devkit-0.2.1.dev37711169350-py3-none-any.whl", hash = "sha256:36a1cfee980e366eab52a92ecbaccd06f3de971ebecd2a214af9f838a6168bf2", size = 28223, upload-time = "2026-10-08T01:12:41.589Z" },
-]
-
-[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -266,17 +252,16 @@ wheels = [
 
 [[package]]
 name = "python-devkit"
-version = "0.2.0"
+version = "0.3.0.dev38096025533"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bashrun" },
-    { name = "ci-devkit" },
     { name = "pydantic" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/13/42316e7d52663d38027728b2e974ead7b57b8b1836c8ddffcb52aa29cd3c/python_devkit-0.2.0.tar.gz", hash = "sha256:49fb9d2dd9d9eddd191330193c722b8462ac901d282f4de4653593c8316ea767", size = 33742, upload-time = "2026-10-05T17:49:48.932Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/85/07/160d8d87f184c1f9a32e2dd64a413695d10dad275d1684f89728d28c543c/python_devkit-0.3.0.dev38096025533.tar.gz", hash = "sha256:94b6f3d63b9192ede7d4bff2a3fabcc714a202807e2a7468c0047920837bb657", size = 33112, upload-time = "2026-10-10T23:47:13.476Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cb/1d/4f8957f20da89128b7690297c567d6bc0abda0d662376bbe9d9f5ef69579/python_devkit-0.2.0-py3-none-any.whl", hash = "sha256:0ea4dd7a51e572746ff8bce4a48160424318fa68be3feb17cb6820e16020df87", size = 14524, upload-time = "2026-10-05T17:49:48.047Z" },
+    { url = "https://files.pythonhosted.org/packages/12/66/c87d7ab58ba1ded58dfb21fe0c9783231d7a67514fd335239bd95df58414/python_devkit-0.3.0.dev38096025533-py3-none-any.whl", hash = "sha256:605aeabb81770f6393e771518639512fd6a7c39b5a22554dfe747fd9de3a0205", size = 14633, upload-time = "2026-10-10T23:47:12.49Z" },
 ]
 
 [[package]]
@@ -363,7 +348,7 @@ requires-dist = [
 dev = [
     { name = "basedpyright", specifier = ">=1.39.10" },
     { name = "pytest", specifier = ">=8.0.0" },
-    { name = "python-devkit", specifier = ">=0.1.0" },
+    { name = "python-devkit", specifier = ">=0.3.0.dev0" },
     { name = "ruff", specifier = ">=0.14.11" },
     { name = "types-pyyaml", specifier = ">=6.0.12.20260906" },
     { name = "types-strictyaml", specifier = ">=1.7.3.3" },
