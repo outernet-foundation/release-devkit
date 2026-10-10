@@ -203,10 +203,49 @@ python-devkit bug — either land Phase 5's fixed line and relock first, or acce
 window). Next: Phase 3 (unity-devkit), per the section below.
 
 Landing prerequisites (operator-owned, recorded here so no session re-derives them): the branch is
-local-only and must be pushed before any CI runs; this repo's own merge-gate hybrid reads the App
-key from a secret spelled `merge-bot-private-key` (kebab — no forwarding hop, unlike consumers'
-`MERGE_BOT_APP_PRIVATE_KEY`) plus the `MERGE_BOT_APP_ID` var, so both must exist in this repo under
-those names before the first `ready-to-merge` label.
+pushed (origin/rearchitect, plus the two stacked commits below); this repo's own merge-gate hybrid
+reads the App key from a secret spelled `merge-bot-private-key` (kebab — no forwarding hop, unlike
+consumers' `MERGE_BOT_APP_PRIVATE_KEY`) plus the `MERGE_BOT_APP_ID` var, so both must exist in this
+repo under those names before the first `ready-to-merge` label.
+
+Third session (2026-10-10, latest): Phase 5 executed early — the operator chose the green landing
+over accepting the red window, so python-devkit landed before this repo. Its repo state: the
+deptry-src pair had already been landed directly on dev by the operator; the unlanded `f0f080b`
+(wrapper pin bump to `029a9a6` + the `publish-prerelease`→`prerelease` verb rename, whose script
+existence at that pin was verified) was folded in; `ci_step` deleted outright with no replacement
+(the toolkit ruling — the separator log bought nothing), the `ci-devkit` dependency dissolved
+(audit: `ci_step` was its only import), `major_minor` bumped to 0.3, AGENTS.md purged in a separate
+prose commit. Landed as PR #5 through its own merge-gate; its release.yml published
+`python-devkit 0.3.0.dev38096025533` to PyPI (run-keyed dev prerelease, old-binding spelling — a
+floor of `>=0.3.0.dev0` matches it and any later count-keyed republish). The relock of this repo's
+dev group onto that floor is NOT yet done — it is the next session's first act, riding this branch:
+edit the dev-group floor to `python-devkit>=0.3.0.dev0`, `uv lock`, commit, push, then open the
+rearchitect→dev PR; certification should now be fully green (the deptry step runs `deptry src` from
+the fixed line), and after confirming the landing-prerequisite wiring above, label `ready-to-merge`.
+Then Phase 3, unchanged.
+
+Same session, the CPython 3.15 drift incident (fleet-wide CI slowdown): uv 0.11.x offers managed
+3.15.0, and every repo with the fleet's unbounded `requires-python = ">=3.13"` let fresh runners
+resolve 3.15 — whose lock pins (pydantic-core 2.46.5 and friends) ship no cp315 wheels, so every
+wrapper-clone `uv run --project` built the pydantic-core Rust sdist: multi-minute silent stalls
+(lint-workflows 81s and validate-release-plan 83s in python-devkit's PR #5 versus sub-second actual
+verbs; pinned repos were immune — python-devkit's own preflight job ran 6s). Resolution:
+`.python-version` pins (`3.13`, matching the repos that were already pinned — python-devkit,
+bashrun, build-artifact-registry, docker-devkit, openapi-client-codegen, placeframe,
+placeframe-capture-tool, pydantic-settings-pulumi). The audit found 14 gaps; pins are committed but
+UNPUSHED, one per repo, on each repo's checked-out branch: this repo (rearchitect — the
+fleet-load-bearing one: `uv run --project <clone>` discovers the interpreter from the project, so
+this repo's own pin governs every wrapper-era and future `$/`-clone install), unity-devkit
+(more-ci-fixes-2), logger-conf (update-release-devkit), lbe-toolkit / Make-it-Sing / Nessle /
+ObserveThing (ci-support-redux each), infra-github-org / infra-github-runners / infra-rathole / infra
+(dev each), prepo (main), pulsar (feature/working). `misc` is not a git repo — no pin, no CI.
+`requires-python` ranges stay open by design (the pin wins discovery; operator declined bounding).
+Secondary finding from the same investigation, unfixed: `ensure_actionlint()` fetches the upstream
+checksums file on every run even when the binary is warm-cached — the lint's one live network
+dependency (offline-persona hole; zizmor's hashes are constants here), and the bootstrap's
+`curl -fsSL` calls carry no timeouts — a stalled connection hangs forever, silently. Fix candidates:
+checksums as repo constants (zizmor pattern) + `--connect-timeout`/`--max-time` on the two
+downloads.
 
 ### Matrix/version refactor (before Phase 3)
 
