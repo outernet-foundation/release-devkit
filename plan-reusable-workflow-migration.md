@@ -58,6 +58,25 @@ Each question carries the session's recommended default; confirm or override, th
    content validation already lives in pydantic config load and `validate-release-plan`), and
    the `environment:` ban — dies into the single-copy devkit artifacts or is already
    actionlint/zizmor territory.
+9. **All reusables in one repo; release-devkit renamed `github-action-devkit`.** Recommendation:
+   yes — restores the law that every devkit except this one is GitHub-Actions-agnostic (Phases
+   3–4 as drafted put workflow YAML in unity-devkit/docker-devkit, and Phase 4's absorbed shim
+   would have read ambient `GITHUB_ACTOR`/`GITHUB_TOKEN` inside devkit code). Verb resolution
+   is untouched: reusables run `uv run <verb>` against the consumer checkout, so
+   unity/docker/python/ci code still resolves from each consumer's `uv.lock` (a missing dep
+   fails loudly, exactly as today), while this repo's own verbs self-checkout at
+   `job.workflow_sha` — the dependency-of-nothing law survives the rename. The same-SHA law
+   collapses to one repo, one SHA per consumer; coherent bumps become: the `uses:` SHA tracks
+   orchestration, locks track code, coordinated only when the YAML's expected verb surface
+   moves — covered by the stable-CLI-API doctrine (script names and flags are public API),
+   now explicitly fleet law for every devkit. Unity/docker filenames must disambiguate inside
+   the one repo: `build-unity.yml` / `build-docker.yml` (job names stay `build-unity` /
+   `build-docker`). Phase 4's shim absorption stays in docker-devkit but takes
+   registry/actor/token as explicit parameters, supplied by this repo's reusable — devkit code
+   stays GitHub-free. Accepted costs: devkit self-hosting loses `./` refs (their CI consumes
+   the reusables cross-repo at a SHA like anyone else, so orchestration changes land here
+   first), and structure-code coherence moves from same-repo-atomic to two-repo-coordinated.
+   Phase 1 gains the rename; Phases 3–4 shrink to code motions plus reusable authorship here.
 
 ## Thesis
 
