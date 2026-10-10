@@ -3,7 +3,8 @@
 Status: drafted 2026-10-09 from the architecture session; consolidates and supersedes
 `release-devkit-finish.md` (executed; its T_FINISH bookkeeping is moot — nothing pins a single
 finish SHA anymore), `ci-refresh-seed.md` (folded into Phase 7), `zizmor-audit.md` (live gated
-items folded here; audit residue parked at `todo/zizmor-audit.md`), and
+items folded here; facts-and-decisions residue folded into `todo/supply-chain-control.md`'s
+appendix), and
 `plan-reusable-workflow-migration.md` (subsumed). Session decisions below are binding for
 execution sessions. Cadence: one session per PR where practical, each landing on `dev` via the
 repo's own merge-gate; commit discipline per AGENTS-SHARED (prose and code in separate commits,
