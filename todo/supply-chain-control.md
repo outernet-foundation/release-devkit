@@ -3,8 +3,8 @@
 Implementation deferred by operator ruling (2026-10-09): all supply-chain questions —
 sensing AND restocking — park here as one future comprehensive initiative. The
 universal interim answer is manual operator bumping (Interim policy). Nothing here
-is built or load-bearing yet. Resume after the zizmor audit's static components
-land (zizmor-audit.md backlog item 1); the sensing half meanwhile stands exactly as
+is built or load-bearing yet. Resume after the devkit rearchitecture's fleet cutover
+lands (plan-devkit-rearchitecture.md Phase 7); the sensing half meanwhile stands exactly as
 committed (`--offline` in `lint_workflows.py` — the API-dependent zizmor audits
 `impostor-commit` and `known-vulnerable-actions` simply never run).
 
@@ -15,10 +15,10 @@ have standing controls, recorded so a resuming session doesn't re-derive them:
 
 | Chain link | Standing control | Open question |
 |---|---|---|
-| Python dependencies | committed `uv.lock` closure (the seal); `>=` floors + relock via the DAG sweep (ci-refresh-seed.md) | none parked |
+| Python dependencies | committed `uv.lock` closure (the seal); `>=` floors + relock via the fleet sweep (plan-devkit-rearchitecture.md Phase 7) | none parked |
 | Docker base images | digest pins in `workloads/images.lock`; the org mirror namespace (upstream-yank immunity, docker-devkit AGENTS.md) | none parked |
 | npm / nuget adoption | exact pins; adoption is a human commit by law | none parked |
-| GitHub Actions references | D1/D2 (zizmor-audit.md): SHA pins centralized in per-repo composite wrappers | **both halves below — this note** |
+| GitHub Actions references | D1/D2 (zizmor-audit.md): SHA pins centralized — post-rearchitecture third-party SHAs pin inside github-actions-devkit's reusable/composite; consumers carry only local-job wrappers (checkout, setup-uv) | **both halves below — this note** |
 
 ## The taxonomy this file turns on
 
@@ -52,10 +52,14 @@ resolves tags; it will not flag a typo'd-but-existing SHA).
 
 ## The restocking problem (pin-bump maintenance, was zizmor-audit.md P5)
 
-Post-D2 every repo carries four wrapper SHAs (`checkout`, `setup-uv`, `mint-token`,
+Post-D2 every repo carried four wrapper SHAs (`checkout`, `setup-uv`, `mint-token`,
 `nuget-login`) that never move until someone moves them — the flip side of
 hash-pinning: upstream fixes, the `client-id` spelling unblock, and future action
-majors all arrive as "someone must bump the SHA," per repo, forever. Pre-D1 tag
+majors all arrive as "someone must bump the SHA," per repo, forever. The
+rearchitecture shrinks the per-repo inventory (mint-token and nuget-login move
+inside github-actions-devkit's reusable/composite; consumers keep checkout/setup-uv
+for local jobs) and concentrates the fleet's pins in the devkit repo itself — now
+the largest single pin owner. Pre-D1 tag
 pins floated silently; post-D1 staleness is total without an actuator. This half
 is ordinary dependency maintenance (no adversary needed) but is parked WITH the
 sensing half because the decision spaces are welded: the natural tools bundle
@@ -108,7 +112,7 @@ lane it is precisely correct (a sensor must not fail its job, it must speak).
 ## Open sub-decisions (the resume agenda)
 
 1. Topology: where periodic org-wide jobs live — sensor home, bump machinery,
-   and the P3 lander alternatives (zizmor-audit.md P3-B/C) share one "central
+   and the lander alternatives (zizmor-audit.md D10's rejected branches) share one "central
    scheduled job vs per-repo cron vs external service" question; decide once,
    together.
 2. Stable pre-flight blocking policy: any finding vs high-only (hostage-release
@@ -125,7 +129,7 @@ lane it is precisely correct (a sensor must not fail its job, it must speak).
 - The interim decays silently into "never": staleness has no alarm. Known items
   currently gated on a bump: the `client-id` mint-step spelling flip (actionlint
   metadata), future `actions/checkout` / `setup-uv` majors, D3's `$/` flip
-  (devkit-internal: the `ACTIONLINT_VERSION` pin rides release-devkit's own dev
+  (devkit-internal: the `ACTIONLINT_VERSION` pin rides github-actions-devkit's own dev
   flow, not consumer machinery).
 - Sensing gap accepted: SHA pins enter the fleet with no automated real-release
   verification (impostor risk). Mitigations: pins are few, centralized, and
@@ -133,7 +137,7 @@ lane it is precisely correct (a sensor must not fail its job, it must speak).
 
 ## Resume trigger
 
-The zizmor audit's static components implemented and swept (zizmor-audit.md
-backlog item 1: D1/D2/D6/D7 through the consumer sweep) — then this file joins
-the agenda as its own initiative, decided together with P3 (topology) wherever
-it resumes; bump machinery may ride the sweep machinery (ci-refresh-seed.md).
+The zizmor audit's static components implemented and the rearchitecture's fleet cutover
+complete (plan-devkit-rearchitecture.md Phase 7) — then this file joins
+the agenda as its own initiative, decided together with the lander topology question
+wherever it resumes; bump machinery may ride the fleet-sweep machinery.
