@@ -353,7 +353,8 @@ is triggers + concurrency + one gated `uses:` call; `release.yml` is triggers + 
 delivery jobs of one composite `uses:` each.
 
 placeframe-capture-tool `integrate.yml` (canonical example — the target spec; formatting is
-the established fleet style, which the migration does not change):
+the established fleet style, which the migration does not change; job key order: `needs`,
+`permissions`, `uses`, `with`, `secrets`):
 
 ```yaml
 name: Integrate
@@ -377,10 +378,10 @@ jobs:
       app-name: capture-tool
 
   mirror-images:
-    uses: outernet-foundation/github-actions-devkit/.github/workflows/mirror.yml@<sha>
     permissions:
       contents: read
       packages: write
+    uses: outernet-foundation/github-actions-devkit/.github/workflows/mirror.yml@<sha>
 
   preflight:
     needs: [verify, mirror-images]
@@ -408,10 +409,10 @@ jobs:
 
   update-pr-draft-release:
     needs: [build-unity, build-docker]
-    uses: outernet-foundation/github-actions-devkit/.github/workflows/update-pr-draft-release.yml@<sha>
     permissions:
       contents: read
       packages: read
+    uses: outernet-foundation/github-actions-devkit/.github/workflows/update-pr-draft-release.yml@<sha>
 ```
 
 placeframe: same skeleton plus local `preflight` (composed battery), local `build-docker` /
