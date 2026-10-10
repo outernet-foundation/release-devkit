@@ -6,7 +6,7 @@ hydration source — every verified fact and the full decision rationale — for
 supply-chain initiative (`todo/supply-chain-control.md`, co-located here) and for the `$/` flip
 when its gates pass. The audit's session narrative and executed-item records live in git log,
 not here. Post-audit SHA citations in older records may be pre-rebase spellings of content now
-on `lint-trim` as `ada7279`/`624d806`.
+on `github-actions-devkit` as `ada7279`/`624d806`.
 
 ## Context
 

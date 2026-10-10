@@ -144,13 +144,13 @@ Supporting laws:
 - actionlint 1.7.12 may not know the `job.*` context — verify against its release notes and
   bump the pin in the lint if needed (Phase 2).
 
-## Phase 0 — land lint-trim
+## Phase 0 — land github-actions-devkit
 
-The executed `release-devkit-finish.md` work sits on `lint-trim`, unlanded. **Defect to repair
-at landing**: the wrapper self-pin `RELEASE_DEVKIT_COMMIT: f970dbb…` is orphaned (the branch
-was rebased after the audit sessions; that SHA is an ancestor of neither HEAD nor
-origin/lint-trim) — own CI's lint/self-test jobs would fail their clone/checkout on a fresh
-runner. Re-pin to the landing HEAD in the same atomic commit as any workflow-spelling change,
+The executed `release-devkit-finish.md` work sits on `github-actions-devkit` (renamed from
+`lint-trim`), unlanded. **Defect to repair at landing**: the wrapper self-pin
+`RELEASE_DEVKIT_COMMIT: f970dbb…` is orphaned (the branch was rebased after the audit sessions;
+that SHA is an ancestor of neither HEAD nor origin/github-actions-devkit) — own CI's
+lint/self-test jobs would fail their clone/checkout on a fresh runner. Re-pin to the landing HEAD in the same atomic commit as any workflow-spelling change,
 push, land via merge-gate. The trim's own scope is otherwise complete and verified.
 
 ## Phase 1 — build-artifact-registry-devkit (the ci-devkit split)
@@ -328,7 +328,7 @@ committing there**.
 **pyproject hygiene, every repo, every in-tree pyproject.** Delete deptry
 `known_first_party` self-declarations (instance: placeframe `build/pyproject.toml`;
 `per_rule_ignores` tables stay; red windows close at each repo's relock onto python-devkit's
-fixed line — release-devkit is in that window from lint-trim on). Delete `[tool.uv]
+fixed line — release-devkit is in that window from github-actions-devkit on). Delete `[tool.uv]
 prerelease = "if-necessary-or-explicit"` (uv 0.12 deprecates; drop the table when it's the
 only key). Delete redundant hatch wheel `include` blocks naming files under `packages`
 (instance here: this repo's own `pyproject.toml` wheel includes for `py.typed`/`zizmor.yaml`;
