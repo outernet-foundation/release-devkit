@@ -32,6 +32,32 @@ Each question carries the session's recommended default; confirm or override, th
 5. **Preflight reusables** (a python-devkit `preflight-python.yml` for simple repos).
    Recommendation: out of scope; record as a follow-up phase only.
 6. **Doc name.** Recommendation: keep `plan-reusable-workflow-migration.md`.
+7. **release.yml delivery via a devkit-owned composite action.** Recommendation: yes — trusted
+   publishing binds (repo, workflow filename) and composite steps execute inside the caller's
+   job, so `job_workflow_ref` keeps naming the consumer's `release.yml` (the identity reusable
+   workflows break — warehouse#11096 does not reach composites). A `.github/actions/release`
+   composite (inputs `channel`, `nuget`) absorbs the checkout/tag-fetch law, setup-uv, nuget
+   login, and the verb invocation; it self-installs the devkit (verify `github.action_ref`
+   resolves to the called SHA inside a cross-repo composite — the composite analogue of
+   `job.workflow_sha`; fallback: `github.action_path` off a root `action.yml`, where the
+   runner's archive download is the install). The per-consumer `setup-release-devkit` wrapper
+   and `RELEASE_DEVKIT_COMMIT` die fleet-wide, not just for reusable jobs. Verify once, in the
+   bashrun pilot, that PyPI trusted publishing accepts a publish through composite-wrapped
+   steps; fallback if it rejects: release.yml keeps inline verbs and only the wrapper dies.
+   Confirming this supersedes Phase 6's "inline verbs and wrapper install are untouched"
+   clause and the wrapper-validation rows of the disposition table.
+8. **How far to gut `lint-workflows`.** Recommendation: actionlint + zizmor + the SHA law, plus
+   a small irreducible residue: (a) the inline-delivery law retargeted — delivery jobs must
+   call the composite action, never a reusable workflow (enforceable only on consumer files);
+   (b) release.yml's concurrency no-cancel (the delivery mutex); (c) merge-gate's labeled-only
+   wake and per-PR serializing group (arguably droppable — zizmor already bans `workflow_run`
+   and the verb re-derives every precondition on any wake; the surviving failure mode is a
+   racing double-merge). Everything else — verb grammar and spec tables, ref laws, tag-fetch
+   laws, verb-installation, env-reference resolution, wrapper validation, one-saver-cache, the
+   nuget-key env law (whose `declares_nuget()` is the lint's only `release-devkit.yaml` read —
+   content validation already lives in pydantic config load and `validate-release-plan`), and
+   the `environment:` ban — dies into the single-copy devkit artifacts or is already
+   actionlint/zizmor territory.
 
 ## Thesis
 
@@ -117,7 +143,7 @@ the integrate/merge-gate grammar. Own `integrate.yml`/`merge-gate.yml` cut over 
 
 ### Phase 3 — unity-devkit
 
-- `app-build.yml` and `compile-check.yml`, each containing the matrix getter
+- `build.yml` and `compile-check.yml`, each containing the matrix getter
   (`build-unity-matrix` / `compile-check-unity-matrix`) **and** the fanout
   (`ci-build-unity` / `compile-check-unity`) internally: `runs-on: [self-hosted, unity]`,
   `container: ${{ matrix.editor-image }}`, wipe-workspace, checkout + setup-uv restore,
@@ -141,7 +167,7 @@ Code moves (release-train: consumers take them via floor-bump/relock, not workfl
    reusable, or binfmt-from-manifest if trivial).
 2. Teach `docker-build-matrix` the cross-compile cohort: emit legs for
    `x-cross-compile-targets` and platform-pinned services (entries carry a `platform` fact
-   from the manifest's `platforms:` keys). capture-tool's `build-zed` stops hand-enumerating
+   from the manifest's `platforms:` keys). capture-tool's `build-docker` stops hand-enumerating
    targets; its pipeline derives from its manifest.
 3. New reusables `mirror.yml` (login + `uv run mirror`, no inputs) and `build.yml` (getter +
    fanout as above, matrix values env-indirected in the `run:` line).
@@ -162,7 +188,7 @@ direct `actions/checkout@v5`) — cutover jumps directly from diverged state to 
 there is no intermediate re-convergence onto the trim grammar. Devkit repos merge and are
 pushed first (pins must exist on the remote before consumer CI runs). Sequencing: Phase 2
 pilot `bashrun` (exercises verify + merge-gate only) after Phase 1; Phase 5 pilot
-`placeframe-capture-tool` (exercises verify+app-name, unity app-build, docker mirror+build,
+`placeframe-capture-tool` (exercises verify+app-name, unity build, docker mirror+build,
 draft) after Phases 3–4; then the sweep, roughly: simple publishers (python-devkit,
 ci-devkit, logger-conf, openapi-client-codegen, pydantic-settings-pulumi, lbe-toolkit,
 docker-devkit, unity-devkit), the infra trio (verify + merge-gate only), the app repos
@@ -176,44 +202,68 @@ Simple publisher (e.g. bashrun) — `integrate.yml` is `verify` (uses) + local `
 (`needs: [verify]`) + `update-pr-draft-release` (uses, `needs: [preflight]`); `merge-gate.yml`
 is triggers + concurrency + one gated `uses:` call.
 
-placeframe-capture-tool `integrate.yml` (canonical example — this is the target spec):
+placeframe-capture-tool `integrate.yml` (canonical example — this is the target spec; the
+formatting is the established fleet style, which the migration does not change: blank lines
+between jobs and top-level keys, permissions and secrets as block maps, never inline flow
+maps):
 
 ```yaml
+name: Integrate
+
 on:
   workflow_dispatch:
   pull_request:
     branches: [dev]
+
 concurrency:
   group: integrate-${{ github.ref }}
   cancel-in-progress: true
+
 permissions:
   contents: read
+
 jobs:
   verify:
     uses: outernet-foundation/release-devkit/.github/workflows/verify.yml@<sha>
     with:
       app-name: capture-tool
+
   mirror-images:
     uses: outernet-foundation/docker-devkit/.github/workflows/mirror.yml@<sha>
-    permissions: {contents: read, packages: write}
+    permissions:
+      contents: read
+      packages: write
+
   preflight:
     needs: [verify, mirror-images]
     # local: checkout PR-head + saver setup-uv + preflight-python + openapi --check
+
   build-unity:
     needs: [preflight, verify]
-    permissions: {contents: read, packages: write}
-    uses: outernet-foundation/unity-devkit/.github/workflows/app-build.yml@<sha>
+    permissions:
+      contents: read
+      packages: write
+    uses: outernet-foundation/unity-devkit/.github/workflows/build.yml@<sha>
     with:
       version: ${{ needs.verify.outputs.version }}
-    secrets: {unity-email: …, unity-password: …, unity-serial: …}
-  build-zed:
+    secrets:
+      unity-email: …
+      unity-password: …
+      unity-serial: …
+
+  build-docker:
     needs: [preflight, verify, mirror-images]
-    permissions: {contents: read, packages: write}
+    permissions:
+      contents: read
+      packages: write
     uses: outernet-foundation/docker-devkit/.github/workflows/build.yml@<sha>
+
   update-pr-draft-release:
-    needs: [build-unity, build-zed]
+    needs: [build-unity, build-docker]
     uses: outernet-foundation/release-devkit/.github/workflows/update-pr-draft-release.yml@<sha>
-    permissions: {contents: read, packages: read}
+    permissions:
+      contents: read
+      packages: read
 ```
 
 placeframe: same skeleton plus local `preflight` (composed battery), local `build-docker` /
