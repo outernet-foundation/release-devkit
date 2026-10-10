@@ -21,9 +21,8 @@ no trailers).
    precondition on any wake; the surviving failure mode is a racing double-merge.
    Recommendation: keep — it is cheap; drop it if taste says).
    Same item confirms `verify.yml` bundling: `lint-workflows` ∥ `validate-release-plan` as
-   internal parallel jobs with the fail-fast `needs` contract internal, exporting
-   `version`/`version-code`, optional `app-name` input (two separate reusables would re-open
-   needs-contract drift).
+   internal parallel jobs with the fail-fast `needs` contract internal (two separate
+   reusables would re-open needs-contract drift).
 2. **Execution scope of the next session.** Recommendation: Phase 1 (build-artifact-registry-
    devkit split + publish) alone — it is small and unblocks everything; Phase 2
    (github-actions-devkit) gets its own session(s). Pilots after Phase 2+3+4 exist on the
@@ -181,8 +180,9 @@ push, land via merge-gate. The trim's own scope is otherwise complete and verifi
 - **Reusables**, each self-checking-out via `job.workflow_repository`/`job.workflow_sha`,
   third-party action SHAs pinned once here:
   - `verify.yml` — internal parallel `lint-workflows` + `validate-release-plan` (checkout
-    PR-head ref law + full fetch internal); optional `app-name` input runs `get-app-version`
-    internally and exports `version`/`version-code`.
+    PR-head ref law + full fetch internal). Pure certification: no inputs, no outputs —
+    the app-version math rides the plan core, so a bad `major_minor` line still fails at
+    minute 1; the version stamp is computed inside `build-unity.yml`, its sole consumer.
   - `update-pr-draft-release.yml` — `release --channel pr`; `if: github.event.pull_request`
     internal; `packages: read` at call site; needs the consumer's terminal build legs.
   - `merge-gate.yml` — full-clone checkout of the PR head, internal mint of the merge-bot App
@@ -192,8 +192,10 @@ push, land via merge-gate. The trim's own scope is otherwise complete and verifi
     bare leg list through the envelope helper) + fanout internally: `runs-on: [self-hosted,
     unity]`, `container: ${{ matrix.editor-image }}`, wipe-workspace, checkout + setup-uv
     restore, license `--license` threading, unity secrets named, registry auth ambient,
-    runner-provisioning pre-steps (absorbed `setup`), `version` input from
-    `needs.verify.outputs.version`, optional `project` scoping passthrough. Verb code resolves
+    runner-provisioning pre-steps (absorbed `setup`), `app-name` input — the getter runs
+    `get-app-version --app` at the same PR-head checkout and threads the stamp to the legs
+    (its sole consumer; export via `workflow_call.outputs` only if a second stamper ever
+    appears), optional `project` scoping passthrough. Verb code resolves
     from the consumer's `uv.lock` — the `@sha` pins structure, the lock pins code.
   - `build-docker.yml` / `mirror.yml` — docker matrix getter + fanout, mirror login + `uv run
     mirror`; matrix values env-indirected in `run:` lines; `free_disk_space` a reusable input.
@@ -255,8 +257,8 @@ push, land via merge-gate. The trim's own scope is otherwise complete and verifi
 
 - **bashrun** after Phase 2: exercises verify + merge-gate + the release composite; carries
   the PyPI-through-composite verification gate (fallback decision point for release.yml).
-- **placeframe-capture-tool** after Phases 3–4: exercises verify+app-name, unity build,
-  docker mirror+build, update-pr-draft-release.
+- **placeframe-capture-tool** after Phases 3–4: exercises verify, unity build (app-name
+  version stamping), docker mirror+build, update-pr-draft-release.
 
 ## Phase 7 — fleet sweep (folds ci-refresh-seed; the old doc's mechanics re-aimed from
 "wrapper re-pin + grammar rewrite" to "atomic cutover to reusables/composite + SHA bump")
@@ -375,8 +377,6 @@ permissions:
 jobs:
   verify:
     uses: outernet-foundation/github-actions-devkit/.github/workflows/verify.yml@<sha>
-    with:
-      app-name: capture-tool
 
   mirror-images:
     permissions:
@@ -395,7 +395,7 @@ jobs:
       packages: write
     uses: outernet-foundation/github-actions-devkit/.github/workflows/build-unity.yml@<sha>
     with:
-      version: ${{ needs.verify.outputs.version }}
+      app-name: capture-tool
     secrets:
       unity-email: …
       unity-password: …
