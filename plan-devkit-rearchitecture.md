@@ -208,7 +208,7 @@ reads the App key from a secret spelled `merge-bot-private-key` (kebab — no fo
 consumers' `MERGE_BOT_APP_PRIVATE_KEY`) plus the `MERGE_BOT_APP_ID` var, so both must exist in this
 repo under those names before the first `ready-to-merge` label.
 
-Third session (2026-10-10, latest): Phase 5 executed early — the operator chose the green landing
+Third session (2026-10-10): Phase 5 executed early — the operator chose the green landing
 over accepting the red window, so python-devkit landed before this repo. Its repo state: the
 deptry-src pair had already been landed directly on dev by the operator; the unlanded `f0f080b`
 (wrapper pin bump to `029a9a6` + the `publish-prerelease`→`prerelease` verb rename, whose script
@@ -246,6 +246,20 @@ dependency (offline-persona hole; zizmor's hashes are constants here), and the b
 `curl -fsSL` calls carry no timeouts — a stalled connection hangs forever, silently. Fix candidates:
 checksums as repo constants (zizmor pattern) + `--connect-timeout`/`--max-time` on the two
 downloads.
+
+Fourth session (2026-10-10): the relock landed on the branch (`0dd342e` — dev-group floor
+`python-devkit>=0.3.0.dev0`; ci-devkit fell out of the lock with it, its dependency dissolved in
+Phase 5), the branch was pushed, and PR #3 (rearchitect→dev) was opened — the install trio's
+first live exercise. Preflight failed at toolkit-checkout: `actions/checkout` refuses any `path`
+outside `$GITHUB_WORKSPACE` (its #197, every release since v2), so the install law's
+`runner.temp` target was never reachable through it — a platform wall the mechanics section had
+wrong, corrected above. Fix riding the same PR: toolkit-checkout hand-fetches (init → remote add
+→ depth-1 bare-SHA fetch → detach, facts in step env, no token), verified from the sandbox
+against the exact hidden merge-ref SHA of the failed run; AGENTS.md's installation paragraph and
+operator-ownership law (pushes/pulls/PRs are operator's, remote stays SSH) updated with it. The
+two carried `$/` risks (self-reference resolution from a called reusable, the unity fleet's
+runner version) remain unobserved — the failed run died before reaching them; the re-run
+surfaces both or passes silently past them.
 
 ### Matrix/version refactor (before Phase 3)
 
@@ -367,10 +381,16 @@ Supporting laws:
   `needs`, a getter job emitting output consumed by a fanout via
   `strategy.matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}`, `container:` from matrix,
   `fail-fast`.
-- **Self-checkout is first-class.** `job.workflow_repository` + `job.workflow_sha` give a called
-  workflow its own resolved repo and SHA — `actions/checkout` with those checks the devkit out
-  at exactly the pin the caller spelled. This is github-actions-toolkit's install mechanism
-  inside its reusables.
+- **Self-checkout is first-class — but not via `actions/checkout`.** `job.workflow_repository` +
+  `job.workflow_sha` give a called workflow its own resolved repo and SHA, and a bare-SHA
+  `git fetch --depth 1` serves them on GitHub, hidden `refs/pull/N/merge` tips included
+  (allowTipSHA1InWant) — verified live 2026-10-10 against the merge-ref SHA of this repo's PR #3
+  failed run. `actions/checkout` cannot make this clone: it refuses any `path` outside
+  `$GITHUB_WORKSPACE` (actions/checkout#197, every release since v2), and the toolkit clone must
+  live outside the workspace (consumer-checkout's `git clean -ffdx` would wipe a nested copy;
+  the consumer's zizmor scans the repo root, respecting .gitignore but not untracked clones).
+  github-actions-toolkit's install mechanism is the hand-fetch inside its `toolkit-checkout`
+  composite — same shape as its self-test clone, no token (public org).
 - **`uses:` is resolved statically by GitHub, server-side.** No expressions, no env, no
   filesystem. Cross-repo refs must be `owner/repo/.github/workflows/file.yml@ref`; `./` refs
   resolve same-repo at the caller's commit — github-actions-toolkit's own `integrate.yml` calls
