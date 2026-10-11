@@ -1,0 +1,62 @@
+name: Compile check unity
+
+on:
+  workflow_call:
+    secrets:
+      unity-email:
+        description: Unity license email
+        required: true
+      unity-password:
+        description: Unity license password
+        required: true
+      unity-serial:
+        description: Unity license serial
+        required: true
+
+jobs:
+  plan-unity-compile-checks:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      license-cache-key: ${{ steps.license-cache-key.outputs.license-cache-key }}
+    steps:
+      - uses: $/.github/actions/toolkit-checkout
+      - uses: $/.github/actions/consumer-checkout
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: $/.github/actions/setup-uv
+      - id: license-cache-key
+        run: echo "license-cache-key=$(uv run --locked unity-license-tag)" >> "$GITHUB_OUTPUT"
+      - id: matrix
+        run: uv run --locked compile-check-unity-matrix | uv run --project "${{ runner.temp }}/github-actions-toolkit" --locked --no-dev matrix
+
+  compile-check-unity:
+    needs: [plan-unity-compile-checks]
+    runs-on:
+      - self-hosted
+      - unity
+    container: ${{ matrix.editor-image }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan-unity-compile-checks.outputs.matrix) }}
+    steps:
+      - name: Wipe workspace
+        run: find "$GITHUB_WORKSPACE" -mindepth 1 -delete; rm -rf ~/.cache/Unity
+      - uses: $/.github/actions/consumer-checkout
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: $/.github/actions/setup-uv
+      - run: >-
+          uv run --locked compile-check-unity
+          --project "$PROJECT"
+          --license-cache-key "$LICENSE_CACHE_KEY"
+          --registry "$REGISTRY"
+        env:
+          PROJECT: ${{ matrix.project }}
+          LICENSE_CACHE_KEY: ${{ needs.plan-unity-compile-checks.outputs.license-cache-key }}
+          UNITY_EMAIL: ${{ secrets.unity-email }}
+          UNITY_PASSWORD: ${{ secrets.unity-password }}
+          UNITY_SERIAL: ${{ secrets.unity-serial }}
+          REGISTRY: ghcr.io/${{ github.repository }}
+          REGISTRY_TOKEN: ${{ github.token }}
+          REGISTRY_USERNAME: ${{ github.actor }}

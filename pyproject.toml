@@ -5,7 +5,7 @@ description = "Publication machinery: per-package tag ledger, path-diff change d
 requires-python = ">=3.13"
 dependencies = [
     "bashrun>=0.1.0",
-    "ci-devkit>=0.2.1.dev37711169350",
+    "build-artifact-registry>=0.1.0.dev0",
     "pydantic>=2.11.7",
     "pydantic-settings>=2.9.1",
     "pyyaml>=6.0.3",
@@ -13,15 +13,12 @@ dependencies = [
     "typer>=0.17.4",
 ]
 
-[tool.uv]
-prerelease = "if-necessary-or-explicit"
-
 [dependency-groups]
 dev = [
     "basedpyright>=1.39.10",
     "ruff>=0.14.11",
     "pytest>=8.0.0",
-    "python-devkit>=0.1.0",
+    "python-devkit>=0.3.0.dev0",
     "types-pyyaml>=6.0.12.20260906",
     "types-strictyaml>=1.7.3.3",
 ]
@@ -31,8 +28,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-get-app-version = "release_devkit.verbs.get_app_version:app"
+free-disk-space = "release_devkit.verbs.free_disk_space:app"
 lint-workflows = "release_devkit.verbs.lint_workflows:app"
+matrix = "release_devkit.verbs.matrix:app"
 merge-gate = "release_devkit.verbs.merge_gate:app"
 release = "release_devkit.verbs.release:app"
 validate-release-plan = "release_devkit.verbs.validate_release_plan:app"
@@ -41,13 +39,14 @@ validate-release-plan = "release_devkit.verbs.validate_release_plan:app"
 packages = ["src/release_devkit"]
 include = [
     "src/release_devkit/py.typed",
+    "src/release_devkit/verbs/zizmor.yaml",
 ]
 
 [tool.basedpyright]
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "strict"
-include = ["src", "tests"]
+include = ["src", "tests", "scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

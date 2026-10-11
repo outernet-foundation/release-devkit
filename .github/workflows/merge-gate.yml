@@ -4,38 +4,37 @@ on:
   pull_request:
     branches: [dev]
     types: [labeled]
-  workflow_run:
-    workflows: [Integrate]
-    types: [completed]
+  workflow_call:
+    secrets:
+      merge-bot-private-key:
+        description: Merge-bot GitHub App private key
+        required: true
 
 concurrency:
-  group: merge-gate-${{ github.event.pull_request.number || github.event.workflow_run.head_branch }}
+  group: merge-gate-${{ github.event.pull_request.number }}
 
 permissions:
   contents: read
 
 jobs:
   merge-gate:
-    if: github.event.label.name == 'ready-to-merge' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    if: github.event.label.name == 'ready-to-merge'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: $/.github/actions/toolkit-checkout
+      - uses: $/.github/actions/consumer-checkout
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}
-          # Perform a full clone, required so merge-gate can validate that this PR is a fast forward from dev
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Full clone without tags, so merge-gate can validate that this PR is a fast forward from dev
           fetch-depth: 0
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          save-cache: "false"
-      - uses: ./.github/actions/setup-release-devkit
-      - uses: actions/create-github-app-token@v3
+      - uses: $/.github/actions/setup-uv
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         id: mint
         with:
           app-id: ${{ vars.MERGE_BOT_APP_ID }}
-          private-key: ${{ secrets.MERGE_BOT_APP_PRIVATE_KEY }}
-      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev merge-gate
+          private-key: ${{ secrets.merge-bot-private-key }}
+          permission-contents: write
+          permission-pull-requests: read
+      - run: uv run --project "${{ runner.temp }}/github-actions-toolkit" --locked --no-dev merge-gate --head-sha ${{ github.event.pull_request.head.sha }}
         env:
           GITHUB_TOKEN: ${{ steps.mint.outputs.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha }}

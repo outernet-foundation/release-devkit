@@ -10,16 +10,19 @@ from release_devkit.plan import (
     PackagePlan,
     ResolvedDependency,
     compute_release_plan,
+    get_latest_version,
+    latest_version_in_line,
     next_version,
+    parse_major_minor,
+    parse_version,
     resolve_dependency_versions,
 )
 from release_devkit.manifests import SENTINEL_VERSION
-from release_devkit.tags import get_latest_version, latest_version_in_line, parse_major_minor, parse_version
 
 
 def test_latest_version_skips_prerelease_tags(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "release_devkit.tags.list_tag_versions",
+        "release_devkit.plan.list_tag_versions",
         preview_and_stable_tags,
     )
 
@@ -28,7 +31,7 @@ def test_latest_version_skips_prerelease_tags(monkeypatch: pytest.MonkeyPatch) -
 
 def test_latest_version_returns_none_when_no_stable_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "release_devkit.tags.list_tag_versions",
+        "release_devkit.plan.list_tag_versions",
         prerelease_only_tags,
     )
 
@@ -37,7 +40,7 @@ def test_latest_version_returns_none_when_no_stable_tag(monkeypatch: pytest.Monk
 
 def test_latest_version_in_line_filters_to_declared_line(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "release_devkit.tags.list_tag_versions",
+        "release_devkit.plan.list_tag_versions",
         multi_line_tags,
     )
 

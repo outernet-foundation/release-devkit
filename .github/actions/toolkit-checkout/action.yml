@@ -1,0 +1,15 @@
+name: toolkit-checkout
+description: Check the toolkit out at the SHA the caller pinned, into runner temp — never the workspace
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        git init "$TOOLKIT_PATH"
+        git -C "$TOOLKIT_PATH" remote add origin "https://github.com/$TOOLKIT_REPOSITORY.git"
+        git -C "$TOOLKIT_PATH" fetch --depth 1 origin "$TOOLKIT_SHA"
+        git -C "$TOOLKIT_PATH" checkout --detach FETCH_HEAD
+      env:
+        TOOLKIT_PATH: ${{ runner.temp }}/github-actions-toolkit
+        TOOLKIT_REPOSITORY: ${{ job.workflow_repository }}
+        TOOLKIT_SHA: ${{ job.workflow_sha }}

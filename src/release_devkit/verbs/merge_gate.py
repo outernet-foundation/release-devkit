@@ -5,7 +5,6 @@ from typing import Annotated
 
 import typer
 from bashrun.bash import bash, bash_check, bash_output
-from ci_devkit.ci_step import ci_step
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from release_devkit.config import Settings
@@ -53,11 +52,60 @@ PULL_REQUEST_REFS = TypeAdapter(list[PullRequestRef])
 @app.command()
 def main(
     head_sha: Annotated[str, typer.Option(help="Head SHA to resolve to a PR and merge")],
+    dry_run: Annotated[
+        bool, typer.Option(help="Exercise the full machinery and report, with zero side effects")
+    ] = False,
 ) -> None:
     settings = Settings.model_validate({})
     repository = settings.github_repository
     if not repository:
         raise SystemExit("GITHUB_REPOSITORY is not set — this verb reads the GitHub runner environment")
+    pr_number = resolve_pr_number(head_sha, dry_run)
+    if pr_number is None:
+        return
+    pull_request = PullRequest.model_validate_json(
+        bash_output(f"gh pr view {pr_number} --json state,title,headRefOid,labels,statusCheckRollup")
+    )
+    if dry_run:
+        report_dry_run(head_sha, pr_number, pull_request)
+        return
+    if pull_request.state != "OPEN":
+        raise SystemExit(f"PR is {pull_request.state}, not OPEN — refusing to merge")
+    if LABEL_NAME not in {label.name for label in pull_request.labels}:
+        raise SystemExit(f"label {LABEL_NAME} absent — refusing to merge")
+
+    battery = [entry for entry in pull_request.check_rollup if entry.name != GATE_CHECK_NAME]
+    blocking = [entry for entry in battery if entry.status != "COMPLETED" or entry.conclusion not in GREEN_CONCLUSIONS]
+    if blocking:
+        if all(entry.status in WAITING_STATUSES for entry in blocking):
+            raise SystemExit(f"checks still pending on PR #{pr_number} — remove and re-add the label once green")
+        raise SystemExit(f"checks not green on PR #{pr_number} head {pull_request.head_oid[:12]} — see the PR's checks")
+    print(f"  {len(battery)} checks green on {pull_request.head_oid[:12]}")
+
+    checked_out = bash_output("git rev-parse HEAD").strip()
+    if checked_out != pull_request.head_oid:
+        raise SystemExit(f"checkout HEAD {checked_out[:12]} is not the PR head {pull_request.head_oid[:12]}")
+    bash(f"{GIT_COMMAND} fetch origin refs/heads/{BASE_BRANCH}")
+    if not bash_check("git merge-base --is-ancestor FETCH_HEAD HEAD"):
+        raise SystemExit(f"{BASE_BRANCH} has commits not on the PR head — rebase the PR onto {BASE_BRANCH}")
+    bash("git checkout --detach FETCH_HEAD")
+    bash('git config user.name "merge-bot"')
+    bash('git config user.email "merge-bot@users.noreply.github.com"')
+    message = f"Merge PR #{pr_number}: {pull_request.title}"
+    bash(f"git merge --no-ff {pull_request.head_oid} -m {shlex.quote(message)}")
+    bash(f"{GIT_COMMAND} push origin HEAD:refs/heads/{BASE_BRANCH}")
+    print(f"  {BASE_BRANCH} merged PR #{pr_number}")
+
+    head_ref = bash_output(f"gh pr view {pr_number} --json headRefName --jq .headRefName").strip()
+    if head_ref and head_ref not in (BASE_BRANCH, "main"):
+        if bash_check(f"{GIT_COMMAND} ls-remote --heads origin {head_ref}"):
+            bash(f"{GIT_COMMAND} push origin --delete {head_ref}")
+            print(f"  deleted branch {head_ref}")
+
+    delete_draft_release(f"pr-{pr_number}", repository)
+
+
+def resolve_pr_number(head_sha: str, dry_run: bool) -> str | None:
     branches = bash_output(f"git branch -r --contains {head_sha}").split()
     numbers: list[int] = []
     for branch in branches:
@@ -68,50 +116,33 @@ def main(
     matches = sorted(set(numbers))
     if len(matches) != 1:
         rendered = ", ".join(str(number) for number in matches) or "none"
+        if dry_run:
+            print(f"  head {head_sha[:12]} matches {rendered} open PR(s) to {BASE_BRANCH} — informational")
+            return None
         raise SystemExit(f"head {head_sha[:12]} matches {rendered} open PR(s) to {BASE_BRANCH}")
-    pr_number = str(matches[0])
-    pull_request = PullRequest.model_validate_json(
-        bash_output(f"gh pr view {pr_number} --json state,title,headRefOid,labels,statusCheckRollup")
-    )
-    if pull_request.state != "OPEN":
-        raise SystemExit(f"PR is {pull_request.state}, not OPEN — refusing to merge")
-    if LABEL_NAME not in {label.name for label in pull_request.labels}:
-        raise SystemExit(f"label {LABEL_NAME} absent — refusing to merge")
+    return str(matches[0])
 
-    with ci_step("Verify checks"):
-        battery = [entry for entry in pull_request.check_rollup if entry.name != GATE_CHECK_NAME]
-        blocking = [
-            entry for entry in battery if entry.status != "COMPLETED" or entry.conclusion not in GREEN_CONCLUSIONS
-        ]
-        if blocking:
-            if all(entry.status in WAITING_STATUSES for entry in blocking):
-                print(f"  checks still pending on PR #{pr_number} — the other wake will land it")
-                return
-            raise SystemExit(
-                f"checks not green on PR #{pr_number} head {pull_request.head_oid[:12]} — see the PR's checks"
-            )
+
+def report_dry_run(head_sha: str, pr_number: str, pull_request: PullRequest) -> None:
+    print(f"  PR #{pr_number} state {pull_request.state}")
+    label_present = LABEL_NAME in {label.name for label in pull_request.labels}
+    print(f"  label {LABEL_NAME} {'present' if label_present else 'absent — apply the label to attempt the merge'}")
+    battery = [entry for entry in pull_request.check_rollup if entry.name != GATE_CHECK_NAME]
+    blocking = [entry for entry in battery if entry.status != "COMPLETED" or entry.conclusion not in GREEN_CONCLUSIONS]
+    if not blocking:
         print(f"  {len(battery)} checks green on {pull_request.head_oid[:12]}")
-
-    with ci_step("Merge to dev"):
-        checked_out = bash_output("git rev-parse HEAD").strip()
-        if checked_out != pull_request.head_oid:
-            raise SystemExit(f"checkout HEAD {checked_out[:12]} is not the PR head {pull_request.head_oid[:12]}")
-        bash(f"{GIT_COMMAND} fetch origin refs/heads/{BASE_BRANCH}")
-        if not bash_check("git merge-base --is-ancestor FETCH_HEAD HEAD"):
-            raise SystemExit(f"{BASE_BRANCH} has commits not on the PR head — rebase the PR onto {BASE_BRANCH}")
-        bash("git checkout --detach FETCH_HEAD")
-        bash('git config user.name "merge-bot"')
-        bash('git config user.email "merge-bot@users.noreply.github.com"')
-        message = f"Merge PR #{pr_number}: {pull_request.title}"
-        bash(f"git merge --no-ff {pull_request.head_oid} -m {shlex.quote(message)}")
-        bash(f"{GIT_COMMAND} push origin HEAD:refs/heads/{BASE_BRANCH}")
-        print(f"  {BASE_BRANCH} merged PR #{pr_number}")
-
-    with ci_step("Delete merged branch"):
-        head_ref = bash_output(f"gh pr view {pr_number} --json headRefName --jq .headRefName").strip()
-        if head_ref and head_ref not in (BASE_BRANCH, "main"):
-            if bash_check(f"{GIT_COMMAND} ls-remote --heads origin {head_ref}"):
-                bash(f"{GIT_COMMAND} push origin --delete {head_ref}")
-                print(f"  deleted branch {head_ref}")
-
-    delete_draft_release(f"pr-{pr_number}", repository)
+    elif all(entry.status in WAITING_STATUSES for entry in blocking):
+        print(f"  {len(blocking)} checks still pending on PR #{pr_number} — re-apply the label once green")
+    else:
+        print(f"  checks not green on PR #{pr_number} head {pull_request.head_oid[:12]} — see the PR's checks")
+    bash(f"{GIT_COMMAND} fetch origin refs/heads/{BASE_BRANCH}")
+    if bash_check("git merge-base --is-ancestor FETCH_HEAD HEAD"):
+        print(f"  {BASE_BRANCH} is an ancestor of the head (semi-linear precondition holds)")
+    else:
+        print(f"  {BASE_BRANCH} has commits not on the PR head — rebase needed before landing")
+    checked_out = bash_output("git rev-parse HEAD").strip()
+    if checked_out == pull_request.head_oid:
+        print(f"  checkout HEAD {checked_out[:12]} is the PR head")
+    else:
+        print(f"  checkout HEAD {checked_out[:12]} is not the PR head {pull_request.head_oid[:12]}")
+    print(f"  would merge --no-ff into {BASE_BRANCH}, delete the head branch, delete the pr-{pr_number} draft")

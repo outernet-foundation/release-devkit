@@ -1,0 +1,5 @@
+# Reviewed exceptions for the canonical workflow shapes; lint-workflows applies this file via --config
+# (global discovery), so consumers never carry a zizmor config of their own. The offline persona is set
+# by the runner's permanent --offline flag, not here: zizmor has no offline config persona. The audit
+# input is the repo root, so the composite wrappers under .github/actions are covered like workflows.
+rules: {}

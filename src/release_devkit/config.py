@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     github_actor: str = ""
     github_workspace: str = ""
     github_ref: str = ""
+    github_path: str | None = None
 
     @model_validator(mode="after")
     def require_runner_environment(self) -> Self:

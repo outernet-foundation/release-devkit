@@ -11,25 +11,10 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
+  checks: read
+  actions: read
 
 jobs:
   preflight:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          # Perform a full clone, required for tags
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-          save-cache: "true"
-      - run: uv run preflight-python
-      - name: Self-test install (this PR's head, consumer geometry, into RUNNER_TEMP)
-        run: >
-          git clone https://github.com/outernet-foundation/release-devkit.git "$RUNNER_TEMP/release-devkit"
-          && git -C "$RUNNER_TEMP/release-devkit" checkout ${{ github.event.pull_request.head.sha || github.sha }}
-      - run: uv run --project "$RUNNER_TEMP/release-devkit" --locked --no-dev validate-release-plan
+    uses: $/.github/workflows/preflight.yml
