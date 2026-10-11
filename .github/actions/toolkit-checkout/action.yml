@@ -3,9 +3,13 @@ description: Check the toolkit out at the SHA the caller pinned, into runner tem
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-      with:
-        repository: ${{ job.workflow_repository }}
-        ref: ${{ job.workflow_sha }}
-        path: ${{ runner.temp }}/github-actions-toolkit
-        persist-credentials: false
+    - shell: bash
+      run: |
+        git init "$TOOLKIT_PATH"
+        git -C "$TOOLKIT_PATH" remote add origin "https://github.com/$TOOLKIT_REPOSITORY.git"
+        git -C "$TOOLKIT_PATH" fetch --depth 1 origin "$TOOLKIT_SHA"
+        git -C "$TOOLKIT_PATH" checkout --detach FETCH_HEAD
+      env:
+        TOOLKIT_PATH: ${{ runner.temp }}/github-actions-toolkit
+        TOOLKIT_REPOSITORY: ${{ job.workflow_repository }}
+        TOOLKIT_SHA: ${{ job.workflow_sha }}
